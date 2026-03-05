@@ -408,7 +408,7 @@
                 <div class="logout-timer">
                     <i class="fa-regular fa-clock"></i> 자정(23:59)에 자동 로그아웃 됩니다.
                 </div>
-                <div class="alert alert-success mt-2 mb-0 text-center"
+                <div id="visitAlert" class="alert alert-success mt-2 mb-0 text-center hidden"
                     style="padding: 0.5rem; font-size: 0.8rem; display:flex; align-items:center; justify-content:center; gap:0.5rem;">
                     <span><i class="fa-solid fa-check-circle"></i> 공간 방문 기록이 자동 제출되었습니다.</span>
                     <button id="forceVisitBtn" type="button"
@@ -567,7 +567,7 @@
         // [필수] Google Apps Script 웹 앱 URL
         // ----------------------------------------------------------------------------------
         // TODO: apps_script.js 배포 후 생성된 URL을 입력하세요.
-        const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw5MzWkDwzp3_Mn3EBSeM9a05rc_oZTFigOUZ6PfsUSY75P6STEOxmD_0-DfzDGtIoy8w/exec";
+        const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzBi8nteTyhfIURb3f6YyWHYBexi8mEpq1IHnUu7YjoR7_YXyDKIe39C3_SD-6UZK1UYw/exec";
 
         // 사용자 상태 변수
         let currentUserData = null;
@@ -707,10 +707,20 @@
             let firebaseSuccess = false;
             try {
                 if (currentUserData) {
-                    await addDoc(collection(db, "records", currentUserData.uid, type), {
+                    const logEntry = {
                         ...data,
+                        userName: currentUserData.name,
+                        userId: currentUserData.uid,
+                        type: type,
                         timestamp: serverTimestamp()
-                    });
+                    };
+
+                    // 1) 사용자별 경로에 저장
+                    await addDoc(collection(db, "records", currentUserData.uid, type), logEntry);
+
+                    // 2) 전체 통합 경로에 저장 (관리자 확인용)
+                    await addDoc(collection(db, "all_logs"), logEntry);
+
                     firebaseSuccess = true;
                 }
             } catch (error) {
@@ -799,7 +809,7 @@
         // Auth 상태 구독
         onAuthStateChanged(auth, async (user) => {
             if (user) {
-                // 1. 기본 정보 설정
+                // 1. 기본 정보 설정 (Fallback)
                 currentUserData = {
                     uid: user.uid,
                     email: user.email,
@@ -809,19 +819,23 @@
                 };
 
                 // 2. Firestore에서 상세 프로필(나이, 성별 등) 가져오기
-                try {
-                    const { getDoc, doc } = await import("https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js");
-                    const userDoc = await getDoc(doc(db, "users", user.uid));
-                    if (userDoc.exists()) {
-                        const profile = userDoc.data();
-                        currentUserData.name = profile.name || currentUserData.name;
-                        // 생년월일이 있으면 현재 날짜 기준 나이 재계산
-                        currentUserData.age = profile.birthDate ? calcAge(profile.birthDate) : (profile.age || '');
-                        currentUserData.gender = profile.gender || '';
+                const loadProfile = async () => {
+                    try {
+                        const { getDoc, doc } = await import("https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js");
+                        const userDoc = await getDoc(doc(db, "users", user.uid));
+                        if (userDoc.exists()) {
+                            const profile = userDoc.data();
+                            currentUserData.name = profile.name || currentUserData.name;
+                            // 생년월일이 있으면 현재 날짜 기준 나이 재계산
+                            currentUserData.age = profile.birthDate ? calcAge(profile.birthDate) : (profile.age || '');
+                            currentUserData.gender = profile.gender || '';
+                        }
+                    } catch (e) {
+                        console.error("프로필 조회 실패:", e);
                     }
-                } catch (e) {
-                    console.error("프로필 조회 실패:", e);
-                }
+                };
+
+                await loadProfile();
 
                 // UI 업데이트
                 userNameDisplay.textContent = currentUserData.name;
@@ -831,11 +845,12 @@
                 updateSyncUI();
 
                 // 3. 자동 공간 방문 기록 제출 (하루 1회, Firestore 기준 중복 방지)
-                const todayStr = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+                const todayStr = new Date().toISOString().split('T')[0];
                 const visitDocRef = doc(db, "users", user.uid, "visitLog", todayStr);
                 try {
                     const visitDoc = await getDoc(visitDocRef);
                     if (!visitDoc.exists()) {
+                        console.log("오늘 첫 로그인 - 방문일지 제출 시도");
                         const success = await submitRecord('visit', {
                             name: currentUserData.name,
                             gender: currentUserData.gender,
@@ -843,10 +858,14 @@
                         }, 'loginBtn');
                         if (success) {
                             await setDoc(visitDocRef, { submitted: true, timestamp: serverTimestamp() });
+                            document.getElementById('visitAlert').classList.remove('hidden');
                         }
+                    } else {
+                        console.log("오늘 이미 방문일지가 제출되었습니다.");
+                        document.getElementById('visitAlert').classList.remove('hidden');
                     }
                 } catch (e) {
-                    console.error("방문일지 중복체크 오류:", e);
+                    console.error("방문일지 처리 오류:", e);
                 }
             } else {
                 // 로그아웃 상태
