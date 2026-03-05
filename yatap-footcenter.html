@@ -1,0 +1,1104 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>야탑 청년지원센터 공간 관리 시스템</title>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@300;400;500;600;700&display=swap"
+        rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <style>
+        :root {
+            --primary-light: #667eea;
+            --primary-dark: #764ba2;
+            --text-color: #333;
+            --bg-color: #f4f7f6;
+            --white: #ffffff;
+            --gray-light: #e2e8f0;
+            --gray-text: #64748b;
+            --danger: #ef4444;
+            --success: #10b981;
+            --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            --transition: all 0.3s ease;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Pretendard', sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            line-height: 1.6;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* 공통 유틸리티 */
+        .hidden {
+            display: none !important;
+        }
+
+        .text-center {
+            text-align: center;
+        }
+
+        .mt-2 {
+            margin-top: 0.5rem;
+        }
+
+        .mt-4 {
+            margin-top: 1rem;
+        }
+
+        .mb-2 {
+            margin-bottom: 0.5rem;
+        }
+
+        .mb-4 {
+            margin-bottom: 1rem;
+        }
+
+        /* 헤더 배경 (그라데이션) */
+        .app-bg {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 40vh;
+            background: linear-gradient(135deg, var(--primary-light) 0%, var(--primary-dark) 100%);
+            z-index: -1;
+            border-bottom-left-radius: 30px;
+            border-bottom-right-radius: 30px;
+        }
+
+        /* 컨테이너 */
+        .container {
+            width: 100%;
+            max-width: 500px;
+            margin: 0 auto;
+            padding: 2rem 1rem;
+            flex: 1;
+        }
+
+        /* 카드 UI */
+        .card {
+            background: var(--white);
+            border-radius: 16px;
+            padding: 2rem;
+            box-shadow: var(--shadow);
+            margin-bottom: 1.5rem;
+            animation: slideUp 0.4s ease forwards;
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* 헤더 영역 */
+        .header {
+            color: var(--white);
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        .header h1 {
+            font-size: 1.8rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+        }
+
+        .header p {
+            opacity: 0.9;
+            font-size: 0.95rem;
+        }
+
+        /* 폼 요소 */
+        .form-group {
+            margin-bottom: 1.25rem;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+            font-size: 0.9rem;
+            color: var(--text-color);
+        }
+
+        .form-control {
+            width: 100%;
+            padding: 0.8rem 1rem;
+            border: 1px solid var(--gray-light);
+            border-radius: 8px;
+            font-size: 1rem;
+            transition: var(--transition);
+            background-color: #f8fafc;
+        }
+
+        .form-control:focus {
+            outline: none;
+            border-color: var(--primary-light);
+            background-color: var(--white);
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.2);
+        }
+
+        .row {
+            display: flex;
+            gap: 1rem;
+        }
+
+        .col {
+            flex: 1;
+        }
+
+        /* 버튼 */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            padding: 0.8rem 1.5rem;
+            font-size: 1rem;
+            font-weight: 600;
+            border-radius: 8px;
+            border: none;
+            cursor: pointer;
+            transition: var(--transition);
+            gap: 0.5rem;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--primary-light) 0%, var(--primary-dark) 100%);
+            color: var(--white);
+        }
+
+        .btn-primary:hover {
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+            transform: translateY(-2px);
+        }
+
+        .btn-outline {
+            background: transparent;
+            border: 1px solid var(--gray-light);
+            color: var(--text-color);
+        }
+
+        .btn-outline:hover {
+            background: var(--bg-color);
+        }
+
+        .btn-danger {
+            background: #fff0f0;
+            color: var(--danger);
+            border: 1px solid #fecaca;
+        }
+
+        /* 탭 메뉴 */
+        .tabs {
+            display: flex;
+            border-bottom: 1px solid var(--gray-light);
+            margin-bottom: 1.5rem;
+        }
+
+        .tab {
+            flex: 1;
+            padding: 0.8rem;
+            text-align: center;
+            font-weight: 500;
+            color: var(--gray-text);
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: var(--transition);
+        }
+
+        .tab.active {
+            color: var(--primary-dark);
+            border-bottom-color: var(--primary-dark);
+        }
+
+        /* 대시보드 헤더 */
+        .dashboard-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .user-greeting {
+            font-size: 1.2rem;
+            font-weight: 600;
+        }
+
+        .logout-timer {
+            font-size: 0.85rem;
+            color: var(--gray-text);
+            display: flex;
+            align-items: center;
+            gap: 0.3rem;
+        }
+
+        /* 로딩 스피너 */
+        .spinner {
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: var(--white);
+            animation: spin 1s ease-in-out infinite;
+            display: none;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        /* 알림 메시지 */
+        .alert {
+            padding: 0.8rem;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+            font-size: 0.9rem;
+            text-align: center;
+        }
+
+        .alert-error {
+            background-color: #fef2f2;
+            color: var(--danger);
+            border: 1px solid #fecaca;
+        }
+
+        .alert-success {
+            background-color: #ecfdf5;
+            color: var(--success);
+            border: 1px solid #a7f3d0;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="app-bg"></div>
+
+    <div class="container">
+        <!-- 상단 타이틀 -->
+        <div class="header">
+            <h1>야탑 청년지원센터</h1>
+            <p>공간 방문 및 시설 이용 일지 시스템</p>
+        </div>
+
+        <!-- Section 1: 인증 (로그인/회원가입) -->
+        <div id="authSection">
+            <!-- 로그인 뷰 -->
+            <div id="loginView" class="card">
+                <h2 class="text-center mb-4">로그인</h2>
+                <div id="loginAlert" class="alert alert-error hidden"></div>
+
+                <form id="loginForm">
+                    <div class="form-group">
+                        <label for="loginId"><i class="fa-solid fa-user"></i> 아이디</label>
+                        <input type="text" id="loginId" class="form-control" placeholder="아이디를 입력하세요" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="loginPw"><i class="fa-solid fa-lock"></i> 비밀번호</label>
+                        <input type="password" id="loginPw" class="form-control" placeholder="비밀번호를 입력하세요" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary mt-2" id="loginBtn">
+                        <span>로그인</span>
+                        <div class="spinner"></div>
+                    </button>
+                    <div class="text-center mt-4">
+                        <p style="font-size: 0.9rem; color: var(--gray-text);">
+                            계정이 없으신가요?
+                            <a href="#" id="showSignupBtn"
+                                style="color: var(--primary-light); text-decoration: none; font-weight: 600;">회원가입</a>
+                        </p>
+                    </div>
+                </form>
+            </div>
+
+            <!-- 회원가입 뷰 -->
+            <div id="signupView" class="card hidden">
+                <h2 class="text-center mb-4">회원가입</h2>
+                <div id="signupAlert" class="alert alert-error hidden"></div>
+
+                <form id="signupForm">
+                    <div class="form-group">
+                        <label for="signupId">아이디</label>
+                        <input type="text" id="signupId" class="form-control" placeholder="영문/숫자 조합" required
+                            minlength="4">
+                    </div>
+                    <div class="form-group">
+                        <label for="signupPw">비밀번호 (6자리 이상)</label>
+                        <input type="password" id="signupPw" class="form-control" required minlength="6">
+                    </div>
+                    <div class="form-group">
+                        <label for="signupName">이름</label>
+                        <input type="text" id="signupName" class="form-control" required>
+                    </div>
+
+                    <div class="row">
+                        <div class="col form-group">
+                            <label for="signupBirth">생년월일</label>
+                            <input type="date" id="signupBirth" class="form-control" required>
+                        </div>
+                        <div class="col form-group">
+                            <label for="signupGender">성별</label>
+                            <select id="signupGender" class="form-control" required>
+                                <option value="">선택</option>
+                                <option value="남성">남성</option>
+                                <option value="여성">여성</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="signupPhone">연락처</label>
+                        <input type="tel" id="signupPhone" class="form-control" placeholder="010-0000-0000" required>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary mt-2" id="signupBtn">
+                        <span>가입하기</span>
+                        <div class="spinner"></div>
+                    </button>
+                    <button type="button" class="btn btn-outline mt-2" id="showLoginBtn">뒤로가기</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Section 2: 메인 대시보드 (로그인 후) -->
+        <div id="mainSection" class="hidden">
+            <div class="card mb-4" style="background: rgba(255,255,255,0.95);">
+                <div class="dashboard-header">
+                    <h3>반갑습니다, <span id="userNameDisplay">사용자</span>님</h3>
+                    <div class="d-flex align-items-center gap-2">
+                        <button id="manualSyncBtn" class="btn btn-outline hidden sync-btn"
+                            style="background:var(--warning); color:#fff; border:none;">
+                            <i class="fa-solid fa-arrows-rotate"></i> 미동기화 건 전송
+                        </button>
+                        <span id="timeRemaining" class="timer-text" title="자동 로그아웃 남은 시간">(00:00:00)</span>
+                        <button id="logoutActionBtn" class="btn btn-outline" style="padding: 0.5rem 1rem;">로그아웃</button>
+                    </div>
+                </div>
+                <div class="logout-timer">
+                    <i class="fa-regular fa-clock"></i> 자정(23:59)에 자동 로그아웃 됩니다.
+                </div>
+                <div class="alert alert-success mt-2 mb-0 text-center"
+                    style="padding: 0.5rem; font-size: 0.8rem; display:flex; align-items:center; justify-content:center; gap:0.5rem;">
+                    <span><i class="fa-solid fa-check-circle"></i> 공간 방문 기록이 자동 제출되었습니다.</span>
+                    <button id="forceVisitBtn" type="button"
+                        style="background:#e2e8f0; border:1px solid #cbd5e0; border-radius:4px; padding:2px 8px; font-size:0.75rem; cursor:pointer; color:#4a5568;"
+                        title="디버그용: 1일 제한 무시하고 방문일지 강제 제출">🐞 강제제출</button>
+                </div>
+            </div>
+
+            <div class="card">
+                <h3 class="mb-4 text-center">시설 이용 일지 작성</h3>
+
+                <!-- 탭 네비게이션 -->
+                <div class="tabs">
+                    <div class="tab active" data-target="tab-printer">🖨️ 프린터</div>
+                    <div class="tab" data-target="tab-career">💼 커리어존</div>
+                    <div class="tab" data-target="tab-connect">🤝 커넥트룸</div>
+                </div>
+
+                <!-- 탭 콘텐츠: 프린터 -->
+                <div id="tab-printer" class="tab-content">
+                    <form id="printerForm">
+                        <div class="form-group">
+                            <label>오늘 날짜</label>
+                            <input type="text" class="form-control today-date" readonly>
+                        </div>
+                        <div class="form-group">
+                            <label for="printerCount">출력 매수 (장)</label>
+                            <input type="number" id="printerCount" class="form-control" min="1" required>
+                        </div>
+                        <button type="submit" class="btn btn-primary mt-2 submit-btn">제출하기 <div class="spinner"></div>
+                        </button>
+                    </form>
+                </div>
+
+                <!-- 탭 콘텐츠: 커리어존 -->
+                <div id="tab-career" class="tab-content hidden">
+                    <form id="careerForm">
+                        <div class="form-group">
+                            <label>오늘 날짜</label>
+                            <input type="text" class="form-control today-date" readonly>
+                        </div>
+                        <div class="form-group">
+                            <label for="cPlace">이용 장소</label>
+                            <select id="cPlace" class="form-control" required>
+                                <option value="">선택</option>
+                                <option value="청취Room1">청취Room1</option>
+                                <option value="청취Room2">청취Room2</option>
+                            </select>
+                        </div>
+                        <div class="row">
+                            <div class="col form-group">
+                                <label for="cStartTime">시작 시간</label>
+                                <input type="time" id="cStartTime" class="form-control" required>
+                            </div>
+                            <div class="col form-group">
+                                <label for="cEndTime">종료 시간</label>
+                                <input type="time" id="cEndTime" class="form-control" required>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="cPurpose">이용 목적</label>
+                            <input type="text" id="cPurpose" class="form-control" placeholder="예: 면접 연습, 문서 작업"
+                                required>
+                        </div>
+
+                        <!-- 동반 이용자 정보 추가 섹션 -->
+                        <div class="companion-section mt-4 mb-4"
+                            style="background:#f8fafc; padding:1rem; border-radius:8px; border:1px dashed var(--gray-light);">
+                            <label style="font-weight:600; font-size:0.95rem; margin-bottom:0.8rem; display:block;">동반
+                                이용자 (대표자 본인 제외)</label>
+                            <div id="careerCompanionsList"></div>
+                            <button type="button" class="btn btn-outline" id="addCareerCompanionBtn"
+                                style="padding:0.5rem; font-size:0.85rem;">
+                                <i class="fa-solid fa-plus"></i> 이용자 추가
+                            </button>
+                        </div>
+
+                        <button type="submit" class="btn btn-primary mt-2 submit-btn">제출하기 <div class="spinner"></div>
+                        </button>
+                    </form>
+                </div>
+
+                <!-- 탭 콘텐츠: 커넥트룸 -->
+                <div id="tab-connect" class="tab-content hidden">
+                    <form id="connectForm">
+                        <div class="form-group">
+                            <label>오늘 날짜</label>
+                            <input type="text" class="form-control today-date" readonly>
+                        </div>
+                        <div class="row">
+                            <div class="col form-group">
+                                <label for="rStartTime">시작 시간</label>
+                                <input type="time" id="rStartTime" class="form-control" required>
+                            </div>
+                            <div class="col form-group">
+                                <label for="rEndTime">종료 시간</label>
+                                <input type="time" id="rEndTime" class="form-control" required>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="rPurpose">이용 목적</label>
+                            <input type="text" id="rPurpose" class="form-control" placeholder="예: 스터디 모임, 회의" required>
+                        </div>
+
+                        <!-- 동반 이용자 정보 추가 섹션 -->
+                        <div class="companion-section mt-4 mb-4"
+                            style="background:#f8fafc; padding:1rem; border-radius:8px; border:1px dashed var(--gray-light);">
+                            <label style="font-weight:600; font-size:0.95rem; margin-bottom:0.8rem; display:block;">동반
+                                이용자 (대표자 본인 제외)</label>
+                            <div id="connectCompanionsList"></div>
+                            <button type="button" class="btn btn-outline" id="addConnectCompanionBtn"
+                                style="padding:0.5rem; font-size:0.85rem;">
+                                <i class="fa-solid fa-plus"></i> 이용자 추가
+                            </button>
+                        </div>
+
+                        <button type="submit" class="btn btn-primary mt-2 submit-btn">제출하기 <div class="spinner"></div>
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Firebase SDK & Logic Scripts (To be added) -->
+    <script type="module">
+        // ----------------------------------------------------------------------------------
+        // [필수] Firebase 설정 및 초기화 (임시 설정값 - 실제 키로 교체 필요)
+        // ----------------------------------------------------------------------------------
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import {
+            getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword,
+            signOut, onAuthStateChanged, updateProfile
+        } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+        import {
+            getFirestore, doc, setDoc, collection, addDoc, serverTimestamp
+        } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+        // TODO: Firebase 콘솔에서 발급받은 실제 설정값으로 변경하세요
+        const firebaseConfig = {
+            apiKey: "AIzaSyAy03-w2n--iLVEtHN7rrunSTHK_HoChK4",
+            authDomain: "yatap-footcenter.firebaseapp.com",
+            databaseURL: "https://yatap-footcenter-default-rtdb.firebaseio.com",
+            projectId: "yatap-footcenter",
+            storageBucket: "yatap-footcenter.firebasestorage.app",
+            messagingSenderId: "484534753683",
+            appId: "1:484534753683:web:bb9b68b44fdd40c83d7066",
+            measurementId: "G-J6WK1LWR5D"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        // ----------------------------------------------------------------------------------
+        // [필수] Google Apps Script 웹 앱 URL
+        // ----------------------------------------------------------------------------------
+        // TODO: apps_script.js 배포 후 생성된 URL을 입력하세요.
+        const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw5MzWkDwzp3_Mn3EBSeM9a05rc_oZTFigOUZ6PfsUSY75P6STEOxmD_0-DfzDGtIoy8w/exec";
+
+        // 사용자 상태 변수
+        let currentUserData = null;
+        let logoutTimer = null;
+
+        // UI 요소
+        const authSection = document.getElementById('authSection');
+        const mainSection = document.getElementById('mainSection');
+        const loginView = document.getElementById('loginView');
+        const signupView = document.getElementById('signupView');
+        const showSignupBtn = document.getElementById('showSignupBtn');
+        const showLoginBtn = document.getElementById('showLoginBtn');
+        const userNameDisplay = document.getElementById('userNameDisplay');
+        const timeRemainingDisplay = document.getElementById('timeRemaining');
+        const logoutActionBtn = document.getElementById('logoutActionBtn');
+
+        // 알림 함수
+        function showAlert(elementId, message, type = 'error') {
+            const el = document.getElementById(elementId);
+            el.textContent = message;
+            el.className = `alert alert-${type}`;
+            el.classList.remove('hidden');
+            setTimeout(() => el.classList.add('hidden'), 5000);
+        }
+
+        // 로딩 스피너 제어
+        function toggleLoading(btnId, isLoading) {
+            const btn = document.getElementById(btnId);
+            if (!btn) return;
+            const spinner = btn.querySelector('.spinner');
+            if (isLoading) {
+                btn.disabled = true;
+                if (spinner) spinner.style.display = 'block';
+            } else {
+                btn.disabled = false;
+                if (spinner) spinner.style.display = 'none';
+            }
+        }
+
+        // 생년월일로 만 나이 계산
+        function calcAge(birthStr) {
+            if (!birthStr) return '';
+            const birth = new Date(birthStr);
+            const today = new Date();
+            let age = today.getFullYear() - birth.getFullYear();
+            const m = today.getMonth() - birth.getMonth();
+            if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) {
+                age--;
+            }
+            return String(age);
+        }
+
+        // ----------------------------------------------------------------------------------
+        // UI 로직 (탭, 전환 등)
+        // ----------------------------------------------------------------------------------
+        showSignupBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            loginView.classList.add('hidden');
+            signupView.classList.remove('hidden');
+        });
+
+        showLoginBtn.addEventListener('click', () => {
+            signupView.classList.add('hidden');
+            loginView.classList.remove('hidden');
+        });
+
+        const tabs = document.querySelectorAll('.tab');
+        const tabContents = document.querySelectorAll('.tab-content');
+        tabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                tabs.forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                const targetId = tab.getAttribute('data-target');
+                tabContents.forEach(content => content.classList.add('hidden'));
+                document.getElementById(targetId).classList.remove('hidden');
+            });
+        });
+
+        // 오늘 날짜 필드 자동 완성
+        const today = new Date();
+        const dateString = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+        document.querySelectorAll('.today-date').forEach(el => {
+            el.value = dateString;
+        });
+
+        // ----------------------------------------------------------------------------------
+        // 자동 로그아웃 (자정) 및 카운트다운 로직
+        // ----------------------------------------------------------------------------------
+        function startLogoutTimer() {
+            if (logoutTimer) clearInterval(logoutTimer);
+
+            logoutTimer = setInterval(() => {
+                const now = new Date();
+                const target = new Date();
+                target.setHours(23, 59, 0, 0); // 자정(23:59)
+
+                // 만약 현재 시간이 23:59:00 이후라면 바로 로그아웃
+                if (now.getTime() >= target.getTime()) {
+                    clearInterval(logoutTimer);
+                    signOut(auth);
+                    return;
+                }
+
+                // 남은 시간 계산 및 표시
+                const diff = target.getTime() - now.getTime();
+                const hours = Math.floor(diff / (1000 * 60 * 60));
+                const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+                const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+
+                timeRemainingDisplay.textContent = `(${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')})`;
+            }, 1000);
+        }
+
+        // ----------------------------------------------------------------------------------
+        // Google Sheets 및 Firebase 데이터 전송 공통 로직
+        // ----------------------------------------------------------------------------------
+        async function submitRecord(type, data, btnId, isRetry = false) {
+            if (btnId) toggleLoading(btnId, true);
+
+            // 1. Google Sheets 로 전송 시도
+            let sheetSuccess = false;
+            try {
+                if (GOOGLE_SCRIPT_URL && GOOGLE_SCRIPT_URL.includes("script.google.com")) {
+                    await fetch(GOOGLE_SCRIPT_URL, {
+                        method: 'POST',
+                        mode: 'no-cors',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ type: type, data: data })
+                    });
+                    sheetSuccess = true;
+                }
+            } catch (error) {
+                console.error("GSheet 전송 실패:", error);
+            }
+
+            // 2. Firebase Firestore 에 백업 저장 (항상 수행)
+            let firebaseSuccess = false;
+            try {
+                if (currentUserData) {
+                    await addDoc(collection(db, "records", currentUserData.uid, type), {
+                        ...data,
+                        timestamp: serverTimestamp()
+                    });
+                    firebaseSuccess = true;
+                }
+            } catch (error) {
+                console.error("Firebase 저장 실패:", error);
+            }
+
+            // 3. 만약 시트 전송에 실패했다면 LocalStorage에 저장하여 나중에 수동 동기화 가능하게 함
+            if (!sheetSuccess && !isRetry) {
+                const pending = JSON.parse(localStorage.getItem('pendingRecords') || '[]');
+                pending.push({ type, data, timestamp: new Date().toISOString() });
+                localStorage.setItem('pendingRecords', JSON.stringify(pending));
+                updateSyncUI();
+                if (!isRetry) alert('현재 네트워크가 불안정하여 구글 시트 전송에 실패했습니다. 데이터는 브라우저에 임시 저장되었으며, 나중에 수동 동기화가 가능합니다.');
+            }
+
+            if (sheetSuccess && !isRetry) {
+                alert('일지가 성공적으로 제출되었습니다.');
+            }
+
+            if (btnId) toggleLoading(btnId, false);
+
+            // 성공 시 UI 처리 (폼 초기화 등)
+            if ((sheetSuccess || firebaseSuccess) && !isRetry) {
+                if (btnId && btnId !== 'loginBtn') {
+                    const form = document.getElementById(btnId).closest('form');
+                    if (form) form.reset();
+                    document.querySelectorAll('.today-date').forEach(el => el.value = dateString);
+                }
+            }
+            return sheetSuccess;
+        }
+
+        // 수동 동기화 UI 업데이트 및 로직
+        function updateSyncUI() {
+            const pending = JSON.parse(localStorage.getItem('pendingRecords') || '[]');
+            const syncBtn = document.getElementById('manualSyncBtn');
+            if (pending.length > 0) {
+                syncBtn.classList.remove('hidden');
+                syncBtn.innerHTML = `<i class="fa-solid fa-arrows-rotate"></i> 미동기화 ${pending.length}건 전송`;
+            } else {
+                syncBtn.classList.add('hidden');
+            }
+        }
+
+        async function retryPendingRecords() {
+            const pending = JSON.parse(localStorage.getItem('pendingRecords') || '[]');
+            if (pending.length === 0) return;
+
+            toggleLoading('manualSyncBtn', true);
+            const stillPending = [];
+
+            for (const record of pending) {
+                const success = await submitRecord(record.type, record.data, null, true);
+                if (!success) {
+                    stillPending.push(record);
+                }
+            }
+
+            localStorage.setItem('pendingRecords', JSON.stringify(stillPending));
+            updateSyncUI();
+            toggleLoading('manualSyncBtn', false);
+
+            if (stillPending.length === 0) {
+                alert('모든 데이터가 구글 시트에 성공적으로 동기화되었습니다!');
+            } else {
+                alert(`${stillPending.length}건의 데이터 전통이 여전히 실패했습니다. 네트워크를 확인해주세요.`);
+            }
+        }
+
+        document.getElementById('manualSyncBtn')?.addEventListener('click', retryPendingRecords);
+
+        // 디버그: 방문일지 강제 제출 (1일 제한 무시)
+        document.getElementById('forceVisitBtn')?.addEventListener('click', () => {
+            if (!currentUserData) { alert('로그인이 필요합니다.'); return; }
+            submitRecord('visit', {
+                name: currentUserData.name,
+                gender: currentUserData.gender,
+                age: currentUserData.age
+            }, null);
+        });
+
+        // ----------------------------------------------------------------------------------
+        // 인증 및 폼 이벤트 리스너
+        // ----------------------------------------------------------------------------------
+
+        // Auth 상태 구독
+        onAuthStateChanged(auth, async (user) => {
+            if (user) {
+                // 1. 기본 정보 설정
+                currentUserData = {
+                    uid: user.uid,
+                    email: user.email,
+                    name: user.displayName || '사용자',
+                    age: '',
+                    gender: ''
+                };
+
+                // 2. Firestore에서 상세 프로필(나이, 성별 등) 가져오기
+                try {
+                    const { getDoc, doc } = await import("https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js");
+                    const userDoc = await getDoc(doc(db, "users", user.uid));
+                    if (userDoc.exists()) {
+                        const profile = userDoc.data();
+                        currentUserData.name = profile.name || currentUserData.name;
+                        // 생년월일이 있으면 현재 날짜 기준 나이 재계산
+                        currentUserData.age = profile.birthDate ? calcAge(profile.birthDate) : (profile.age || '');
+                        currentUserData.gender = profile.gender || '';
+                    }
+                } catch (e) {
+                    console.error("프로필 조회 실패:", e);
+                }
+
+                // UI 업데이트
+                userNameDisplay.textContent = currentUserData.name;
+                authSection.classList.add('hidden');
+                mainSection.classList.remove('hidden');
+                startLogoutTimer();
+                updateSyncUI();
+
+                // 3. 자동 공간 방문 기록 제출
+                // 1일 1회 체크는 간단히 localStorage로 처리
+                const todayKey = 'visit_' + user.uid + '_' + new Date().toISOString().split('T')[0];
+                if (!localStorage.getItem(todayKey)) {
+                    submitRecord('visit', {
+                        name: currentUserData.name,
+                        gender: currentUserData.gender,
+                        age: currentUserData.age
+                    }, 'loginBtn').then(success => {
+                        if (success) localStorage.setItem(todayKey, 'true');
+                    });
+                }
+            } else {
+                // 로그아웃 상태
+                currentUserData = null;
+                if (logoutTimer) clearInterval(logoutTimer);
+                mainSection.classList.add('hidden');
+                authSection.classList.remove('hidden');
+                document.getElementById('loginForm').reset();
+            }
+        });
+
+        // 회원가입
+        document.getElementById('signupForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const userId = document.getElementById('signupId').value.trim();
+            const email = userId + '@yatap.local'; // Firebase는 이메일 형식만 지원하므로 내부 변환
+            const pw = document.getElementById('signupPw').value;
+            const name = document.getElementById('signupName').value;
+            const birthDate = document.getElementById('signupBirth').value; // YYYY-MM-DD
+            const gender = document.getElementById('signupGender').value;
+            const phone = document.getElementById('signupPhone').value;
+
+            // 생년월일로 만 나이 계산
+            const age = calcAge(birthDate);
+
+            toggleLoading('signupBtn', true);
+            try {
+                // Firebase Auth 생성
+                const userCredential = await createUserWithEmailAndPassword(auth, email, pw);
+                const user = userCredential.user;
+
+                // 이름 업데이트
+                await updateProfile(user, { displayName: name });
+
+                // 사용자 추가 정보 Firestore에 저장
+                await setDoc(doc(db, "users", user.uid), {
+                    name, birthDate, age, gender, phone, userId,
+                    createdAt: serverTimestamp()
+                });
+
+                showAlert('signupAlert', '회원가입 완료! 자동으로 로그인됩니다.', 'success');
+            } catch (error) {
+                let msg = error.message;
+                if (error.code === 'auth/email-already-in-use') msg = "이미 사용 중인 아이디입니다.";
+                else if (error.code === 'auth/weak-password') msg = "비밀번호는 최소 6자리 이상이어야 합니다.";
+                showAlert('signupAlert', msg, 'error');
+            } finally {
+                toggleLoading('signupBtn', false);
+            }
+        });
+
+        // 로그인
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const userId = document.getElementById('loginId').value.trim();
+            const email = userId + '@yatap.local'; // 내부 이메일 변환
+            const pw = document.getElementById('loginPw').value;
+
+            toggleLoading('loginBtn', true);
+            try {
+                await signInWithEmailAndPassword(auth, email, pw);
+            } catch (error) {
+                let msg = "로그인 실패. 아이디 또는 비밀번호를 확인하세요.";
+                showAlert('loginAlert', msg, 'error');
+                toggleLoading('loginBtn', false);
+            }
+        });
+
+        // 로그아웃
+        logoutActionBtn.addEventListener('click', () => {
+            signOut(auth);
+        });
+
+        // 프린터 폼 제출
+        document.getElementById('printerForm').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const count = document.getElementById('printerCount').value;
+
+            // 제출 버튼의 ID 설정 (toggleLoading 함수에서 버튼을 찾기 위해)
+            const btn = e.target.querySelector('button[type="submit"]');
+            btn.id = btn.id || 'btn_submit_print';
+
+            submitRecord('printer', {
+                name: currentUserData.name,
+                count: count
+            }, btn.id);
+        });
+
+        // ----------------------------------------------------------------------------------
+        // 동반 이용자 관리 로직 
+        // ----------------------------------------------------------------------------------
+        function createCompanionItem() {
+            const div = document.createElement('div');
+            div.className = 'companion-item mb-2 p-2';
+            div.style.cssText = 'background:#fff; border:1px solid #e2e8f0; border-radius:6px; position:relative;';
+            div.innerHTML = `
+                <button type="button" class="remove-companion-btn" style="position:absolute; top:4px; right:4px; background:transparent; border:none; color:var(--danger); cursor:pointer;"><i class="fa-solid fa-times"></i></button>
+                <div class="row" style="margin-top:8px;">
+                    <div class="col form-group" style="margin-bottom:0;">
+                        <input type="text" class="form-control comp-name" placeholder="이름(선택)" style="padding:0.4rem; font-size:0.85rem;">
+                    </div>
+                    <div class="col form-group" style="margin-bottom:0;">
+                        <select class="form-control comp-gender" required style="padding:0.4rem; font-size:0.85rem;">
+                            <option value="">성별</option>
+                            <option value="남성">남성</option>
+                            <option value="여성">여성</option>
+                        </select>
+                    </div>
+                    <div class="col form-group" style="margin-bottom:0;">
+                        <input type="number" class="form-control comp-age" placeholder="나이" required min="1" max="100" style="padding:0.4rem; font-size:0.85rem;">
+                    </div>
+                </div>
+            `;
+
+            div.querySelector('.remove-companion-btn').addEventListener('click', () => {
+                div.remove();
+            });
+
+            return div;
+        }
+
+        document.getElementById('addCareerCompanionBtn').addEventListener('click', () => {
+            document.getElementById('careerCompanionsList').appendChild(createCompanionItem());
+        });
+
+        document.getElementById('addConnectCompanionBtn').addEventListener('click', () => {
+            document.getElementById('connectCompanionsList').appendChild(createCompanionItem());
+        });
+
+        function getCareerZoneStats() {
+            const container = document.getElementById('careerCompanionsList');
+            const items = container.querySelectorAll('.companion-item');
+
+            let maleCount = 0;
+            let femaleCount = 0;
+            let detailsArr = [];
+
+            // 대표자(로그인 유저) 본인 포함
+            let repGender = currentUserData.gender || '남성'; // Firestore나 가입시 정보가 없을 경우 기본값 방어
+            let repAge = currentUserData.age || '미상';
+            if (repGender === '남성') maleCount++;
+            if (repGender === '여성') femaleCount++;
+            detailsArr.push(`[대표]${currentUserData.name}(${repGender}, ${repAge}세)`);
+
+            // 동반자 집계
+            items.forEach(item => {
+                const name = item.querySelector('.comp-name').value;
+                const gender = item.querySelector('.comp-gender').value;
+                const age = item.querySelector('.comp-age').value;
+
+                if (gender === '남성') maleCount++;
+                if (gender === '여성') femaleCount++;
+
+                const displayName = name ? name : '이름미상';
+                detailsArr.push(`${displayName}(${gender}, ${age}세)`);
+            });
+
+            return {
+                maleCount,
+                femaleCount,
+                companionsDetail: detailsArr.join(' / ')
+            };
+        }
+
+        function getConnectRoomStats() {
+            const container = document.getElementById('connectCompanionsList');
+            const items = container.querySelectorAll('.companion-item');
+
+            let m20 = 0, f20 = 0;
+            let m30 = 0, f30 = 0;
+            let m19 = 0, f19 = 0;
+            let detailsArr = [];
+
+            // 연령대 계산 헬퍼 함수
+            const addPerson = (gender, ageText, nameText, isRep = false) => {
+                const age = parseInt(ageText, 10);
+                const g = gender;
+
+                if (!isNaN(age)) {
+                    if (age <= 19) {
+                        if (g === '남성') m19++;
+                        if (g === '여성') f19++;
+                    } else if (age <= 29) {
+                        if (g === '남성') m20++;
+                        if (g === '여성') f20++;
+                    } else if (age <= 39) {
+                        if (g === '남성') m30++;
+                        if (g === '여성') f30++;
+                    }
+                    // 40세 이상은 연령대 집계에서 제외 (예외처리)
+                }
+
+                const role = isRep ? "[대표]" : "";
+                const displayName = nameText ? nameText : '이름미상';
+                detailsArr.push(`${role}${displayName}(${g}, ${ageText}세)`);
+            };
+
+            // 대표자 포함
+            let repGender = currentUserData.gender || '남성';
+            let repAge = currentUserData.age || '20'; // 없을시 20대 기본 방어
+            addPerson(repGender, repAge, currentUserData.name, true);
+
+            // 동반자 포함
+            items.forEach(item => {
+                const name = item.querySelector('.comp-name').value;
+                const gender = item.querySelector('.comp-gender').value;
+                const age = item.querySelector('.comp-age').value;
+                addPerson(gender, age, name, false);
+            });
+
+            return {
+                m20, f20, m30, f30, m19, f19,
+                companionsDetail: detailsArr.join(' / ')
+            };
+        }
+
+        // 커리어존 폼 제출
+        document.getElementById('careerForm').addEventListener('submit', (e) => {
+            e.preventDefault();
+
+            const btn = e.target.querySelector('button[type="submit"]');
+            btn.id = btn.id || 'btn_submit_career';
+
+            const stats = getCareerZoneStats();
+
+            submitRecord('careerZone', {
+                name: currentUserData.name,
+                place: document.getElementById('cPlace').value,
+                startTime: document.getElementById('cStartTime').value,
+                endTime: document.getElementById('cEndTime').value,
+                purpose: document.getElementById('cPurpose').value,
+                maleCount: stats.maleCount,
+                femaleCount: stats.femaleCount,
+                companionsDetail: stats.companionsDetail
+            }, btn.id).then(() => {
+                document.getElementById('careerCompanionsList').innerHTML = ''; // 성공 시 초기화
+            });
+        });
+
+        // 커넥트룸 폼 제출
+        document.getElementById('connectForm').addEventListener('submit', (e) => {
+            e.preventDefault();
+
+            const btn = e.target.querySelector('button[type="submit"]');
+            btn.id = btn.id || 'btn_submit_connect';
+
+            const stats = getConnectRoomStats();
+
+            submitRecord('connectRoom', {
+                name: currentUserData.name,
+                startTime: document.getElementById('rStartTime').value,
+                endTime: document.getElementById('rEndTime').value,
+                purpose: document.getElementById('rPurpose').value,
+                m20: stats.m20,
+                f20: stats.f20,
+                m30: stats.m30,
+                f30: stats.f30,
+                m19: stats.m19,
+                f19: stats.f19,
+                companionsDetail: stats.companionsDetail
+            }, btn.id).then(() => {
+                document.getElementById('connectCompanionsList').innerHTML = ''; // 성공 시 초기화
+            });
+        });
+    </script>
+</body>
+
+</html>
