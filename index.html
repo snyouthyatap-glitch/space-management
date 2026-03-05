@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>야탑 청년지원센터 공간 관리 시스템</title>
+    <title>야탑 청년이봄 공간 관리 시스템</title>
     <!-- Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@300;400;500;600;700&display=swap"
         rel="stylesheet">
@@ -301,8 +301,8 @@
     <div class="container">
         <!-- 상단 타이틀 -->
         <div class="header">
-            <h1>야탑 청년지원센터</h1>
-            <p>공간 방문 및 시설 이용 일지 시스템</p>
+            <h1>야탑 청년이봄</h1>
+            <p>공간 방문 및 시설 이용</p>
         </div>
 
         <!-- Section 1: 인증 (로그인/회원가입) -->
@@ -537,7 +537,7 @@
             signOut, onAuthStateChanged, updateProfile
         } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
         import {
-            getFirestore, doc, setDoc, collection, addDoc, serverTimestamp
+            getFirestore, doc, setDoc, getDoc, collection, addDoc, serverTimestamp
         } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
         // TODO: Firebase 콘솔에서 발급받은 실제 설정값으로 변경하세요
@@ -823,17 +823,23 @@
                 startLogoutTimer();
                 updateSyncUI();
 
-                // 3. 자동 공간 방문 기록 제출
-                // 1일 1회 체크는 간단히 localStorage로 처리
-                const todayKey = 'visit_' + user.uid + '_' + new Date().toISOString().split('T')[0];
-                if (!localStorage.getItem(todayKey)) {
-                    submitRecord('visit', {
-                        name: currentUserData.name,
-                        gender: currentUserData.gender,
-                        age: currentUserData.age
-                    }, 'loginBtn').then(success => {
-                        if (success) localStorage.setItem(todayKey, 'true');
-                    });
+                // 3. 자동 공간 방문 기록 제출 (하루 1회, Firestore 기준 중복 방지)
+                const todayStr = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+                const visitDocRef = doc(db, "users", user.uid, "visitLog", todayStr);
+                try {
+                    const visitDoc = await getDoc(visitDocRef);
+                    if (!visitDoc.exists()) {
+                        const success = await submitRecord('visit', {
+                            name: currentUserData.name,
+                            gender: currentUserData.gender,
+                            age: currentUserData.age
+                        }, 'loginBtn');
+                        if (success) {
+                            await setDoc(visitDocRef, { submitted: true, timestamp: serverTimestamp() });
+                        }
+                    }
+                } catch (e) {
+                    console.error("방문일지 중복체크 오류:", e);
                 }
             } else {
                 // 로그아웃 상태
