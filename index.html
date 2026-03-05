@@ -888,6 +888,29 @@
                 });
 
                 showAlert('signupAlert', '회원가입 완료! 자동으로 로그인됩니다.', 'success');
+
+                // 회원정보 가입 즉시 UI 및 데이터 업데이트 (onAuthStateChanged 보다 늦게 기록되므로 수동 업데이트)
+                if (currentUserData) {
+                    currentUserData.name = name;
+                    currentUserData.age = age;
+                    currentUserData.gender = gender;
+                    userNameDisplay.textContent = name;
+
+                    // 가동 방문 기록 재시도 (프로필 생성전에 실행되었을 수 있으므로)
+                    const todayStr = new Date().toISOString().split('T')[0];
+                    const visitDocRef = doc(db, "users", user.uid, "visitLog", todayStr);
+                    const visitDoc = await getDoc(visitDocRef);
+                    if (!visitDoc.exists()) {
+                        const success = await submitRecord('visit', {
+                            name: name,
+                            gender: gender,
+                            age: age
+                        }, null);
+                        if (success) {
+                            await setDoc(visitDocRef, { submitted: true, timestamp: serverTimestamp() });
+                        }
+                    }
+                }
             } catch (error) {
                 let msg = error.message;
                 if (error.code === 'auth/email-already-in-use') msg = "이미 사용 중인 아이디입니다.";
