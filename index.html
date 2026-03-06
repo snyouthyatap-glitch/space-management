@@ -1318,6 +1318,10 @@
                 const loadProfile = async () => {
                     try {
                         const userDoc = await getDoc(doc(db, "users", user.uid));
+
+                        // [초기화] 프로필 로드 시 관리자 UI 기본 숨김
+                        document.getElementById('adminBadge')?.classList.add('hidden');
+                        document.getElementById('adminModeBtn')?.classList.add('hidden');
                         if (userDoc.exists()) {
                             const profile = userDoc.data();
                             currentUserData.name = profile.name || currentUserData.name;
@@ -1338,10 +1342,13 @@
                                 const adminBadge = document.getElementById('adminBadge');
                                 const adminModeBtn = document.getElementById('adminModeBtn');
                                 if (currentUserData.role === 'admin') {
-                                    if (adminBadge) adminBadge.classList.remove('hidden');
-                                    if (adminModeBtn) adminModeBtn.classList.remove('hidden');
+                                    adminBadge?.classList.remove('hidden');
+                                    adminModeBtn?.classList.remove('hidden');
                                     loadAdminStats();
                                     loadPendingUsers(); // 관리자 탭 데이터 미리 로드
+                                } else {
+                                    adminBadge?.classList.add('hidden');
+                                    adminModeBtn?.classList.add('hidden');
                                 }
                                 checkAndSubmitDailyVisit(user);
                             } else {
@@ -1368,6 +1375,8 @@
                 document.getElementById('pendingArea').classList.add('hidden');
                 document.getElementById('userArea').classList.add('hidden');
                 document.getElementById('adminArea').classList.add('hidden');
+                document.getElementById('adminBadge')?.classList.add('hidden');
+                document.getElementById('adminModeBtn')?.classList.add('hidden');
                 authSection.classList.remove('hidden');
                 document.getElementById('loginForm').reset();
             }
