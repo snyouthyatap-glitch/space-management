@@ -381,13 +381,20 @@
                         </div>
                     </div>
 
-                    <div class="form-group">
-                        <label for="signupPhone">연락처</label>
-                        <input type="tel" id="signupPhone" class="form-control" placeholder="010-0000-0000" required>
+                    <div class="form-group mt-3" style="background: #f1f5f9; padding: 0.75rem; border-radius: 6px;">
+                        <input type="checkbox" id="signupPrivacy" required style="width: auto; margin-right: 0.5rem;">
+                        <label for="signupPrivacy" style="display: inline; font-size: 0.85rem; cursor: pointer;">
+                            개인정보 수집 및 이용에 동의합니다 (필수)
+                        </label>
+                        <small
+                            style="display: block; font-size: 0.7rem; color: var(--gray-text); margin-top: 0.25rem; line-height: 1.2;">
+                            ※ 수집항목: 이름, 생년월일, 성별, 연락처<br>
+                            ※ 이용목적: 공간 이용 관리 및 청년 정책 안내
+                        </small>
                     </div>
 
-                    <button type="submit" class="btn btn-primary mt-2" id="signupBtn">
-                        <span>가입하기</span>
+                    <button type="submit" class="btn btn-primary mt-3" id="signupBtn">
+                        <span class="btn-text">가입하기</span>
                         <div class="spinner"></div>
                     </button>
                     <button type="button" class="btn btn-outline mt-2" id="showLoginBtn">뒤로가기</button>
@@ -452,8 +459,13 @@
                                 ※ 1회 최대 10장까지 가능 (만 20-39세 청년 대상)
                             </small>
                         </div>
-                        <button type="submit" class="btn btn-primary mt-2 submit-btn">제출하기 <div class="spinner"></div>
+                        <button type="submit" class="btn btn-primary mt-2 submit-btn">
+                            <span class="btn-text">제출하기</span>
+                            <div class="spinner"></div>
                         </button>
+                        <p style="font-size: 0.7rem; color: var(--gray-text); margin-top: 0.5rem; text-align: center;">
+                            ※ 본 신청서 제출 시 개인정보 수집 및 이용에 동의하는 것으로 간주합니다.
+                        </p>
                     </form>
                 </div>
 
@@ -500,9 +512,22 @@
                             </button>
                         </div>
 
-                        <button type="submit" class="btn btn-primary mt-2 submit-btn">제출하기 <div class="spinner"></div>
+                        <div class="form-group mt-3"
+                            style="background: #fff; padding: 0.5rem; border: 1px solid #e2e8f0; border-radius: 6px;">
+                            <input type="checkbox" id="careerPrivacy" required
+                                style="width: auto; margin-right: 0.5rem;">
+                            <label for="careerPrivacy" style="display: inline; font-size: 0.8rem; cursor: pointer;">
+                                동행인의 개인정보 수집 및 이용에 대해 동의를 얻었음을 확인합니다. (필수)
+                            </label>
+                        </div>
+
+                        <button type="submit" class="btn btn-primary mt-2 submit-btn">
+                            <span class="btn-text">제출하기</span>
+                            <div class="spinner"></div>
                         </button>
-                    </form>
+                        <p style="font-size: 0.7rem; color: var(--gray-text); margin-top: 0.5rem; text-align: center;">
+                            ※ 본 신청서 제출 시 개인정보 수집 및 이용에 동의하는 것으로 간주합니다.
+                        </p>
                 </div>
 
                 <!-- 탭 콘텐츠: 커넥트룸 -->
@@ -539,8 +564,22 @@
                             </button>
                         </div>
 
-                        <button type="submit" class="btn btn-primary mt-2 submit-btn">제출하기 <div class="spinner"></div>
+                        <div class="form-group mt-3"
+                            style="background: #fff; padding: 0.5rem; border: 1px solid #e2e8f0; border-radius: 6px;">
+                            <input type="checkbox" id="connectPrivacy" required
+                                style="width: auto; margin-right: 0.5rem;">
+                            <label for="connectPrivacy" style="display: inline; font-size: 0.8rem; cursor: pointer;">
+                                동행인의 개인정보 수집 및 이용에 대해 동의를 얻었음을 확인합니다. (필수)
+                            </label>
+                        </div>
+
+                        <button type="submit" class="btn btn-primary mt-2 submit-btn">
+                            <span class="btn-text">제출하기</span>
+                            <div class="spinner"></div>
                         </button>
+                        <p style="font-size: 0.7rem; color: var(--gray-text); margin-top: 0.5rem; text-align: center;">
+                            ※ 본 신청서 제출 시 개인정보 수집 및 이용에 동의하는 것으로 간주합니다.
+                        </p>
                     </form>
                 </div>
             </div>
@@ -632,16 +671,26 @@
             setTimeout(() => el.classList.add('hidden'), 5000);
         }
 
-        // 로딩 스피너 제어
+        // 로딩 스피너 및 버튼 텍스트 제어
         function toggleLoading(btnId, isLoading) {
             const btn = document.getElementById(btnId);
             if (!btn) return;
+            const btnText = btn.querySelector('.btn-text');
             const spinner = btn.querySelector('.spinner');
+
             if (isLoading) {
                 btn.disabled = true;
+                if (btnText) {
+                    btn.setAttribute('data-original-text', btnText.textContent);
+                    btnText.textContent = '처리 중...';
+                }
                 if (spinner) spinner.style.display = 'block';
             } else {
                 btn.disabled = false;
+                if (btnText) {
+                    const originalText = btn.getAttribute('data-original-text');
+                    if (originalText) btnText.textContent = originalText;
+                }
                 if (spinner) spinner.style.display = 'none';
             }
         }
@@ -1030,6 +1079,12 @@
                 return;
             }
 
+            // 개인정보 동의 확인
+            if (!document.getElementById('signupPrivacy').checked) {
+                showAlert('signupAlert', '개인정보 수집 및 이용에 동의해주세요.', 'error');
+                return;
+            }
+
             toggleLoading('signupBtn', true);
             try {
                 // Firebase Auth 생성
@@ -1119,7 +1174,9 @@
             submitRecord('printer', {
                 name: currentUserData.name,
                 count: count
-            }, btn.id);
+            }, btn.id).then((success) => {
+                if (success) e.target.reset();
+            });
         });
 
         // ----------------------------------------------------------------------------------
@@ -1254,6 +1311,12 @@
         document.getElementById('careerForm').addEventListener('submit', (e) => {
             e.preventDefault();
 
+            // 동행인 동의 체크 확인
+            if (!document.getElementById('careerPrivacy').checked) {
+                alert('동행인의 개인정보 수집 동의여부를 확인해주세요.');
+                return;
+            }
+
             const btn = e.target.querySelector('button[type="submit"]');
             btn.id = btn.id || 'btn_submit_career';
 
@@ -1268,14 +1331,24 @@
                 maleCount: stats.maleCount,
                 femaleCount: stats.femaleCount,
                 companionsDetail: stats.companionsDetail
-            }, btn.id).then(() => {
-                document.getElementById('careerCompanionsList').innerHTML = ''; // 성공 시 초기화
+            }, btn.id).then((success) => {
+                if (success) {
+                    document.getElementById('careerCompanionsList').innerHTML = ''; // 성공 시 초기화
+                    document.getElementById('careerPrivacy').checked = false; // 체크박스 초기화
+                    e.target.reset(); // 폼 초기화
+                }
             });
         });
 
         // 커넥트룸 폼 제출
         document.getElementById('connectForm').addEventListener('submit', (e) => {
             e.preventDefault();
+
+            // 동행인 동의 체크 확인
+            if (!document.getElementById('connectPrivacy').checked) {
+                alert('동행인의 개인정보 수집 동의여부를 확인해주세요.');
+                return;
+            }
 
             const btn = e.target.querySelector('button[type="submit"]');
             btn.id = btn.id || 'btn_submit_connect';
@@ -1294,8 +1367,12 @@
                 m19: stats.m19,
                 f19: stats.f19,
                 companionsDetail: stats.companionsDetail
-            }, btn.id).then(() => {
-                document.getElementById('connectCompanionsList').innerHTML = ''; // 성공 시 초기화
+            }, btn.id).then((success) => {
+                if (success) {
+                    document.getElementById('connectCompanionsList').innerHTML = ''; // 성공 시 초기화
+                    document.getElementById('connectPrivacy').checked = false; // 체크박스 초기화
+                    e.target.reset(); // 폼 초기화
+                }
             });
         });
     </script>
