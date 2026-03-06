@@ -1514,7 +1514,16 @@
                     createdAt: serverTimestamp()
                 });
 
-                showAlert('signupAlert', '회원가입 신청이 완료되었습니다! 관리자 승인 후 이용 가능합니다.', 'success');
+                // [중요] 가입 완료 후 자동 로그인을 막고 로그인 화면으로 보냅니다.
+                await signOut(auth);
+
+                alert('회원가입 신청이 완료되었습니다!\n관리자 승인 후(최대 24시간 이내) 이용 가능합니다.');
+
+                // UI 초기화 및 로그인 화면으로 전환
+                document.getElementById('signupForm').reset();
+                signupView.classList.add('hidden');
+                loginView.classList.remove('hidden');
+                showAlert('loginAlert', '가입 신청 완료! 관리자 승인을 기다려주세요.', 'success');
 
                 // 회원정보 가입 즉시 UI 및 데이터 업데이트 (onAuthStateChanged 보다 늦게 기록되므로 수동 업데이트)
                 if (currentUserData) {
