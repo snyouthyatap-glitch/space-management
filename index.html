@@ -409,8 +409,14 @@
                         <button id="logoutActionBtn" class="btn btn-outline" style="padding: 0.5rem 1rem;">로그아웃</button>
                     </div>
                 </div>
-                <div class="logout-timer">
-                    <i class="fa-regular fa-clock"></i> 자정(23:59)에 자동 로그아웃 됩니다.
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div class="logout-timer">
+                        <i class="fa-regular fa-clock"></i> 자정(23:59)에 자동 로그아웃 됩니다.
+                    </div>
+                    <div id="siteAuthBadge"
+                        style="font-size: 0.75rem; padding: 2px 8px; border-radius: 20px; font-weight: 600;">
+                        <!-- 인증 상태 표시 -->
+                    </div>
                 </div>
                 <div id="visitAlert" class="alert alert-success mt-2 mb-0 text-center hidden"
                     style="padding: 0.5rem; font-size: 0.8rem; display:flex; align-items:center; justify-content:center; gap:0.5rem;">
@@ -615,6 +621,51 @@
             }
         }
 
+        // ----------------------------------------------------------------------------------
+        // [추가] 현장 방문 인증 로직 (QR 코드 기반)
+        // ----------------------------------------------------------------------------------
+        function checkSiteAccessAuth() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const authCode = urlParams.get('auth');
+            const todayStr = new Date().toLocaleDateString('en-CA');
+            const badge = document.getElementById('siteAuthBadge');
+
+            // 1. URL 파라미터로 명시적으로 인증 시도 시
+            if (authCode === 'yatap') {
+                localStorage.setItem('lastVerifiedDate', todayStr);
+                // 주소창 세척 (파라미터 제거)
+                const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname;
+                window.history.replaceState({ path: newUrl }, '', newUrl);
+                updateAuthUI(true);
+                return true;
+            }
+
+            // 2. 저장된 인증 정보 확인
+            const lastVerifiedDate = localStorage.getItem('lastVerifiedDate');
+            const isVerified = lastVerifiedDate === todayStr;
+            updateAuthUI(isVerified);
+            return isVerified;
+        }
+
+        function updateAuthUI(isVerified) {
+            const badge = document.getElementById('siteAuthBadge');
+            if (!badge) return;
+            if (isVerified) {
+                badge.innerHTML = '<i class="fa-solid fa-location-dot"></i> 현장인증 완료';
+                badge.style.backgroundColor = '#ecfdf5';
+                badge.style.color = '#10b981';
+                badge.style.border = '1px solid #a7f3d0';
+            } else {
+                badge.innerHTML = '<i class="fa-solid fa-circle-exclamation"></i> 현장인증 필요';
+                badge.style.backgroundColor = '#fff7ed';
+                badge.style.color = '#f97316';
+                badge.style.border = '1px solid #ffedd5';
+            }
+        }
+
+        // 페이지 로드 시 즉시 실행
+        const isSiteVerified = checkSiteAccessAuth();
+
         // 생년월일로 만 나이 계산
         function calcAge(birthStr) {
             if (!birthStr) return '';
@@ -693,6 +744,14 @@
         // Google Sheets 및 Firebase 데이터 전송 공통 로직
         // ----------------------------------------------------------------------------------
         async function submitRecord(type, data, btnId, isRetry = false) {
+            // [추가] 현장 인증 여부 최종 확인
+            const todayStr = new Date().toLocaleDateString('en-CA');
+            if (localStorage.getItem('lastVerifiedDate') !== todayStr) {
+                alert('현장 방문 인증이 필요합니다. 센터 내 비치된 QR 코드를 찍어주세요.');
+                updateAuthUI(false);
+                return false;
+            }
+
             if (btnId) toggleLoading(btnId, true);
 
             // 1. Google Sheets 로 전송 시도
