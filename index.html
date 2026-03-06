@@ -447,7 +447,7 @@
                         <input type="password" id="loginPw" class="form-control" placeholder="비밀번호를 입력하세요" required>
                     </div>
                     <button type="submit" class="btn btn-primary mt-2" id="loginBtn">
-                        <span>로그인</span>
+                        <span class="btn-text">로그인</span>
                         <div class="spinner"></div>
                     </button>
                     <div class="text-center mt-4">
@@ -1158,17 +1158,9 @@
             // Auth 상태 구독
             onAuthStateChanged(auth, async (user) => {
                 const todayStr = getTrustedNow().toLocaleDateString('en-CA');
-                const lastLoginDate = localStorage.getItem('lastLoginDate');
 
                 if (user) {
-                    // [강력 로그아웃] 자정이 지났는데 로그인 상태인 경우 (브라우저 재진입 등)
-                    if (lastLoginDate && lastLoginDate !== todayStr) {
-                        console.log("날짜 변경 감지 - 강제 로그아웃");
-                        localStorage.removeItem('lastLoginDate');
-                        signOut(auth);
-                        return;
-                    }
-
+                    // [로그인 성공 시점에만 날짜 저장]
                     localStorage.setItem('lastLoginDate', todayStr);
 
                     // 1. 기본 정보 설정 (Fallback)
@@ -1206,13 +1198,13 @@
                     const adminDashboard = document.getElementById('adminDashboard');
                     const forceVisitBtn = document.getElementById('forceVisitBtn');
                     if (currentUserData.role === 'admin') {
-                        adminBadge.classList.remove('hidden');
-                        adminDashboard.classList.remove('hidden');
+                        if (adminBadge) adminBadge.classList.remove('hidden');
+                        if (adminDashboard) adminDashboard.classList.remove('hidden');
                         if (forceVisitBtn) forceVisitBtn.classList.remove('hidden');
                         loadAdminStats(); // 통계 로드
                     } else {
-                        adminBadge.classList.add('hidden');
-                        adminDashboard.classList.add('hidden');
+                        if (adminBadge) adminBadge.classList.add('hidden');
+                        if (adminDashboard) adminDashboard.classList.add('hidden');
                         if (forceVisitBtn) forceVisitBtn.classList.add('hidden');
                     }
 
@@ -1227,7 +1219,6 @@
                 } else {
                     // 로그아웃 상태
                     currentUserData = null;
-                    localStorage.removeItem('lastLoginDate');
                     if (logoutTimer) clearInterval(logoutTimer);
                     mainSection.classList.add('hidden');
                     authSection.classList.remove('hidden');
