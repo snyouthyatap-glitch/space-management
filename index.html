@@ -1172,7 +1172,14 @@
                         gender: ''
                     };
 
-                    // 2. Firestore에서 상세 프로필 가져오기
+                    // UI 즉시 업데이트 (로딩 중에도 화면 전환)
+                    authSection.classList.add('hidden');
+                    mainSection.classList.remove('hidden');
+                    userNameDisplay.textContent = currentUserData.name;
+                    startLogoutTimer();
+                    updateSyncUI();
+
+                    // 2. Firestore에서 상세 프로필 가져오기 (비동기로 진행하되 UI는 먼저 전환)
                     const loadProfile = async () => {
                         try {
                             const userDoc = await getDoc(doc(db, "users", user.uid));
@@ -1181,41 +1188,32 @@
                                 currentUserData.name = profile.name || currentUserData.name;
                                 currentUserData.age = profile.birthDate ? calcAge(profile.birthDate) : (profile.age || '');
                                 currentUserData.gender = profile.gender || '';
-                                currentUserData.role = profile.role || 'user'; // 관리자 권한 확인
+                                currentUserData.role = profile.role || 'user';
+
+                                // 프로필 로드 후 UI 2차 업데이트 (이름 등)
+                                userNameDisplay.textContent = currentUserData.name;
+
+                                // 관리자 권한에 따른 추가 UI 처리
+                                const adminBadge = document.getElementById('adminBadge');
+                                const adminDashboard = document.getElementById('adminDashboard');
+                                const forceVisitBtn = document.getElementById('forceVisitBtn');
+                                if (currentUserData.role === 'admin') {
+                                    if (adminBadge) adminBadge.classList.remove('hidden');
+                                    if (adminDashboard) adminDashboard.classList.remove('hidden');
+                                    if (forceVisitBtn) forceVisitBtn.classList.remove('hidden');
+                                    loadAdminStats(); // 통계 로드
+                                }
+                                checkSiteAccessAuth(); // 권한에 따른 배지 업데이트
                             }
                         } catch (e) {
                             console.error("프로필 조회 실패:", e);
                         }
                     };
 
-                    await loadProfile();
-
-                    // UI 업데이트
-                    userNameDisplay.textContent = currentUserData.name;
-
-                    // 관리자 UI 처리
-                    const adminBadge = document.getElementById('adminBadge');
-                    const adminDashboard = document.getElementById('adminDashboard');
-                    const forceVisitBtn = document.getElementById('forceVisitBtn');
-                    if (currentUserData.role === 'admin') {
-                        if (adminBadge) adminBadge.classList.remove('hidden');
-                        if (adminDashboard) adminDashboard.classList.remove('hidden');
-                        if (forceVisitBtn) forceVisitBtn.classList.remove('hidden');
-                        loadAdminStats(); // 통계 로드
-                    } else {
-                        if (adminBadge) adminBadge.classList.add('hidden');
-                        if (adminDashboard) adminDashboard.classList.add('hidden');
-                        if (forceVisitBtn) forceVisitBtn.classList.add('hidden');
-                    }
-
-                    authSection.classList.add('hidden');
-                    mainSection.classList.remove('hidden');
-                    startLogoutTimer();
-                    updateSyncUI();
-                    checkSiteAccessAuth(); // 권한에 따른 배지 업데이트
-
-                    // 3. 자동 공간 방문 기록 제출
-                    await checkAndSubmitDailyVisit(user);
+                    // 프로필 로드 및 방문 기록 제출을 별도로 실행하여 UI 차단 방지
+                    loadProfile().then(() => {
+                        checkAndSubmitDailyVisit(user);
+                    });
                 } else {
                     // 로그아웃 상태
                     currentUserData = null;
@@ -1326,6 +1324,9 @@
                 toggleLoading('loginBtn', true);
                 try {
                     await signInWithEmailAndPassword(auth, email, pw);
+                    // 성공 시 UI 전환은 onAuthStateChanged에서 처리되지만, 
+                    // 버튼 상태는 여기서 복구해주는 것이 안전합니다 (또는 상태 감지기에 맡김)
+                    toggleLoading('loginBtn', false);
                 } catch (error) {
                     let msg = "로그인 실패. 아이디 또는 비밀번호를 확인하세요.";
                     showAlert('loginAlert', msg, 'error');
