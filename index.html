@@ -761,7 +761,8 @@
                 signOut, onAuthStateChanged, updateProfile
             } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
             import {
-                getFirestore, doc, setDoc, getDoc, collection, addDoc, serverTimestamp
+                getFirestore, doc, setDoc, getDoc, collection, addDoc, serverTimestamp,
+                query, getDocs
             } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
             // TODO: Firebase 콘솔에서 발급받은 실제 설정값으로 변경하세요
@@ -1557,92 +1558,100 @@
                         e.target.reset(); // 폼 초기화
                     }
                 });
-                // ----------------------------------------------------------------------------------
-                // 관리자 통계 로드 (오늘 기준)
-                // ----------------------------------------------------------------------------------
-                async function loadAdminStats() {
-                    if (!currentUserData || currentUserData.role !== 'admin') return;
+            }); // onAuthStateChanged 끝
 
-                    const todayStr = getTrustedNow().toLocaleDateString('en-CA');
-                    const stats = { visit: 0, printer: 0, career: 0, connect: 0 };
+            // ----------------------------------------------------------------------------------
+            // 관리자 통계 로드 (오늘 기준) - 전역 함수로 분리
+            // ----------------------------------------------------------------------------------
+            async function loadAdminStats() {
+                if (!currentUserData || currentUserData.role !== 'admin') return;
 
-                    try {
-                        // query constraints: 오늘 날짜 데이터만 필터링하는 것이 좋으나, 
-                        // 현재 데이터 구조상 all_logs 컬렉션에서 클라이언트 사이드 필터링 시연
-                        const q = query(collection(db, "all_logs"));
-                        const querySnapshot = await getDocs(q);
+                const refreshBtn = document.getElementById('refreshStatsBtn');
+                const originalBtnContent = refreshBtn.innerHTML;
+                refreshBtn.disabled = true;
+                refreshBtn.innerHTML = '<i class="fa-solid fa-sync fa-spin"></i> 로딩 중...';
 
-                        querySnapshot.forEach((doc) => {
-                            const data = doc.data();
-                            // Firestore Timestamp를 날짜 문자열로 변환하여 오늘 데이터인지 확인
-                            if (data.timestamp) {
-                                const logDate = data.timestamp.toDate().toLocaleDateString('en-CA');
-                                if (logDate === todayStr) {
-                                    if (data.type === 'visit') stats.visit++;
-                                    if (data.type === 'printer') stats.printer += (data.count || 0);
-                                    if (data.type === 'careerZone') stats.career++;
-                                    if (data.type === 'connectRoom') stats.connect++;
-                                }
+                const today = getTrustedNow();
+                const todayStr = today.toLocaleDateString('en-CA'); // YYYY-MM-DD
+                const stats = { visit: 0, printer: 0, career: 0, connect: 0 };
+
+                try {
+                    // all_logs 컬렉션 전체 조회 (오늘 데이터 필터링)
+                    const q = query(collection(db, "all_logs"));
+                    const querySnapshot = await getDocs(q);
+
+                    querySnapshot.forEach((doc) => {
+                        const data = doc.data();
+                        if (data.timestamp) {
+                            const logDate = data.timestamp.toDate().toLocaleDateString('en-CA');
+                            if (logDate === todayStr) {
+                                if (data.type === 'visit') stats.visit++;
+                                if (data.type === 'printer') stats.printer += (Number(data.count) || 0);
+                                if (data.type === 'careerZone') stats.career++;
+                                if (data.type === 'connectRoom') stats.connect++;
                             }
-                        });
+                        }
+                    });
 
-                        document.getElementById('statTotalVisit').textContent = `${stats.visit}명`;
-                        document.getElementById('statTotalPrint').textContent = `${stats.printer}장`;
-                        document.getElementById('statTotalCareer').textContent = `${stats.career}건`;
-                        document.getElementById('statTotalConnect').textContent = `${stats.connect}건`;
-                    } catch (e) {
-                        console.error("통계 로드 실패:", e);
-                    }
+                    document.getElementById('statTotalVisit').textContent = `${stats.visit}명`;
+                    document.getElementById('statTotalPrint').textContent = `${stats.printer}장`;
+                    document.getElementById('statTotalCareer').textContent = `${stats.career}건`;
+                    document.getElementById('statTotalConnect').textContent = `${stats.connect}건`;
+                } catch (e) {
+                    console.error("통계 로드 실패:", e);
+                    alert("통계 데이터를 불러오는데 실패했습니다. (권한 부족 또는 네트워크 오류)");
+                } finally {
+                    refreshBtn.disabled = false;
+                    refreshBtn.innerHTML = originalBtnContent;
                 }
+            }
 
-                document.getElementById('refreshStatsBtn').addEventListener('click', loadAdminStats);
+            // ----------------------------------------------------------------------------------
+            // 온라인 상태 감지 및 제어
+            // ----------------------------------------------------------------------------------
+            function checkOnlineStatus() {
+                const warning = document.getElementById('onlineWarning');
+                const submitButtons = document.querySelectorAll('button[type="submit"]');
 
-                // ----------------------------------------------------------------------------------
-                // 온라인 상태 감지 및 제어
-                // ----------------------------------------------------------------------------------
-                // ... (기존에 추가했던 코드들 포함하여 완성)
-                function checkOnlineStatus() {
-                    const warning = document.getElementById('onlineWarning');
-                    const submitButtons = document.querySelectorAll('button[type="submit"]');
-
-                    if (!navigator.onLine) {
-                        warning.style.display = 'block';
-                        submitButtons.forEach(btn => btn.disabled = true);
-                    } else {
-                        warning.style.display = 'none';
-                        submitButtons.forEach(btn => btn.disabled = false);
-                    }
+                if (!navigator.onLine) {
+                    warning.style.display = 'block';
+                    submitButtons.forEach(btn => btn.disabled = true);
+                } else {
+                    warning.style.display = 'none';
+                    submitButtons.forEach(btn => btn.disabled = false);
                 }
+            }
 
-                window.addEventListener('online', checkOnlineStatus);
-                window.addEventListener('offline', checkOnlineStatus);
-                checkOnlineStatus();
+            window.addEventListener('online', checkOnlineStatus);
+            window.addEventListener('offline', checkOnlineStatus);
+            checkOnlineStatus();
 
-                const privacyModal = document.getElementById('privacyModal');
-                const closeBtn = document.getElementById('closePrivacyModal');
-                const confirmBtn = document.getElementById('modalConfirmBtn');
+            const privacyModal = document.getElementById('privacyModal');
+            const closeBtn = document.getElementById('closePrivacyModal');
+            const confirmBtn = document.getElementById('modalConfirmBtn');
 
-                function openModal(e) {
-                    if (e) e.preventDefault();
-                    privacyModal.style.display = 'block';
+            function openModal(e) {
+                if (e) e.preventDefault();
+                privacyModal.style.display = 'block';
+            }
+
+            function closeModal() {
+                privacyModal.style.display = 'none';
+            }
+
+            document.addEventListener('click', (e) => {
+                if (e.target.classList.contains('open-privacy-modal')) {
+                    openModal(e);
                 }
-
-                function closeModal() {
-                    privacyModal.style.display = 'none';
-                }
-
-                document.addEventListener('click', (e) => {
-                    if (e.target.classList.contains('open-privacy-modal')) {
-                        openModal(e);
-                    }
-                });
-
-                closeBtn.onclick = closeModal;
-                confirmBtn.onclick = closeModal;
-                window.onclick = (event) => {
-                    if (event.target == privacyModal) closeModal();
-                };
             });
+
+            closeBtn.onclick = closeModal;
+            confirmBtn.onclick = closeModal;
+            window.onclick = (event) => {
+                if (event.target == privacyModal) closeModal();
+            };
+
+            document.getElementById('refreshStatsBtn')?.addEventListener('click', loadAdminStats);
         </script>
 </body>
 
