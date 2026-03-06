@@ -591,6 +591,11 @@
                         </div>
                     </div>
 
+                    <div class="form-group">
+                        <label for="signupPhone">연락처</label>
+                        <input type="tel" id="signupPhone" class="form-control" placeholder="010-0000-0000" required>
+                    </div>
+
                     <div class="form-group mt-3" style="background: #f1f5f9; padding: 0.75rem; border-radius: 6px;">
                         <input type="checkbox" id="signupPrivacy" required style="width: auto; margin-right: 0.5rem;">
                         <label for="signupPrivacy" style="display: inline; font-size: 0.85rem; cursor: pointer;">
@@ -826,6 +831,7 @@
                         <p style="font-size: 0.7rem; color: var(--gray-text); margin-top: 0.5rem; text-align: center;">
                             ※ 본 신청서 제출 시 개인정보 수집 및 이용에 동의하는 것으로 간주합니다.
                         </p>
+                    </form>
                 </div>
 
                 <!-- 탭 콘텐츠: 커넥트룸 -->
@@ -905,8 +911,8 @@
             signOut, onAuthStateChanged, updateProfile
         } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
         import {
-            getFirestore, doc, setDoc, getDoc, collection, addDoc, serverTimestamp,
-            query, getDocs
+            getFirestore, doc, setDoc, getDoc, updateDoc, collection, addDoc, serverTimestamp,
+            query, getDocs, where
         } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
         // TODO: Firebase 콘솔에서 발급받은 실제 설정값으로 변경하세요
@@ -931,19 +937,29 @@
         let systemTimeOffset = 0;
 
         async function syncSystemTime() {
-            try {
-                // WorldTimeAPI 사용 (fallback 포함)
-                const response = await fetch('https://worldtimeapi.org/api/timezone/Asia/Seoul');
-                if (response.ok) {
-                    const data = await response.json();
-                    const serverTime = new Date(data.datetime).getTime();
-                    const localTime = Date.now();
-                    systemTimeOffset = serverTime - localTime;
-                    console.log("서버 시간 동기화 완료 (오차: " + systemTimeOffset + "ms)");
+            const timeApis = [
+                'https://worldtimeapi.org/api/timezone/Asia/Seoul',
+                'https://timeapi.io/api/Time/current/zone?timeZone=Asia/Seoul'
+            ];
+
+            for (const api of timeApis) {
+                try {
+                    const response = await fetch(api);
+                    if (response.ok) {
+                        const data = await response.json();
+                        // worldtimeapi: data.datetime, timeapi.io: data.dateTime
+                        const serverTimeStr = data.datetime || data.dateTime || data.currentDateTime;
+                        const serverTime = new Date(serverTimeStr).getTime();
+                        const localTime = Date.now();
+                        systemTimeOffset = serverTime - localTime;
+                        console.log("서버 시간 동기화 완료 (" + api + ")");
+                        return; // 성공 시 종료
+                    }
+                } catch (e) {
+                    console.warn(api + " 동기화 실패:", e);
                 }
-            } catch (e) {
-                console.warn("서버 시간 동기화 실패, 로컬 시간 사용:", e);
             }
+            console.warn("모든 시간 서버 동기화 실패, 로컬 시간 사용");
         }
 
         function getTrustedNow() {
@@ -1358,18 +1374,18 @@
         });
 
         // 관리자 모드 전환 제어
-        document.getElementById('adminModeBtn').addEventListener('click', () => {
+        document.getElementById('adminModeBtn')?.addEventListener('click', () => {
             document.getElementById('userArea').classList.add('hidden');
             document.getElementById('adminArea').classList.remove('hidden');
         });
 
-        document.getElementById('exitAdminModeBtn').addEventListener('click', () => {
+        document.getElementById('exitAdminModeBtn')?.addEventListener('click', () => {
             document.getElementById('adminArea').classList.add('hidden');
             document.getElementById('userArea').classList.remove('hidden');
         });
 
         // 승인 대기 중 로그아웃
-        document.getElementById('pendingLogoutBtn').addEventListener('click', () => signOut(auth));
+        document.getElementById('pendingLogoutBtn')?.addEventListener('click', () => signOut(auth));
 
         // 관리자 탭 전환
         document.querySelectorAll('.admin-tab').forEach(tab => {
@@ -1768,7 +1784,7 @@
         });
 
         // 커넥트룸 폼 제출
-        document.getElementById('connectForm').addEventListener('submit', (e) => {
+        document.getElementById('connectForm')?.addEventListener('submit', (e) => {
             e.preventDefault();
 
             // 동행인 동의 체크 확인
@@ -1801,8 +1817,7 @@
                     e.target.reset(); // 폼 초기화
                 }
             });
-        }); // onAuthStateChanged 끝
-
+        });
         // ----------------------------------------------------------------------------------
         // 관리자 통계 로드 (오늘 기준) - 전역 함수로 분리
         // ----------------------------------------------------------------------------------
