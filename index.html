@@ -298,12 +298,130 @@
             color: var(--success);
             border: 1px solid #a7f3d0;
         }
+
+        /* 온라인 상태 경고 바 */
+        .online-warning {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            background-color: var(--danger);
+            color: white;
+            padding: 8px;
+            text-align: center;
+            font-size: 0.85rem;
+            font-weight: 600;
+            z-index: 9999;
+            display: none;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+        }
+
+        /* 모달 (개인정보 처리방침) */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 10000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(4px);
+        }
+
+        .modal-content {
+            background-color: var(--white);
+            margin: 10% auto;
+            padding: 2rem;
+            border-radius: 16px;
+            width: 90%;
+            max-width: 500px;
+            max-height: 70vh;
+            overflow-y: auto;
+            position: relative;
+            box-shadow: var(--shadow);
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+            position: sticky;
+            top: 0;
+            background: white;
+            padding-bottom: 0.5rem;
+            border-bottom: 1px solid var(--gray-light);
+        }
+
+        .close-modal {
+            font-size: 1.5rem;
+            cursor: pointer;
+            color: var(--gray-text);
+        }
+
+        /* 통계 카드 (관리자용) */
+        .admin-stat-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.75rem;
+            margin-top: 1rem;
+        }
+
+        .stat-card {
+            background: #f8fafc;
+            padding: 1rem;
+            border-radius: 12px;
+            text-align: center;
+            border: 1px solid var(--gray-light);
+        }
+
+        .stat-card h4 {
+            font-size: 0.8rem;
+            color: var(--gray-text);
+            margin-bottom: 0.25rem;
+        }
+
+        .stat-card p {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: var(--primary-dark);
+        }
     </style>
 </head>
 
 <body>
+    <!-- 온라인 상태 경고 -->
+    <div id="onlineWarning" class="online-warning">
+        <i class="fa-solid fa-circle-exclamation"></i> 오프라인 상태입니다. 인터넷 연결을 확인해주세요.
+    </div>
 
     <div class="app-bg"></div>
+
+    <!-- 개인정보 처리방침 모달 -->
+    <div id="privacyModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>개인정보 처리방침</h3>
+                <span class="close-modal" id="closePrivacyModal">&times;</span>
+            </div>
+            <div class="modal-body" style="font-size: 0.85rem; color: var(--text-color);">
+                <p><strong>1. 수집하는 개인정보 항목</strong><br>
+                    - 이름, 생년월일, 성별, 연락처, 아이디, 이용 기록</p><br>
+                <p><strong>2. 개인정보의 수집 및 이용 목적</strong><br>
+                    - 야탑 청년이봄 공간 및 시설 이용 관리<br>
+                    - 이용 통계 분석 및 서비스 개선<br>
+                    - 청년 정책 관련 정보 및 소식 안내</p><br>
+                <p><strong>3. 개인정보의 보유 및 이용 기간</strong><br>
+                    - 이용일로부터 1년간 보관 후 지체 없이 파기합니다.<br>
+                    - 단, 사용자의 요청이 있을 경우 즉시 파기합니다.</p><br>
+                <p><strong>4. 동의 거부 권리 및 불이익</strong><br>
+                    - 사용자는 개인정보 수집 및 이용에 대한 동의를 거부할 권리가 있습니다.<br>
+                    - 동의 거부 시 공간 이용 및 회원가입이 제한될 수 있습니다.</p>
+            </div>
+            <button class="btn btn-outline mt-4" id="modalConfirmBtn">확인</button>
+        </div>
+    </div>
 
     <div class="container">
         <!-- 상단 타이틀 -->
@@ -406,7 +524,9 @@
         <div id="mainSection" class="hidden">
             <div class="card mb-4" style="background: rgba(255,255,255,0.95);">
                 <div class="dashboard-header">
-                    <h3>반갑습니다, <span id="userNameDisplay">사용자</span>님</h3>
+                    <h3>반갑습니다, <span id="userNameDisplay">사용자</span>님 <span id="adminBadge" class="hidden"
+                            style="font-size: 0.7rem; background: var(--primary-dark); color: white; padding: 2px 6px; border-radius: 4px; vertical-align: middle; margin-left: 4px;">ADMIN</span>
+                    </h3>
                     <div class="d-flex align-items-center gap-2">
                         <button id="manualSyncBtn" class="btn btn-outline hidden sync-btn"
                             style="background:var(--warning); color:#fff; border:none;">
@@ -424,769 +544,840 @@
                         style="font-size: 0.75rem; padding: 2px 8px; border-radius: 20px; font-weight: 600;">
                         <!-- 인증 상태 표시 -->
                     </div>
-                </div>
-                <div id="visitAlert" class="alert alert-success mt-2 mb-0 text-center hidden"
-                    style="padding: 0.5rem; font-size: 0.8rem; display:flex; align-items:center; justify-content:center; gap:0.5rem;">
-                    <span><i class="fa-solid fa-check-circle"></i> 공간 방문 기록이 자동 제출되었습니다.</span>
-                    <button id="forceVisitBtn" type="button"
-                        style="background:#e2e8f0; border:1px solid #cbd5e0; border-radius:4px; padding:2px 8px; font-size:0.75rem; cursor:pointer; color:#4a5568;"
-                        title="디버그용: 1일 제한 무시하고 방문일지 강제 제출">🐞 강제제출</button>
-                </div>
-            </div>
-
-            <div class="card">
-                <h3 class="mb-4 text-center">시설 이용 일지 작성</h3>
-
-                <!-- 탭 네비게이션 -->
-                <div class="tabs">
-                    <div class="tab active" data-target="tab-printer">🖨️ 프린터</div>
-                    <div class="tab" data-target="tab-career">💼 커리어존</div>
-                    <div class="tab" data-target="tab-connect">🤝 커넥트룸</div>
+                    <div id="visitAlert" class="alert alert-success mt-2 mb-0 text-center hidden"
+                        style="padding: 0.5rem; font-size: 0.8rem; display:flex; align-items:center; justify-content:center; gap:0.5rem;">
+                        <span><i class="fa-solid fa-check-circle"></i> 공간 방문 기록이 자동 제출되었습니다.</span>
+                        <button id="forceVisitBtn" type="button"
+                            style="background:#e2e8f0; border:1px solid #cbd5e0; border-radius:4px; padding:2px 8px; font-size:0.75rem; cursor:pointer; color:#4a5568;"
+                            title="디버그용: 1일 제한 무시하고 방문일지 강제 제출">🐞 강제제출</button>
+                    </div>
                 </div>
 
-                <!-- 탭 콘텐츠: 프린터 -->
-                <div id="tab-printer" class="tab-content">
-                    <form id="printerForm">
-                        <div class="form-group">
-                            <label>오늘 날짜</label>
-                            <input type="text" class="form-control today-date" readonly>
+                <!-- 관리자 전용 대시보드 섹션 -->
+                <div id="adminDashboard" class="card hidden"
+                    style="border: 2px solid var(--primary-light); background: #fdfefe;">
+                    <h3 class="mb-3"><i class="fa-solid fa-chart-line"></i> 관리자 실시간 현황 (오늘)</h3>
+                    <div class="admin-stat-grid">
+                        <div class="stat-card">
+                            <h4>총 방문자</h4>
+                            <p id="statTotalVisit">0명</p>
                         </div>
-                        <div class="form-group">
-                            <label for="printerCount">출력 매수 (장)</label>
-                            <input type="number" id="printerCount" class="form-control" min="1" max="10" required>
-                            <small
-                                style="color: var(--gray-text); font-size: 0.75rem; display: block; margin-top: 0.25rem;">
-                                ※ 1회 최대 10장까지 가능 (만 20-39세 청년 대상)
-                            </small>
+                        <div class="stat-card">
+                            <h4>프린터 사용</h4>
+                            <p id="statTotalPrint">0장</p>
                         </div>
-                        <button type="submit" class="btn btn-primary mt-2 submit-btn">
-                            <span class="btn-text">제출하기</span>
-                            <div class="spinner"></div>
+                        <div class="stat-card">
+                            <h4>커리어존</h4>
+                            <p id="statTotalCareer">0건</p>
+                        </div>
+                        <div class="stat-card">
+                            <h4>커넥트룸</h4>
+                            <p id="statTotalConnect">0건</p>
+                        </div>
+                    </div>
+                    <div class="text-center mt-3">
+                        <button id="refreshStatsBtn" class="btn btn-outline"
+                            style="font-size: 0.8rem; padding: 0.4rem;">
+                            <i class="fa-solid fa-sync"></i> 통계 새로고침
                         </button>
-                        <p style="font-size: 0.7rem; color: var(--gray-text); margin-top: 0.5rem; text-align: center;">
-                            ※ 본 신청서 제출 시 개인정보 수집 및 이용에 동의하는 것으로 간주합니다.
-                        </p>
-                    </form>
+                    </div>
                 </div>
 
-                <!-- 탭 콘텐츠: 커리어존 -->
-                <div id="tab-career" class="tab-content hidden">
-                    <form id="careerForm">
-                        <div class="form-group">
-                            <label>오늘 날짜</label>
-                            <input type="text" class="form-control today-date" readonly>
-                        </div>
-                        <div class="form-group">
-                            <label for="cPlace">이용 장소</label>
-                            <select id="cPlace" class="form-control" required>
-                                <option value="">선택</option>
-                                <option value="청취Room1">청취Room1</option>
-                                <option value="청취Room2">청취Room2</option>
-                            </select>
-                        </div>
-                        <div class="row">
-                            <div class="col form-group">
-                                <label for="cStartTime">시작 시간</label>
-                                <input type="time" id="cStartTime" class="form-control" required>
-                            </div>
-                            <div class="col form-group">
-                                <label for="cEndTime">종료 시간</label>
-                                <input type="time" id="cEndTime" class="form-control" required>
-                            </div>
-                        </div>
-                        <div class="form-group">
-                            <label for="cPurpose">이용 목적</label>
-                            <input type="text" id="cPurpose" class="form-control" placeholder="예: 면접 연습, 문서 작업"
-                                required>
-                        </div>
+                <div class="card">
+                    <h3 class="mb-4 text-center">시설 이용 일지 작성</h3>
 
-                        <!-- 동반 이용자 정보 추가 섹션 -->
-                        <div class="companion-section mt-4 mb-4"
-                            style="background:#f8fafc; padding:1rem; border-radius:8px; border:1px dashed var(--gray-light);">
-                            <label style="font-weight:600; font-size:0.95rem; margin-bottom:0.8rem; display:block;">동반
-                                이용자 (대표자 본인 제외)</label>
-                            <div id="careerCompanionsList"></div>
-                            <button type="button" class="btn btn-outline" id="addCareerCompanionBtn"
-                                style="padding:0.5rem; font-size:0.85rem;">
-                                <i class="fa-solid fa-plus"></i> 이용자 추가
+                    <!-- 탭 네비게이션 -->
+                    <div class="tabs">
+                        <div class="tab active" data-target="tab-printer">🖨️ 프린터</div>
+                        <div class="tab" data-target="tab-career">💼 커리어존</div>
+                        <div class="tab" data-target="tab-connect">🤝 커넥트룸</div>
+                    </div>
+
+                    <!-- 탭 콘텐츠: 프린터 -->
+                    <div id="tab-printer" class="tab-content">
+                        <form id="printerForm">
+                            <div class="form-group">
+                                <label>오늘 날짜</label>
+                                <input type="text" class="form-control today-date" readonly>
+                            </div>
+                            <div class="form-group">
+                                <label for="printerCount">출력 매수 (장)</label>
+                                <input type="number" id="printerCount" class="form-control" min="1" max="10" required>
+                                <small
+                                    style="color: var(--gray-text); font-size: 0.75rem; display: block; margin-top: 0.25rem;">
+                                    ※ 1회 최대 10장까지 가능 (만 20-39세 청년 대상)
+                                </small>
+                            </div>
+                            <button type="submit" class="btn btn-primary mt-2 submit-btn">
+                                <span class="btn-text">제출하기</span>
+                                <div class="spinner"></div>
                             </button>
-                        </div>
+                            <p
+                                style="font-size: 0.7rem; color: var(--gray-text); margin-top: 0.5rem; text-align: center;">
+                                ※ 본 신청서 제출 시 개인정보 수집 및 이용에 동의하는 것으로 간주합니다.
+                            </p>
+                        </form>
+                    </div>
 
-                        <div class="form-group mt-3"
-                            style="background: #fff; padding: 0.5rem; border: 1px solid #e2e8f0; border-radius: 6px;">
-                            <input type="checkbox" id="careerPrivacy" required
-                                style="width: auto; margin-right: 0.5rem;">
-                            <label for="careerPrivacy" style="display: inline; font-size: 0.8rem; cursor: pointer;">
-                                동행인의 개인정보 수집 및 이용에 대해 동의를 얻었음을 확인합니다. (필수)
-                            </label>
-                        </div>
+                    <!-- 탭 콘텐츠: 커리어존 -->
+                    <div id="tab-career" class="tab-content hidden">
+                        <form id="careerForm">
+                            <div class="form-group">
+                                <label>오늘 날짜</label>
+                                <input type="text" class="form-control today-date" readonly>
+                            </div>
+                            <div class="form-group">
+                                <label for="cPlace">이용 장소</label>
+                                <select id="cPlace" class="form-control" required>
+                                    <option value="">선택</option>
+                                    <option value="청취Room1">청취Room1</option>
+                                    <option value="청취Room2">청취Room2</option>
+                                </select>
+                            </div>
+                            <div class="row">
+                                <div class="col form-group">
+                                    <label for="cStartTime">시작 시간</label>
+                                    <input type="time" id="cStartTime" class="form-control" required>
+                                </div>
+                                <div class="col form-group">
+                                    <label for="cEndTime">종료 시간</label>
+                                    <input type="time" id="cEndTime" class="form-control" required>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="cPurpose">이용 목적</label>
+                                <input type="text" id="cPurpose" class="form-control" placeholder="예: 면접 연습, 문서 작업"
+                                    required>
+                            </div>
 
-                        <button type="submit" class="btn btn-primary mt-2 submit-btn">
-                            <span class="btn-text">제출하기</span>
-                            <div class="spinner"></div>
-                        </button>
-                        <p style="font-size: 0.7rem; color: var(--gray-text); margin-top: 0.5rem; text-align: center;">
-                            ※ 본 신청서 제출 시 개인정보 수집 및 이용에 동의하는 것으로 간주합니다.
-                        </p>
+                            <!-- 동반 이용자 정보 추가 섹션 -->
+                            <div class="companion-section mt-4 mb-4"
+                                style="background:#f8fafc; padding:1rem; border-radius:8px; border:1px dashed var(--gray-light);">
+                                <label
+                                    style="font-weight:600; font-size:0.95rem; margin-bottom:0.8rem; display:block;">동반
+                                    이용자 (대표자 본인 제외)</label>
+                                <div id="careerCompanionsList"></div>
+                                <button type="button" class="btn btn-outline" id="addCareerCompanionBtn"
+                                    style="padding:0.5rem; font-size:0.85rem;">
+                                    <i class="fa-solid fa-plus"></i> 이용자 추가
+                                </button>
+                            </div>
+
+                            <div class="form-group mt-3"
+                                style="background: #fff; padding: 0.5rem; border: 1px solid #e2e8f0; border-radius: 6px;">
+                                <input type="checkbox" id="careerPrivacy" required
+                                    style="width: auto; margin-right: 0.5rem;">
+                                <label for="careerPrivacy" style="display: inline; font-size: 0.8rem; cursor: pointer;">
+                                    동행인의 개인정보 수집 및 이용에 대해 동의를 얻었음을 확인합니다. (필수)
+                                </label>
+                            </div>
+
+                            <button type="submit" class="btn btn-primary mt-2 submit-btn">
+                                <span class="btn-text">제출하기</span>
+                                <div class="spinner"></div>
+                            </button>
+                            <p
+                                style="font-size: 0.7rem; color: var(--gray-text); margin-top: 0.5rem; text-align: center;">
+                                ※ 본 신청서 제출 시 개인정보 수집 및 이용에 동의하는 것으로 간주합니다.
+                            </p>
+                    </div>
+
+                    <!-- 탭 콘텐츠: 커넥트룸 -->
+                    <div id="tab-connect" class="tab-content hidden">
+                        <form id="connectForm">
+                            <div class="form-group">
+                                <label>오늘 날짜</label>
+                                <input type="text" class="form-control today-date" readonly>
+                            </div>
+                            <div class="row">
+                                <div class="col form-group">
+                                    <label for="rStartTime">시작 시간</label>
+                                    <input type="time" id="rStartTime" class="form-control" required>
+                                </div>
+                                <div class="col form-group">
+                                    <label for="rEndTime">종료 시간</label>
+                                    <input type="time" id="rEndTime" class="form-control" required>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="rPurpose">이용 목적</label>
+                                <input type="text" id="rPurpose" class="form-control" placeholder="예: 스터디 모임, 회의"
+                                    required>
+                            </div>
+
+                            <!-- 동반 이용자 정보 추가 섹션 -->
+                            <div class="companion-section mt-4 mb-4"
+                                style="background:#f8fafc; padding:1rem; border-radius:8px; border:1px dashed var(--gray-light);">
+                                <label
+                                    style="font-weight:600; font-size:0.95rem; margin-bottom:0.8rem; display:block;">동반
+                                    이용자 (대표자 본인 제외)</label>
+                                <div id="connectCompanionsList"></div>
+                                <button type="button" class="btn btn-outline" id="addConnectCompanionBtn"
+                                    style="padding:0.5rem; font-size:0.85rem;">
+                                    <i class="fa-solid fa-plus"></i> 이용자 추가
+                                </button>
+                            </div>
+
+                            <div class="form-group mt-3"
+                                style="background: #fff; padding: 0.5rem; border: 1px solid #e2e8f0; border-radius: 6px;">
+                                <input type="checkbox" id="connectPrivacy" required
+                                    style="width: auto; margin-right: 0.5rem;">
+                                <label for="connectPrivacy"
+                                    style="display: inline; font-size: 0.8rem; cursor: pointer;">
+                                    동행인의 개인정보 수집 및 이용에 대해 동의를 얻었음을 확인합니다. (필수)
+                                </label>
+                            </div>
+
+                            <button type="submit" class="btn btn-primary mt-2 submit-btn">
+                                <span class="btn-text">제출하기</span>
+                                <div class="spinner"></div>
+                            </button>
+                            <p
+                                style="font-size: 0.7rem; color: var(--gray-text); margin-top: 0.5rem; text-align: center;">
+                                ※ 본 신청서 제출 시 개인정보 수집 및 이용에 동의하는 것으로 간주합니다.
+                            </p>
+                        </form>
+                    </div>
                 </div>
 
-                <!-- 탭 콘텐츠: 커넥트룸 -->
-                <div id="tab-connect" class="tab-content hidden">
-                    <form id="connectForm">
-                        <div class="form-group">
-                            <label>오늘 날짜</label>
-                            <input type="text" class="form-control today-date" readonly>
-                        </div>
-                        <div class="row">
-                            <div class="col form-group">
-                                <label for="rStartTime">시작 시간</label>
-                                <input type="time" id="rStartTime" class="form-control" required>
-                            </div>
-                            <div class="col form-group">
-                                <label for="rEndTime">종료 시간</label>
-                                <input type="time" id="rEndTime" class="form-control" required>
-                            </div>
-                        </div>
-                        <div class="form-group">
-                            <label for="rPurpose">이용 목적</label>
-                            <input type="text" id="rPurpose" class="form-control" placeholder="예: 스터디 모임, 회의" required>
-                        </div>
-
-                        <!-- 동반 이용자 정보 추가 섹션 -->
-                        <div class="companion-section mt-4 mb-4"
-                            style="background:#f8fafc; padding:1rem; border-radius:8px; border:1px dashed var(--gray-light);">
-                            <label style="font-weight:600; font-size:0.95rem; margin-bottom:0.8rem; display:block;">동반
-                                이용자 (대표자 본인 제외)</label>
-                            <div id="connectCompanionsList"></div>
-                            <button type="button" class="btn btn-outline" id="addConnectCompanionBtn"
-                                style="padding:0.5rem; font-size:0.85rem;">
-                                <i class="fa-solid fa-plus"></i> 이용자 추가
-                            </button>
-                        </div>
-
-                        <div class="form-group mt-3"
-                            style="background: #fff; padding: 0.5rem; border: 1px solid #e2e8f0; border-radius: 6px;">
-                            <input type="checkbox" id="connectPrivacy" required
-                                style="width: auto; margin-right: 0.5rem;">
-                            <label for="connectPrivacy" style="display: inline; font-size: 0.8rem; cursor: pointer;">
-                                동행인의 개인정보 수집 및 이용에 대해 동의를 얻었음을 확인합니다. (필수)
-                            </label>
-                        </div>
-
-                        <button type="submit" class="btn btn-primary mt-2 submit-btn">
-                            <span class="btn-text">제출하기</span>
-                            <div class="spinner"></div>
-                        </button>
-                        <p style="font-size: 0.7rem; color: var(--gray-text); margin-top: 0.5rem; text-align: center;">
-                            ※ 본 신청서 제출 시 개인정보 수집 및 이용에 동의하는 것으로 간주합니다.
-                        </p>
-                    </form>
+                <!-- 푸터 및 약관 링크 -->
+                <div class="text-center mt-4 mb-4">
+                    <a href="#" class="open-privacy-modal"
+                        style="font-size: 0.8rem; color: var(--gray-text); text-decoration: underline;">개인정보 처리방침</a>
+                    <p style="font-size: 0.75rem; color: #cbd5e0; margin-top: 0.5rem;">&copy; 2026 야탑 청년이봄. All rights
+                        reserved.</p>
                 </div>
             </div>
         </div>
-    </div>
 
-    <!-- Firebase SDK & Logic Scripts (To be added) -->
-    <script type="module">
-        // ----------------------------------------------------------------------------------
-        // [필수] Firebase 설정 및 초기화 (임시 설정값 - 실제 키로 교체 필요)
-        // ----------------------------------------------------------------------------------
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-        import {
-            getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword,
-            signOut, onAuthStateChanged, updateProfile
-        } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-        import {
-            getFirestore, doc, setDoc, getDoc, collection, addDoc, serverTimestamp
-        } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        <!-- Firebase SDK & Logic Scripts (To be added) -->
+        <script type="module">
+            // ----------------------------------------------------------------------------------
+            // [필수] Firebase 설정 및 초기화 (임시 설정값 - 실제 키로 교체 필요)
+            // ----------------------------------------------------------------------------------
+            import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+            import {
+                getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword,
+                signOut, onAuthStateChanged, updateProfile
+            } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+            import {
+                getFirestore, doc, setDoc, getDoc, collection, addDoc, serverTimestamp
+            } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-        // TODO: Firebase 콘솔에서 발급받은 실제 설정값으로 변경하세요
-        const firebaseConfig = {
-            apiKey: "AIzaSyAy03-w2n--iLVEtHN7rrunSTHK_HoChK4",
-            authDomain: "yatap-footcenter.firebaseapp.com",
-            databaseURL: "https://yatap-footcenter-default-rtdb.firebaseio.com",
-            projectId: "yatap-footcenter",
-            storageBucket: "yatap-footcenter.firebasestorage.app",
-            messagingSenderId: "484534753683",
-            appId: "1:484534753683:web:bb9b68b44fdd40c83d7066",
-            measurementId: "G-J6WK1LWR5D"
-        };
+            // TODO: Firebase 콘솔에서 발급받은 실제 설정값으로 변경하세요
+            const firebaseConfig = {
+                apiKey: "AIzaSyAy03-w2n--iLVEtHN7rrunSTHK_HoChK4",
+                authDomain: "yatap-footcenter.firebaseapp.com",
+                databaseURL: "https://yatap-footcenter-default-rtdb.firebaseio.com",
+                projectId: "yatap-footcenter",
+                storageBucket: "yatap-footcenter.firebasestorage.app",
+                messagingSenderId: "484534753683",
+                appId: "1:484534753683:web:bb9b68b44fdd40c83d7066",
+                measurementId: "G-J6WK1LWR5D"
+            };
 
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
+            const app = initializeApp(firebaseConfig);
+            const auth = getAuth(app);
+            const db = getFirestore(app);
 
-        // ----------------------------------------------------------------------------------
-        // [신규] 서버 시간 동기화 및 신뢰할 수 있는 시간 제공
-        // ----------------------------------------------------------------------------------
-        let systemTimeOffset = 0;
+            // ----------------------------------------------------------------------------------
+            // [신규] 서버 시간 동기화 및 신뢰할 수 있는 시간 제공
+            // ----------------------------------------------------------------------------------
+            let systemTimeOffset = 0;
 
-        async function syncSystemTime() {
-            try {
-                // WorldTimeAPI 사용 (fallback 포함)
-                const response = await fetch('https://worldtimeapi.org/api/timezone/Asia/Seoul');
-                if (response.ok) {
-                    const data = await response.json();
-                    const serverTime = new Date(data.datetime).getTime();
-                    const localTime = Date.now();
-                    systemTimeOffset = serverTime - localTime;
-                    console.log("서버 시간 동기화 완료 (오차: " + systemTimeOffset + "ms)");
+            async function syncSystemTime() {
+                try {
+                    // WorldTimeAPI 사용 (fallback 포함)
+                    const response = await fetch('https://worldtimeapi.org/api/timezone/Asia/Seoul');
+                    if (response.ok) {
+                        const data = await response.json();
+                        const serverTime = new Date(data.datetime).getTime();
+                        const localTime = Date.now();
+                        systemTimeOffset = serverTime - localTime;
+                        console.log("서버 시간 동기화 완료 (오차: " + systemTimeOffset + "ms)");
+                    }
+                } catch (e) {
+                    console.warn("서버 시간 동기화 실패, 로컬 시간 사용:", e);
                 }
-            } catch (e) {
-                console.warn("서버 시간 동기화 실패, 로컬 시간 사용:", e);
             }
-        }
 
-        function getTrustedNow() {
-            return new Date(Date.now() + systemTimeOffset);
-        }
+            function getTrustedNow() {
+                return new Date(Date.now() + systemTimeOffset);
+            }
 
-        // ----------------------------------------------------------------------------------
-        // [필수] Google Apps Script 웹 앱 URL
-        // ----------------------------------------------------------------------------------
-        // TODO: apps_script.js 배포 후 생성된 URL을 입력하세요.
-        const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzBi8nteTyhfIURb3f6YyWHYBexi8mEpq1IHnUu7YjoR7_YXyDKIe39C3_SD-6UZK1UYw/exec";
+            // ----------------------------------------------------------------------------------
+            // [필수] Google Apps Script 웹 앱 URL
+            // ----------------------------------------------------------------------------------
+            // TODO: apps_script.js 배포 후 생성된 URL을 입력하세요.
+            const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzBi8nteTyhfIURb3f6YyWHYBexi8mEpq1IHnUu7YjoR7_YXyDKIe39C3_SD-6UZK1UYw/exec";
 
-        // 사용자 상태 변수
-        let currentUserData = null;
-        let logoutTimer = null;
+            // 사용자 상태 변수
+            let currentUserData = null;
+            let logoutTimer = null;
 
-        // UI 요소
-        const authSection = document.getElementById('authSection');
-        const mainSection = document.getElementById('mainSection');
-        const loginView = document.getElementById('loginView');
-        const signupView = document.getElementById('signupView');
-        const showSignupBtn = document.getElementById('showSignupBtn');
-        const showLoginBtn = document.getElementById('showLoginBtn');
-        const userNameDisplay = document.getElementById('userNameDisplay');
-        const timeRemainingDisplay = document.getElementById('timeRemaining');
-        const logoutActionBtn = document.getElementById('logoutActionBtn');
+            // UI 요소
+            const authSection = document.getElementById('authSection');
+            const mainSection = document.getElementById('mainSection');
+            const loginView = document.getElementById('loginView');
+            const signupView = document.getElementById('signupView');
+            const showSignupBtn = document.getElementById('showSignupBtn');
+            const showLoginBtn = document.getElementById('showLoginBtn');
+            const userNameDisplay = document.getElementById('userNameDisplay');
+            const timeRemainingDisplay = document.getElementById('timeRemaining');
+            const logoutActionBtn = document.getElementById('logoutActionBtn');
 
-        // 알림 함수
-        function showAlert(elementId, message, type = 'error') {
-            const el = document.getElementById(elementId);
-            el.textContent = message;
-            el.className = `alert alert-${type}`;
-            el.classList.remove('hidden');
-            setTimeout(() => el.classList.add('hidden'), 5000);
-        }
+            // 알림 함수
+            function showAlert(elementId, message, type = 'error') {
+                const el = document.getElementById(elementId);
+                el.textContent = message;
+                el.className = `alert alert-${type}`;
+                el.classList.remove('hidden');
+                setTimeout(() => el.classList.add('hidden'), 5000);
+            }
 
-        // 로딩 스피너 및 버튼 텍스트 제어
-        function toggleLoading(btnId, isLoading) {
-            const btn = document.getElementById(btnId);
-            if (!btn) return;
-            const btnText = btn.querySelector('.btn-text');
-            const spinner = btn.querySelector('.spinner');
+            // 로딩 스피너 및 버튼 텍스트 제어
+            function toggleLoading(btnId, isLoading) {
+                const btn = document.getElementById(btnId);
+                if (!btn) return;
+                const btnText = btn.querySelector('.btn-text');
+                const spinner = btn.querySelector('.spinner');
 
-            if (isLoading) {
-                btn.disabled = true;
-                if (btnText) {
-                    btn.setAttribute('data-original-text', btnText.textContent);
-                    btnText.textContent = '처리 중...';
+                if (isLoading) {
+                    btn.disabled = true;
+                    if (btnText) {
+                        btn.setAttribute('data-original-text', btnText.textContent);
+                        btnText.textContent = '처리 중...';
+                    }
+                    if (spinner) spinner.style.display = 'block';
+                } else {
+                    btn.disabled = false;
+                    if (btnText) {
+                        const originalText = btn.getAttribute('data-original-text');
+                        if (originalText) btnText.textContent = originalText;
+                    }
+                    if (spinner) spinner.style.display = 'none';
                 }
-                if (spinner) spinner.style.display = 'block';
-            } else {
-                btn.disabled = false;
-                if (btnText) {
-                    const originalText = btn.getAttribute('data-original-text');
-                    if (originalText) btnText.textContent = originalText;
+            }
+
+            // ----------------------------------------------------------------------------------
+            // [추가] 현장 방문 인증 로직 (QR 코드 기반)
+            // ----------------------------------------------------------------------------------
+            function checkSiteAccessAuth() {
+                // 0. 관리자인 경우 QR 인증 무시
+                if (currentUserData && currentUserData.role === 'admin') {
+                    updateAuthUI(true);
+                    return true;
                 }
-                if (spinner) spinner.style.display = 'none';
+
+                const urlParams = new URLSearchParams(window.location.search);
+                const authCode = urlParams.get('auth');
+                const todayStr = getTrustedNow().toLocaleDateString('en-CA');
+                const badge = document.getElementById('siteAuthBadge');
+
+                // 1. URL 파라미터로 명시적으로 인증 시도 시
+                if (authCode === 'yatap') {
+                    localStorage.setItem('lastVerifiedDate', todayStr);
+                    // 주소창 세척 (파라미터 제거)
+                    const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname;
+                    window.history.replaceState({ path: newUrl }, '', newUrl);
+                    updateAuthUI(true);
+                    return true;
+                }
+
+                // 2. 저장된 인증 정보 확인
+                const lastVerifiedDate = localStorage.getItem('lastVerifiedDate');
+                const isVerified = lastVerifiedDate === todayStr;
+                updateAuthUI(isVerified);
+                return isVerified;
             }
-        }
 
-        // ----------------------------------------------------------------------------------
-        // [추가] 현장 방문 인증 로직 (QR 코드 기반)
-        // ----------------------------------------------------------------------------------
-        function checkSiteAccessAuth() {
-            const urlParams = new URLSearchParams(window.location.search);
-            const authCode = urlParams.get('auth');
-            const todayStr = getTrustedNow().toLocaleDateString('en-CA');
-            const badge = document.getElementById('siteAuthBadge');
-
-            // 1. URL 파라미터로 명시적으로 인증 시도 시
-            if (authCode === 'yatap') {
-                localStorage.setItem('lastVerifiedDate', todayStr);
-                // 주소창 세척 (파라미터 제거)
-                const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname;
-                window.history.replaceState({ path: newUrl }, '', newUrl);
-                updateAuthUI(true);
-                return true;
+            function updateAuthUI(isVerified) {
+                const badge = document.getElementById('siteAuthBadge');
+                if (!badge) return;
+                if (isVerified) {
+                    badge.innerHTML = '<i class="fa-solid fa-location-dot"></i> 현장인증 완료';
+                    badge.style.backgroundColor = '#ecfdf5';
+                    badge.style.color = '#10b981';
+                    badge.style.border = '1px solid #a7f3d0';
+                } else {
+                    badge.innerHTML = '<i class="fa-solid fa-circle-exclamation"></i> 현장인증 필요';
+                    badge.style.backgroundColor = '#fff7ed';
+                    badge.style.color = '#f97316';
+                    badge.style.border = '1px solid #ffedd5';
+                }
             }
 
-            // 2. 저장된 인증 정보 확인
-            const lastVerifiedDate = localStorage.getItem('lastVerifiedDate');
-            const isVerified = lastVerifiedDate === todayStr;
-            updateAuthUI(isVerified);
-            return isVerified;
-        }
+            // 페이지 로드 시 즉시 실행
+            const isSiteVerified = checkSiteAccessAuth();
 
-        function updateAuthUI(isVerified) {
-            const badge = document.getElementById('siteAuthBadge');
-            if (!badge) return;
-            if (isVerified) {
-                badge.innerHTML = '<i class="fa-solid fa-location-dot"></i> 현장인증 완료';
-                badge.style.backgroundColor = '#ecfdf5';
-                badge.style.color = '#10b981';
-                badge.style.border = '1px solid #a7f3d0';
-            } else {
-                badge.innerHTML = '<i class="fa-solid fa-circle-exclamation"></i> 현장인증 필요';
-                badge.style.backgroundColor = '#fff7ed';
-                badge.style.color = '#f97316';
-                badge.style.border = '1px solid #ffedd5';
+            // 생년월일로 만 나이 계산
+            function calcAge(birthStr) {
+                if (!birthStr) return '';
+                const birth = new Date(birthStr);
+                const today = getTrustedNow();
+                let age = today.getFullYear() - birth.getFullYear();
+                const m = today.getMonth() - birth.getMonth();
+                if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) {
+                    age--;
+                }
+                return String(age);
             }
-        }
 
-        // 페이지 로드 시 즉시 실행
-        const isSiteVerified = checkSiteAccessAuth();
-
-        // 생년월일로 만 나이 계산
-        function calcAge(birthStr) {
-            if (!birthStr) return '';
-            const birth = new Date(birthStr);
-            const today = getTrustedNow();
-            let age = today.getFullYear() - birth.getFullYear();
-            const m = today.getMonth() - birth.getMonth();
-            if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) {
-                age--;
-            }
-            return String(age);
-        }
-
-        // ----------------------------------------------------------------------------------
-        // UI 로직 (탭, 전환 등)
-        // ----------------------------------------------------------------------------------
-        showSignupBtn.addEventListener('click', (e) => {
-            e.preventDefault();
-            loginView.classList.add('hidden');
-            signupView.classList.remove('hidden');
-        });
-
-        showLoginBtn.addEventListener('click', () => {
-            signupView.classList.add('hidden');
-            loginView.classList.remove('hidden');
-        });
-
-        const tabs = document.querySelectorAll('.tab');
-        const tabContents = document.querySelectorAll('.tab-content');
-        tabs.forEach(tab => {
-            tab.addEventListener('click', () => {
-                tabs.forEach(t => t.classList.remove('active'));
-                tab.classList.add('active');
-                const targetId = tab.getAttribute('data-target');
-                tabContents.forEach(content => content.classList.add('hidden'));
-                document.getElementById(targetId).classList.remove('hidden');
+            // ----------------------------------------------------------------------------------
+            // UI 로직 (탭, 전환 등)
+            // ----------------------------------------------------------------------------------
+            showSignupBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                loginView.classList.add('hidden');
+                signupView.classList.remove('hidden');
             });
-        });
 
-        // 오늘 날짜 필드 자동 완성
-        async function initializeDateFields() {
-            await syncSystemTime(); // 시간 동기화 먼저 수행
-            const today = getTrustedNow();
-            const dateString = today.toLocaleDateString('en-CA');
-            document.querySelectorAll('.today-date').forEach(el => {
-                el.value = dateString;
+            showLoginBtn.addEventListener('click', () => {
+                signupView.classList.add('hidden');
+                loginView.classList.remove('hidden');
             });
-        }
-        initializeDateFields();
 
-        // ----------------------------------------------------------------------------------
-        // 자동 로그아웃 (자정) 및 카운트다운 로직
-        // ----------------------------------------------------------------------------------
-        function startLogoutTimer() {
-            if (logoutTimer) clearInterval(logoutTimer);
+            const tabs = document.querySelectorAll('.tab');
+            const tabContents = document.querySelectorAll('.tab-content');
+            tabs.forEach(tab => {
+                tab.addEventListener('click', () => {
+                    tabs.forEach(t => t.classList.remove('active'));
+                    tab.classList.add('active');
+                    const targetId = tab.getAttribute('data-target');
+                    tabContents.forEach(content => content.classList.add('hidden'));
+                    document.getElementById(targetId).classList.remove('hidden');
+                });
+            });
 
-            logoutTimer = setInterval(() => {
-                const now = getTrustedNow();
-                const target = getTrustedNow();
-                target.setHours(23, 59, 0, 0); // 자정(23:59)
+            // 오늘 날짜 필드 자동 완성
+            async function initializeDateFields() {
+                await syncSystemTime(); // 시간 동기화 먼저 수행
+                const today = getTrustedNow();
+                const dateString = today.toLocaleDateString('en-CA');
+                document.querySelectorAll('.today-date').forEach(el => {
+                    el.value = dateString;
+                });
+            }
+            initializeDateFields();
 
-                // 만약 현재 시간이 23:59:00 이후라면 바로 로그아웃
-                if (now.getTime() >= target.getTime()) {
-                    clearInterval(logoutTimer);
-                    signOut(auth);
-                    return;
-                }
+            // ----------------------------------------------------------------------------------
+            // 자동 로그아웃 (자정) 및 카운트다운 로직
+            // ----------------------------------------------------------------------------------
+            function startLogoutTimer() {
+                if (logoutTimer) clearInterval(logoutTimer);
 
-                // 남은 시간 계산 및 표시
-                const diff = target.getTime() - now.getTime();
-                const hours = Math.floor(diff / (1000 * 60 * 60));
-                const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-                const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+                logoutTimer = setInterval(() => {
+                    const now = getTrustedNow();
+                    const target = getTrustedNow();
+                    target.setHours(23, 59, 0, 0); // 자정(23:59)
 
-                timeRemainingDisplay.textContent = `(${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')})`;
-            }, 1000);
-        }
+                    // 만약 현재 시간이 23:59:00 이후라면 바로 로그아웃
+                    if (now.getTime() >= target.getTime()) {
+                        clearInterval(logoutTimer);
+                        signOut(auth);
+                        return;
+                    }
 
-        // ----------------------------------------------------------------------------------
-        // Google Sheets 및 Firebase 데이터 전송 공통 로직
-        // ----------------------------------------------------------------------------------
-        async function submitRecord(type, data, btnId, isRetry = false) {
-            // [추가] 현장 인증 여부 최종 확인
-            const todayStr = getTrustedNow().toLocaleDateString('en-CA');
-            if (localStorage.getItem('lastVerifiedDate') !== todayStr) {
-                alert('현장 방문 인증이 필요합니다. 센터 내 비치된 QR 코드를 찍어주세요.');
-                updateAuthUI(false);
-                return false;
+                    // 남은 시간 계산 및 표시
+                    const diff = target.getTime() - now.getTime();
+                    const hours = Math.floor(diff / (1000 * 60 * 60));
+                    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+                    const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+
+                    timeRemainingDisplay.textContent = `(${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')})`;
+                }, 1000);
             }
 
-            if (btnId) toggleLoading(btnId, true);
+            // ----------------------------------------------------------------------------------
+            // Google Sheets 및 Firebase 데이터 전송 공통 로직
+            // ----------------------------------------------------------------------------------
+            async function submitRecord(type, data, btnId, isRetry = false) {
+                // [추가] 현장 인증 여부 최종 확인
+                const todayStr = getTrustedNow().toLocaleDateString('en-CA');
+                const isVerified = (localStorage.getItem('lastVerifiedDate') === todayStr);
+                const isAdmin = (currentUserData && currentUserData.role === 'admin');
 
-            // 1. Google Sheets 로 전송 시도
-            let sheetSuccess = false;
-            try {
-                if (GOOGLE_SCRIPT_URL && GOOGLE_SCRIPT_URL.includes("script.google.com")) {
-                    await fetch(GOOGLE_SCRIPT_URL, {
-                        method: 'POST',
-                        mode: 'no-cors',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ type: type, data: data })
-                    });
-                    sheetSuccess = true;
+                if (!isVerified && !isAdmin) {
+                    alert('현장 방문 인증이 필요합니다. 센터 내 비치된 QR 코드를 찍어주세요.');
+                    updateAuthUI(false);
+                    return false;
                 }
-            } catch (error) {
-                console.error("GSheet 전송 실패:", error);
+
+                if (btnId) toggleLoading(btnId, true);
+
+                // 1. Google Sheets 로 전송 시도
+                let sheetSuccess = false;
+                try {
+                    if (GOOGLE_SCRIPT_URL && GOOGLE_SCRIPT_URL.includes("script.google.com")) {
+                        await fetch(GOOGLE_SCRIPT_URL, {
+                            method: 'POST',
+                            mode: 'no-cors',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ type: type, data: data })
+                        });
+                        sheetSuccess = true;
+                    }
+                } catch (error) {
+                    console.error("GSheet 전송 실패:", error);
+                }
+
+                // 2. Firebase Firestore 에 백업 저장 (항상 수행)
+                let firebaseSuccess = false;
+                try {
+                    if (currentUserData) {
+                        const logEntry = {
+                            ...data,
+                            userName: currentUserData.name,
+                            userId: currentUserData.uid,
+                            type: type,
+                            timestamp: serverTimestamp()
+                        };
+
+                        // 1) 사용자별 경로에 저장
+                        await addDoc(collection(db, "records", currentUserData.uid, type), logEntry);
+
+                        // 2) 전체 통합 경로에 저장 (관리자 확인용)
+                        await addDoc(collection(db, "all_logs"), logEntry);
+
+                        firebaseSuccess = true;
+                    }
+                } catch (error) {
+                    console.error("Firebase 저장 실패:", error);
+                }
+
+                // 3. 만약 시트 전송에 실패했다면 LocalStorage에 저장하여 나중에 수동 동기화 가능하게 함
+                if (!sheetSuccess && !isRetry) {
+                    const pending = JSON.parse(localStorage.getItem('pendingRecords') || '[]');
+                    pending.push({ type, data, timestamp: getTrustedNow().toISOString() });
+                    localStorage.setItem('pendingRecords', JSON.stringify(pending));
+                    updateSyncUI();
+                    if (!isRetry) alert('현재 네트워크가 불안정하여 구글 시트 전송에 실패했습니다. 데이터는 브라우저에 임시 저장되었으며, 나중에 수동 동기화가 가능합니다.');
+                }
+
+                if (sheetSuccess && !isRetry) {
+                    alert('일지가 성공적으로 제출되었습니다.');
+                }
+
+                if (btnId) toggleLoading(btnId, false);
+
+                // 성공 시 UI 처리 (폼 초기화 등)
+                if ((sheetSuccess || firebaseSuccess) && !isRetry) {
+                    if (btnId && btnId !== 'loginBtn') {
+                        const form = document.getElementById(btnId).closest('form');
+                        if (form) form.reset();
+                        document.querySelectorAll('.today-date').forEach(el => el.value = dateString);
+                    }
+                }
+                return sheetSuccess;
             }
 
-            // 2. Firebase Firestore 에 백업 저장 (항상 수행)
-            let firebaseSuccess = false;
-            try {
-                if (currentUserData) {
-                    const logEntry = {
-                        ...data,
-                        userName: currentUserData.name,
-                        userId: currentUserData.uid,
-                        type: type,
-                        timestamp: serverTimestamp()
-                    };
-
-                    // 1) 사용자별 경로에 저장
-                    await addDoc(collection(db, "records", currentUserData.uid, type), logEntry);
-
-                    // 2) 전체 통합 경로에 저장 (관리자 확인용)
-                    await addDoc(collection(db, "all_logs"), logEntry);
-
-                    firebaseSuccess = true;
-                }
-            } catch (error) {
-                console.error("Firebase 저장 실패:", error);
-            }
-
-            // 3. 만약 시트 전송에 실패했다면 LocalStorage에 저장하여 나중에 수동 동기화 가능하게 함
-            if (!sheetSuccess && !isRetry) {
+            // 수동 동기화 UI 업데이트 및 로직
+            function updateSyncUI() {
                 const pending = JSON.parse(localStorage.getItem('pendingRecords') || '[]');
-                pending.push({ type, data, timestamp: getTrustedNow().toISOString() });
-                localStorage.setItem('pendingRecords', JSON.stringify(pending));
+                const syncBtn = document.getElementById('manualSyncBtn');
+                if (pending.length > 0) {
+                    syncBtn.classList.remove('hidden');
+                    syncBtn.innerHTML = `<i class="fa-solid fa-arrows-rotate"></i> 미동기화 ${pending.length}건 전송`;
+                } else {
+                    syncBtn.classList.add('hidden');
+                }
+            }
+
+            async function retryPendingRecords() {
+                const pending = JSON.parse(localStorage.getItem('pendingRecords') || '[]');
+                if (pending.length === 0) return;
+
+                toggleLoading('manualSyncBtn', true);
+                const stillPending = [];
+
+                for (const record of pending) {
+                    const success = await submitRecord(record.type, record.data, null, true);
+                    if (!success) {
+                        stillPending.push(record);
+                    }
+                }
+
+                localStorage.setItem('pendingRecords', JSON.stringify(stillPending));
                 updateSyncUI();
-                if (!isRetry) alert('현재 네트워크가 불안정하여 구글 시트 전송에 실패했습니다. 데이터는 브라우저에 임시 저장되었으며, 나중에 수동 동기화가 가능합니다.');
-            }
+                toggleLoading('manualSyncBtn', false);
 
-            if (sheetSuccess && !isRetry) {
-                alert('일지가 성공적으로 제출되었습니다.');
-            }
-
-            if (btnId) toggleLoading(btnId, false);
-
-            // 성공 시 UI 처리 (폼 초기화 등)
-            if ((sheetSuccess || firebaseSuccess) && !isRetry) {
-                if (btnId && btnId !== 'loginBtn') {
-                    const form = document.getElementById(btnId).closest('form');
-                    if (form) form.reset();
-                    document.querySelectorAll('.today-date').forEach(el => el.value = dateString);
-                }
-            }
-            return sheetSuccess;
-        }
-
-        // 수동 동기화 UI 업데이트 및 로직
-        function updateSyncUI() {
-            const pending = JSON.parse(localStorage.getItem('pendingRecords') || '[]');
-            const syncBtn = document.getElementById('manualSyncBtn');
-            if (pending.length > 0) {
-                syncBtn.classList.remove('hidden');
-                syncBtn.innerHTML = `<i class="fa-solid fa-arrows-rotate"></i> 미동기화 ${pending.length}건 전송`;
-            } else {
-                syncBtn.classList.add('hidden');
-            }
-        }
-
-        async function retryPendingRecords() {
-            const pending = JSON.parse(localStorage.getItem('pendingRecords') || '[]');
-            if (pending.length === 0) return;
-
-            toggleLoading('manualSyncBtn', true);
-            const stillPending = [];
-
-            for (const record of pending) {
-                const success = await submitRecord(record.type, record.data, null, true);
-                if (!success) {
-                    stillPending.push(record);
+                if (stillPending.length === 0) {
+                    alert('모든 데이터가 구글 시트에 성공적으로 동기화되었습니다!');
+                } else {
+                    alert(`${stillPending.length}건의 데이터 전통이 여전히 실패했습니다. 네트워크를 확인해주세요.`);
                 }
             }
 
-            localStorage.setItem('pendingRecords', JSON.stringify(stillPending));
-            updateSyncUI();
-            toggleLoading('manualSyncBtn', false);
+            document.getElementById('manualSyncBtn')?.addEventListener('click', retryPendingRecords);
 
-            if (stillPending.length === 0) {
-                alert('모든 데이터가 구글 시트에 성공적으로 동기화되었습니다!');
-            } else {
-                alert(`${stillPending.length}건의 데이터 전통이 여전히 실패했습니다. 네트워크를 확인해주세요.`);
-            }
-        }
+            // 디버그: 방문일지 강제 제출 (1일 제한 무시)
+            document.getElementById('forceVisitBtn')?.addEventListener('click', () => {
+                if (!currentUserData) { alert('로그인이 필요합니다.'); return; }
+                submitRecord('visit', {
+                    name: currentUserData.name,
+                    gender: currentUserData.gender,
+                    age: currentUserData.age
+                }, null);
+            });
 
-        document.getElementById('manualSyncBtn')?.addEventListener('click', retryPendingRecords);
+            // ----------------------------------------------------------------------------------
+            // [수정] 방문 기록 제출 체크 함수 (자정 이후 첫 접속/활동 시 제출 보장)
+            // ----------------------------------------------------------------------------------
+            async function checkAndSubmitDailyVisit(user) {
+                if (!user || !currentUserData) return;
 
-        // 디버그: 방문일지 강제 제출 (1일 제한 무시)
-        document.getElementById('forceVisitBtn')?.addEventListener('click', () => {
-            if (!currentUserData) { alert('로그인이 필요합니다.'); return; }
-            submitRecord('visit', {
-                name: currentUserData.name,
-                gender: currentUserData.gender,
-                age: currentUserData.age
-            }, null);
-        });
+                const todayStr = getTrustedNow().toLocaleDateString('en-CA'); // YYYY-MM-DD
+                const visitDocRef = doc(db, "users", user.uid, "visitLog", todayStr);
 
-        // ----------------------------------------------------------------------------------
-        // [수정] 방문 기록 제출 체크 함수 (자정 이후 첫 접속/활동 시 제출 보장)
-        // ----------------------------------------------------------------------------------
-        async function checkAndSubmitDailyVisit(user) {
-            if (!user || !currentUserData) return;
+                try {
+                    const visitDoc = await getDoc(visitDocRef);
+                    if (!visitDoc.exists()) {
+                        console.log("오늘 첫 로그인/활동 - 방문일지 제출 시도");
+                        const success = await submitRecord('visit', {
+                            name: currentUserData.name,
+                            gender: currentUserData.gender,
+                            age: currentUserData.age
+                        }, null);
 
-            const todayStr = getTrustedNow().toLocaleDateString('en-CA'); // YYYY-MM-DD
-            const visitDocRef = doc(db, "users", user.uid, "visitLog", todayStr);
-
-            try {
-                const visitDoc = await getDoc(visitDocRef);
-                if (!visitDoc.exists()) {
-                    console.log("오늘 첫 로그인/활동 - 방문일지 제출 시도");
-                    const success = await submitRecord('visit', {
-                        name: currentUserData.name,
-                        gender: currentUserData.gender,
-                        age: currentUserData.age
-                    }, null);
-
-                    if (success) {
-                        await setDoc(visitDocRef, { submitted: true, timestamp: serverTimestamp() });
+                        if (success) {
+                            await setDoc(visitDocRef, { submitted: true, timestamp: serverTimestamp() });
+                            document.getElementById('visitAlert').classList.remove('hidden');
+                        }
+                    } else {
                         document.getElementById('visitAlert').classList.remove('hidden');
                     }
-                } else {
-                    document.getElementById('visitAlert').classList.remove('hidden');
+                } catch (e) {
+                    console.error("방문일지 처리 오류:", e);
                 }
-            } catch (e) {
-                console.error("방문일지 처리 오류:", e);
             }
-        }
 
-        // ----------------------------------------------------------------------------------
-        // 인증 및 폼 이벤트 리스너
-        // ----------------------------------------------------------------------------------
+            // ----------------------------------------------------------------------------------
+            // 인증 및 폼 이벤트 리스너
+            // ----------------------------------------------------------------------------------
 
-        // Auth 상태 구독
-        onAuthStateChanged(auth, async (user) => {
-            const todayStr = getTrustedNow().toLocaleDateString('en-CA');
-            const lastLoginDate = localStorage.getItem('lastLoginDate');
-
-            if (user) {
-                // [강력 로그아웃] 자정이 지났는데 로그인 상태인 경우 (브라우저 재진입 등)
-                if (lastLoginDate && lastLoginDate !== todayStr) {
-                    console.log("날짜 변경 감지 - 강제 로그아웃");
-                    localStorage.removeItem('lastLoginDate');
-                    signOut(auth);
-                    return;
-                }
-
-                localStorage.setItem('lastLoginDate', todayStr);
-
-                // 1. 기본 정보 설정 (Fallback)
-                currentUserData = {
-                    uid: user.uid,
-                    email: user.email,
-                    name: user.displayName || '사용자',
-                    age: '',
-                    gender: ''
-                };
-
-                // 2. Firestore에서 상세 프로필 가져오기
-                const loadProfile = async () => {
-                    try {
-                        const userDoc = await getDoc(doc(db, "users", user.uid));
-                        if (userDoc.exists()) {
-                            const profile = userDoc.data();
-                            currentUserData.name = profile.name || currentUserData.name;
-                            currentUserData.age = profile.birthDate ? calcAge(profile.birthDate) : (profile.age || '');
-                            currentUserData.gender = profile.gender || '';
-                        }
-                    } catch (e) {
-                        console.error("프로필 조회 실패:", e);
-                    }
-                };
-
-                await loadProfile();
-
-                // UI 업데이트
-                userNameDisplay.textContent = currentUserData.name;
-                authSection.classList.add('hidden');
-                mainSection.classList.remove('hidden');
-                startLogoutTimer();
-                updateSyncUI();
-
-                // 3. 자동 공간 방문 기록 제출
-                await checkAndSubmitDailyVisit(user);
-            } else {
-                // 로그아웃 상태
-                currentUserData = null;
-                localStorage.removeItem('lastLoginDate');
-                if (logoutTimer) clearInterval(logoutTimer);
-                mainSection.classList.add('hidden');
-                authSection.classList.remove('hidden');
-                document.getElementById('loginForm').reset();
-            }
-        });
-
-        // 사용자가 다시 탭으로 돌아왔을 때 날짜 체크 (브라우저를 켜둔 상태에서 자정이 지난 경우 대응)
-        document.addEventListener('visibilitychange', () => {
-            if (document.visibilityState === 'visible' && auth.currentUser) {
+            // Auth 상태 구독
+            onAuthStateChanged(auth, async (user) => {
                 const todayStr = getTrustedNow().toLocaleDateString('en-CA');
                 const lastLoginDate = localStorage.getItem('lastLoginDate');
 
-                if (lastLoginDate && lastLoginDate !== todayStr) {
-                    console.log("포커스 시 날짜 변경 감지 - 강제 로그아웃");
-                    signOut(auth);
-                } else {
-                    checkAndSubmitDailyVisit(auth.currentUser);
-                }
-            }
-        });
+                if (user) {
+                    // [강력 로그아웃] 자정이 지났는데 로그인 상태인 경우 (브라우저 재진입 등)
+                    if (lastLoginDate && lastLoginDate !== todayStr) {
+                        console.log("날짜 변경 감지 - 강제 로그아웃");
+                        localStorage.removeItem('lastLoginDate');
+                        signOut(auth);
+                        return;
+                    }
 
-        // 회원가입
-        document.getElementById('signupForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const userId = document.getElementById('signupId').value.trim();
-            const email = userId + '@yatap.local'; // Firebase는 이메일 형식만 지원하므로 내부 변환
-            const pw = document.getElementById('signupPw').value;
-            const name = document.getElementById('signupName').value;
-            const birthDate = document.getElementById('signupBirth').value; // YYYY-MM-DD
-            const gender = document.getElementById('signupGender').value;
-            const phone = document.getElementById('signupPhone').value;
+                    localStorage.setItem('lastLoginDate', todayStr);
 
-            // 생년월일로 만 나이 계산
-            const age = parseInt(calcAge(birthDate), 10);
+                    // 1. 기본 정보 설정 (Fallback)
+                    currentUserData = {
+                        uid: user.uid,
+                        email: user.email,
+                        name: user.displayName || '사용자',
+                        age: '',
+                        gender: ''
+                    };
 
-            // 연령 제한 확인 (만 20세 ~ 39세)
-            if (age < 20 || age > 39) {
-                showAlert('signupAlert', '죄송합니다. 본 프로그램은 만 20세~39세 청년만 가입 가능합니다.', 'error');
-                return;
-            }
-
-            // 개인정보 동의 확인
-            if (!document.getElementById('signupPrivacy').checked) {
-                showAlert('signupAlert', '개인정보 수집 및 이용에 동의해주세요.', 'error');
-                return;
-            }
-
-            toggleLoading('signupBtn', true);
-            try {
-                // Firebase Auth 생성
-                const userCredential = await createUserWithEmailAndPassword(auth, email, pw);
-                const user = userCredential.user;
-
-                // 이름 업데이트
-                await updateProfile(user, { displayName: name });
-
-                // 사용자 추가 정보 Firestore에 저장
-                await setDoc(doc(db, "users", user.uid), {
-                    name, birthDate, age, gender, phone, userId,
-                    createdAt: serverTimestamp()
-                });
-
-                showAlert('signupAlert', '회원가입 완료! 자동으로 로그인됩니다.', 'success');
-
-                // 회원정보 가입 즉시 UI 및 데이터 업데이트 (onAuthStateChanged 보다 늦게 기록되므로 수동 업데이트)
-                if (currentUserData) {
-                    currentUserData.name = name;
-                    currentUserData.age = age;
-                    currentUserData.gender = gender;
-                    userNameDisplay.textContent = name;
-
-                    // 가동 방문 기록 재시도 (프로필 생성전에 실행되었을 수 있으므로)
-                    const todayStr = getTrustedNow().toLocaleDateString('en-CA');
-                    const visitDocRef = doc(db, "users", user.uid, "visitLog", todayStr);
-                    const visitDoc = await getDoc(visitDocRef);
-                    if (!visitDoc.exists()) {
-                        const success = await submitRecord('visit', {
-                            name: name,
-                            gender: gender,
-                            age: age
-                        }, null);
-                        if (success) {
-                            await setDoc(visitDocRef, { submitted: true, timestamp: serverTimestamp() });
+                    // 2. Firestore에서 상세 프로필 가져오기
+                    const loadProfile = async () => {
+                        try {
+                            const userDoc = await getDoc(doc(db, "users", user.uid));
+                            if (userDoc.exists()) {
+                                const profile = userDoc.data();
+                                currentUserData.name = profile.name || currentUserData.name;
+                                currentUserData.age = profile.birthDate ? calcAge(profile.birthDate) : (profile.age || '');
+                                currentUserData.gender = profile.gender || '';
+                                currentUserData.role = profile.role || 'user'; // 관리자 권한 확인
+                            }
+                        } catch (e) {
+                            console.error("프로필 조회 실패:", e);
                         }
+                    };
+
+                    await loadProfile();
+
+                    // UI 업데이트
+                    userNameDisplay.textContent = currentUserData.name;
+
+                    // 관리자 UI 처리
+                    const adminBadge = document.getElementById('adminBadge');
+                    const adminDashboard = document.getElementById('adminDashboard');
+                    const forceVisitBtn = document.getElementById('forceVisitBtn');
+                    if (currentUserData.role === 'admin') {
+                        adminBadge.classList.remove('hidden');
+                        adminDashboard.classList.remove('hidden');
+                        if (forceVisitBtn) forceVisitBtn.classList.remove('hidden');
+                        loadAdminStats(); // 통계 로드
+                    } else {
+                        adminBadge.classList.add('hidden');
+                        adminDashboard.classList.add('hidden');
+                        if (forceVisitBtn) forceVisitBtn.classList.add('hidden');
+                    }
+
+                    authSection.classList.add('hidden');
+                    mainSection.classList.remove('hidden');
+                    startLogoutTimer();
+                    updateSyncUI();
+                    checkSiteAccessAuth(); // 권한에 따른 배지 업데이트
+
+                    // 3. 자동 공간 방문 기록 제출
+                    await checkAndSubmitDailyVisit(user);
+                } else {
+                    // 로그아웃 상태
+                    currentUserData = null;
+                    localStorage.removeItem('lastLoginDate');
+                    if (logoutTimer) clearInterval(logoutTimer);
+                    mainSection.classList.add('hidden');
+                    authSection.classList.remove('hidden');
+                    document.getElementById('loginForm').reset();
+                }
+            });
+
+            // 사용자가 다시 탭으로 돌아왔을 때 날짜 체크 (브라우저를 켜둔 상태에서 자정이 지난 경우 대응)
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible' && auth.currentUser) {
+                    const todayStr = getTrustedNow().toLocaleDateString('en-CA');
+                    const lastLoginDate = localStorage.getItem('lastLoginDate');
+
+                    if (lastLoginDate && lastLoginDate !== todayStr) {
+                        console.log("포커스 시 날짜 변경 감지 - 강제 로그아웃");
+                        signOut(auth);
+                    } else {
+                        checkAndSubmitDailyVisit(auth.currentUser);
                     }
                 }
-            } catch (error) {
-                let msg = error.message;
-                if (error.code === 'auth/email-already-in-use') msg = "이미 사용 중인 아이디입니다.";
-                else if (error.code === 'auth/weak-password') msg = "비밀번호는 최소 6자리 이상이어야 합니다.";
-                showAlert('signupAlert', msg, 'error');
-            } finally {
-                toggleLoading('signupBtn', false);
-            }
-        });
-
-        // 로그인
-        document.getElementById('loginForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const userId = document.getElementById('loginId').value.trim();
-            const email = userId + '@yatap.local'; // 내부 이메일 변환
-            const pw = document.getElementById('loginPw').value;
-
-            toggleLoading('loginBtn', true);
-            try {
-                await signInWithEmailAndPassword(auth, email, pw);
-            } catch (error) {
-                let msg = "로그인 실패. 아이디 또는 비밀번호를 확인하세요.";
-                showAlert('loginAlert', msg, 'error');
-                toggleLoading('loginBtn', false);
-            }
-        });
-
-        // 로그아웃
-        logoutActionBtn.addEventListener('click', () => {
-            signOut(auth);
-        });
-
-        // 프린터 폼 제출
-        document.getElementById('printerForm').addEventListener('submit', (e) => {
-            e.preventDefault();
-            const count = parseInt(document.getElementById('printerCount').value, 10);
-
-            // 매수 제한 확인 (1~10장)
-            if (count < 1 || count > 10) {
-                alert('출력 매수는 1~10장 사이여야 합니다.');
-                return;
-            }
-
-            // 제출 버튼의 ID 설정
-            const btn = e.target.querySelector('button[type="submit"]');
-            btn.id = btn.id || 'btn_submit_print';
-
-            submitRecord('printer', {
-                name: currentUserData.name,
-                count: count
-            }, btn.id).then((success) => {
-                if (success) e.target.reset();
             });
-        });
 
-        // ----------------------------------------------------------------------------------
-        // 동반 이용자 관리 로직 
-        // ----------------------------------------------------------------------------------
-        function createCompanionItem() {
-            const div = document.createElement('div');
-            div.className = 'companion-item mb-2 p-2';
-            div.style.cssText = 'background:#fff; border:1px solid #e2e8f0; border-radius:6px; position:relative;';
-            div.innerHTML = `
+            // 회원가입
+            document.getElementById('signupForm').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const userId = document.getElementById('signupId').value.trim();
+                const email = userId + '@yatap.local'; // Firebase는 이메일 형식만 지원하므로 내부 변환
+                const pw = document.getElementById('signupPw').value;
+                const name = document.getElementById('signupName').value;
+                const birthDate = document.getElementById('signupBirth').value; // YYYY-MM-DD
+                const gender = document.getElementById('signupGender').value;
+                const phone = document.getElementById('signupPhone').value;
+
+                // 생년월일로 만 나이 계산
+                const age = parseInt(calcAge(birthDate), 10);
+
+                // 연령 제한 확인 (만 20세 ~ 39세)
+                if (age < 20 || age > 39) {
+                    showAlert('signupAlert', '죄송합니다. 본 프로그램은 만 20세~39세 청년만 가입 가능합니다.', 'error');
+                    return;
+                }
+
+                // 개인정보 동의 확인
+                if (!document.getElementById('signupPrivacy').checked) {
+                    showAlert('signupAlert', '개인정보 수집 및 이용에 동의해주세요.', 'error');
+                    return;
+                }
+
+                toggleLoading('signupBtn', true);
+                try {
+                    // Firebase Auth 생성
+                    const userCredential = await createUserWithEmailAndPassword(auth, email, pw);
+                    const user = userCredential.user;
+
+                    // 이름 업데이트
+                    await updateProfile(user, { displayName: name });
+
+                    // 사용자 추가 정보 Firestore에 저장
+                    await setDoc(doc(db, "users", user.uid), {
+                        name, birthDate, age, gender, phone, userId,
+                        createdAt: serverTimestamp()
+                    });
+
+                    showAlert('signupAlert', '회원가입 완료! 자동으로 로그인됩니다.', 'success');
+
+                    // 회원정보 가입 즉시 UI 및 데이터 업데이트 (onAuthStateChanged 보다 늦게 기록되므로 수동 업데이트)
+                    if (currentUserData) {
+                        currentUserData.name = name;
+                        currentUserData.age = age;
+                        currentUserData.gender = gender;
+                        userNameDisplay.textContent = name;
+
+                        // 가동 방문 기록 재시도 (프로필 생성전에 실행되었을 수 있으므로)
+                        const todayStr = getTrustedNow().toLocaleDateString('en-CA');
+                        const visitDocRef = doc(db, "users", user.uid, "visitLog", todayStr);
+                        const visitDoc = await getDoc(visitDocRef);
+                        if (!visitDoc.exists()) {
+                            const success = await submitRecord('visit', {
+                                name: name,
+                                gender: gender,
+                                age: age
+                            }, null);
+                            if (success) {
+                                await setDoc(visitDocRef, { submitted: true, timestamp: serverTimestamp() });
+                            }
+                        }
+                    }
+                } catch (error) {
+                    let msg = error.message;
+                    if (error.code === 'auth/email-already-in-use') msg = "이미 사용 중인 아이디입니다.";
+                    else if (error.code === 'auth/weak-password') msg = "비밀번호는 최소 6자리 이상이어야 합니다.";
+                    showAlert('signupAlert', msg, 'error');
+                } finally {
+                    toggleLoading('signupBtn', false);
+                }
+            });
+
+            // 로그인
+            document.getElementById('loginForm').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const userId = document.getElementById('loginId').value.trim();
+                const email = userId + '@yatap.local'; // 내부 이메일 변환
+                const pw = document.getElementById('loginPw').value;
+
+                toggleLoading('loginBtn', true);
+                try {
+                    await signInWithEmailAndPassword(auth, email, pw);
+                } catch (error) {
+                    let msg = "로그인 실패. 아이디 또는 비밀번호를 확인하세요.";
+                    showAlert('loginAlert', msg, 'error');
+                    toggleLoading('loginBtn', false);
+                }
+            });
+
+            // 로그아웃
+            logoutActionBtn.addEventListener('click', () => {
+                signOut(auth);
+            });
+
+            // 프린터 폼 제출
+            document.getElementById('printerForm').addEventListener('submit', (e) => {
+                e.preventDefault();
+                const count = parseInt(document.getElementById('printerCount').value, 10);
+
+                // 매수 제한 확인 (1~10장)
+                if (count < 1 || count > 10) {
+                    alert('출력 매수는 1~10장 사이여야 합니다.');
+                    return;
+                }
+
+                // 제출 버튼의 ID 설정
+                const btn = e.target.querySelector('button[type="submit"]');
+                btn.id = btn.id || 'btn_submit_print';
+
+                submitRecord('printer', {
+                    name: currentUserData.name,
+                    count: count
+                }, btn.id).then((success) => {
+                    if (success) e.target.reset();
+                });
+            });
+
+            // ----------------------------------------------------------------------------------
+            // 동반 이용자 관리 로직 
+            // ----------------------------------------------------------------------------------
+            function createCompanionItem() {
+                const div = document.createElement('div');
+                div.className = 'companion-item mb-2 p-2';
+                div.style.cssText = 'background:#fff; border:1px solid #e2e8f0; border-radius:6px; position:relative;';
+                div.innerHTML = `
                 <button type="button" class="remove-companion-btn" style="position:absolute; top:4px; right:4px; background:transparent; border:none; color:var(--danger); cursor:pointer;"><i class="fa-solid fa-times"></i></button>
                 <div class="row" style="margin-top:8px;">
                     <div class="col form-group" style="margin-bottom:0;">
@@ -1205,177 +1396,262 @@
                 </div>
             `;
 
-            div.querySelector('.remove-companion-btn').addEventListener('click', () => {
-                div.remove();
+                div.querySelector('.remove-companion-btn').addEventListener('click', () => {
+                    div.remove();
+                });
+
+                return div;
+            }
+
+            document.getElementById('addCareerCompanionBtn').addEventListener('click', () => {
+                document.getElementById('careerCompanionsList').appendChild(createCompanionItem());
             });
 
-            return div;
-        }
-
-        document.getElementById('addCareerCompanionBtn').addEventListener('click', () => {
-            document.getElementById('careerCompanionsList').appendChild(createCompanionItem());
-        });
-
-        document.getElementById('addConnectCompanionBtn').addEventListener('click', () => {
-            document.getElementById('connectCompanionsList').appendChild(createCompanionItem());
-        });
-
-        function getCareerZoneStats() {
-            const container = document.getElementById('careerCompanionsList');
-            const items = container.querySelectorAll('.companion-item');
-
-            let maleCount = 0;
-            let femaleCount = 0;
-            let detailsArr = [];
-
-            // 대표자(로그인 유저) 본인 포함
-            let repGender = currentUserData.gender || '남성'; // Firestore나 가입시 정보가 없을 경우 기본값 방어
-            let repAge = currentUserData.age || '미상';
-            if (repGender === '남성') maleCount++;
-            if (repGender === '여성') femaleCount++;
-            detailsArr.push(`[대표]${currentUserData.name}(${repGender}, ${repAge}세)`);
-
-            // 동반자 집계
-            items.forEach(item => {
-                const name = item.querySelector('.comp-name').value;
-                const gender = item.querySelector('.comp-gender').value;
-                const age = item.querySelector('.comp-age').value;
-
-                if (gender === '남성') maleCount++;
-                if (gender === '여성') femaleCount++;
-
-                const displayName = name ? name : '이름미상';
-                detailsArr.push(`${displayName}(${gender}, ${age}세)`);
+            document.getElementById('addConnectCompanionBtn').addEventListener('click', () => {
+                document.getElementById('connectCompanionsList').appendChild(createCompanionItem());
             });
 
-            return {
-                maleCount,
-                femaleCount,
-                companionsDetail: detailsArr.join(' / ')
-            };
-        }
+            function getCareerZoneStats() {
+                const container = document.getElementById('careerCompanionsList');
+                const items = container.querySelectorAll('.companion-item');
 
-        function getConnectRoomStats() {
-            const container = document.getElementById('connectCompanionsList');
-            const items = container.querySelectorAll('.companion-item');
+                let maleCount = 0;
+                let femaleCount = 0;
+                let detailsArr = [];
 
-            let m20 = 0, f20 = 0;
-            let m30 = 0, f30 = 0;
-            let m19 = 0, f19 = 0;
-            let detailsArr = [];
+                // 대표자(로그인 유저) 본인 포함
+                let repGender = currentUserData.gender || '남성'; // Firestore나 가입시 정보가 없을 경우 기본값 방어
+                let repAge = currentUserData.age || '미상';
+                if (repGender === '남성') maleCount++;
+                if (repGender === '여성') femaleCount++;
+                detailsArr.push(`[대표]${currentUserData.name}(${repGender}, ${repAge}세)`);
 
-            // 연령대 계산 헬퍼 함수
-            const addPerson = (gender, ageText, nameText, isRep = false) => {
-                const age = parseInt(ageText, 10);
-                const g = gender;
+                // 동반자 집계
+                items.forEach(item => {
+                    const name = item.querySelector('.comp-name').value;
+                    const gender = item.querySelector('.comp-gender').value;
+                    const age = item.querySelector('.comp-age').value;
 
-                if (!isNaN(age)) {
-                    if (age <= 19) {
-                        if (g === '남성') m19++;
-                        if (g === '여성') f19++;
-                    } else if (age <= 29) {
-                        if (g === '남성') m20++;
-                        if (g === '여성') f20++;
-                    } else if (age <= 39) {
-                        if (g === '남성') m30++;
-                        if (g === '여성') f30++;
+                    if (gender === '남성') maleCount++;
+                    if (gender === '여성') femaleCount++;
+
+                    const displayName = name ? name : '이름미상';
+                    detailsArr.push(`${displayName}(${gender}, ${age}세)`);
+                });
+
+                return {
+                    maleCount,
+                    femaleCount,
+                    companionsDetail: detailsArr.join(' / ')
+                };
+            }
+
+            function getConnectRoomStats() {
+                const container = document.getElementById('connectCompanionsList');
+                const items = container.querySelectorAll('.companion-item');
+
+                let m20 = 0, f20 = 0;
+                let m30 = 0, f30 = 0;
+                let m19 = 0, f19 = 0;
+                let detailsArr = [];
+
+                // 연령대 계산 헬퍼 함수
+                const addPerson = (gender, ageText, nameText, isRep = false) => {
+                    const age = parseInt(ageText, 10);
+                    const g = gender;
+
+                    if (!isNaN(age)) {
+                        if (age <= 19) {
+                            if (g === '남성') m19++;
+                            if (g === '여성') f19++;
+                        } else if (age <= 29) {
+                            if (g === '남성') m20++;
+                            if (g === '여성') f20++;
+                        } else if (age <= 39) {
+                            if (g === '남성') m30++;
+                            if (g === '여성') f30++;
+                        }
+                        // 40세 이상은 연령대 집계에서 제외 (예외처리)
                     }
-                    // 40세 이상은 연령대 집계에서 제외 (예외처리)
-                }
 
-                const role = isRep ? "[대표]" : "";
-                const displayName = nameText ? nameText : '이름미상';
-                detailsArr.push(`${role}${displayName}(${g}, ${ageText}세)`);
-            };
+                    const role = isRep ? "[대표]" : "";
+                    const displayName = nameText ? nameText : '이름미상';
+                    detailsArr.push(`${role}${displayName}(${g}, ${ageText}세)`);
+                };
 
-            // 대표자 포함
-            let repGender = currentUserData.gender || '남성';
-            let repAge = currentUserData.age || '20'; // 없을시 20대 기본 방어
-            addPerson(repGender, repAge, currentUserData.name, true);
+                // 대표자 포함
+                let repGender = currentUserData.gender || '남성';
+                let repAge = currentUserData.age || '20'; // 없을시 20대 기본 방어
+                addPerson(repGender, repAge, currentUserData.name, true);
 
-            // 동반자 포함
-            items.forEach(item => {
-                const name = item.querySelector('.comp-name').value;
-                const gender = item.querySelector('.comp-gender').value;
-                const age = item.querySelector('.comp-age').value;
-                addPerson(gender, age, name, false);
-            });
+                // 동반자 포함
+                items.forEach(item => {
+                    const name = item.querySelector('.comp-name').value;
+                    const gender = item.querySelector('.comp-gender').value;
+                    const age = item.querySelector('.comp-age').value;
+                    addPerson(gender, age, name, false);
+                });
 
-            return {
-                m20, f20, m30, f30, m19, f19,
-                companionsDetail: detailsArr.join(' / ')
-            };
-        }
-
-        // 커리어존 폼 제출
-        document.getElementById('careerForm').addEventListener('submit', (e) => {
-            e.preventDefault();
-
-            // 동행인 동의 체크 확인
-            if (!document.getElementById('careerPrivacy').checked) {
-                alert('동행인의 개인정보 수집 동의여부를 확인해주세요.');
-                return;
+                return {
+                    m20, f20, m30, f30, m19, f19,
+                    companionsDetail: detailsArr.join(' / ')
+                };
             }
 
-            const btn = e.target.querySelector('button[type="submit"]');
-            btn.id = btn.id || 'btn_submit_career';
+            // 커리어존 폼 제출
+            document.getElementById('careerForm').addEventListener('submit', (e) => {
+                e.preventDefault();
 
-            const stats = getCareerZoneStats();
-
-            submitRecord('careerZone', {
-                name: currentUserData.name,
-                place: document.getElementById('cPlace').value,
-                startTime: document.getElementById('cStartTime').value,
-                endTime: document.getElementById('cEndTime').value,
-                purpose: document.getElementById('cPurpose').value,
-                maleCount: stats.maleCount,
-                femaleCount: stats.femaleCount,
-                companionsDetail: stats.companionsDetail
-            }, btn.id).then((success) => {
-                if (success) {
-                    document.getElementById('careerCompanionsList').innerHTML = ''; // 성공 시 초기화
-                    document.getElementById('careerPrivacy').checked = false; // 체크박스 초기화
-                    e.target.reset(); // 폼 초기화
+                // 동행인 동의 체크 확인
+                if (!document.getElementById('careerPrivacy').checked) {
+                    alert('동행인의 개인정보 수집 동의여부를 확인해주세요.');
+                    return;
                 }
+
+                const btn = e.target.querySelector('button[type="submit"]');
+                btn.id = btn.id || 'btn_submit_career';
+
+                const stats = getCareerZoneStats();
+
+                submitRecord('careerZone', {
+                    name: currentUserData.name,
+                    place: document.getElementById('cPlace').value,
+                    startTime: document.getElementById('cStartTime').value,
+                    endTime: document.getElementById('cEndTime').value,
+                    purpose: document.getElementById('cPurpose').value,
+                    maleCount: stats.maleCount,
+                    femaleCount: stats.femaleCount,
+                    companionsDetail: stats.companionsDetail
+                }, btn.id).then((success) => {
+                    if (success) {
+                        document.getElementById('careerCompanionsList').innerHTML = ''; // 성공 시 초기화
+                        document.getElementById('careerPrivacy').checked = false; // 체크박스 초기화
+                        e.target.reset(); // 폼 초기화
+                    }
+                });
             });
-        });
 
-        // 커넥트룸 폼 제출
-        document.getElementById('connectForm').addEventListener('submit', (e) => {
-            e.preventDefault();
+            // 커넥트룸 폼 제출
+            document.getElementById('connectForm').addEventListener('submit', (e) => {
+                e.preventDefault();
 
-            // 동행인 동의 체크 확인
-            if (!document.getElementById('connectPrivacy').checked) {
-                alert('동행인의 개인정보 수집 동의여부를 확인해주세요.');
-                return;
-            }
-
-            const btn = e.target.querySelector('button[type="submit"]');
-            btn.id = btn.id || 'btn_submit_connect';
-
-            const stats = getConnectRoomStats();
-
-            submitRecord('connectRoom', {
-                name: currentUserData.name,
-                startTime: document.getElementById('rStartTime').value,
-                endTime: document.getElementById('rEndTime').value,
-                purpose: document.getElementById('rPurpose').value,
-                m20: stats.m20,
-                f20: stats.f20,
-                m30: stats.m30,
-                f30: stats.f30,
-                m19: stats.m19,
-                f19: stats.f19,
-                companionsDetail: stats.companionsDetail
-            }, btn.id).then((success) => {
-                if (success) {
-                    document.getElementById('connectCompanionsList').innerHTML = ''; // 성공 시 초기화
-                    document.getElementById('connectPrivacy').checked = false; // 체크박스 초기화
-                    e.target.reset(); // 폼 초기화
+                // 동행인 동의 체크 확인
+                if (!document.getElementById('connectPrivacy').checked) {
+                    alert('동행인의 개인정보 수집 동의여부를 확인해주세요.');
+                    return;
                 }
+
+                const btn = e.target.querySelector('button[type="submit"]');
+                btn.id = btn.id || 'btn_submit_connect';
+
+                const stats = getConnectRoomStats();
+
+                submitRecord('connectRoom', {
+                    name: currentUserData.name,
+                    startTime: document.getElementById('rStartTime').value,
+                    endTime: document.getElementById('rEndTime').value,
+                    purpose: document.getElementById('rPurpose').value,
+                    m20: stats.m20,
+                    f20: stats.f20,
+                    m30: stats.m30,
+                    f30: stats.f30,
+                    m19: stats.m19,
+                    f19: stats.f19,
+                    companionsDetail: stats.companionsDetail
+                }, btn.id).then((success) => {
+                    if (success) {
+                        document.getElementById('connectCompanionsList').innerHTML = ''; // 성공 시 초기화
+                        document.getElementById('connectPrivacy').checked = false; // 체크박스 초기화
+                        e.target.reset(); // 폼 초기화
+                    }
+                });
+                // ----------------------------------------------------------------------------------
+                // 관리자 통계 로드 (오늘 기준)
+                // ----------------------------------------------------------------------------------
+                async function loadAdminStats() {
+                    if (!currentUserData || currentUserData.role !== 'admin') return;
+
+                    const todayStr = getTrustedNow().toLocaleDateString('en-CA');
+                    const stats = { visit: 0, printer: 0, career: 0, connect: 0 };
+
+                    try {
+                        // query constraints: 오늘 날짜 데이터만 필터링하는 것이 좋으나, 
+                        // 현재 데이터 구조상 all_logs 컬렉션에서 클라이언트 사이드 필터링 시연
+                        const q = query(collection(db, "all_logs"));
+                        const querySnapshot = await getDocs(q);
+
+                        querySnapshot.forEach((doc) => {
+                            const data = doc.data();
+                            // Firestore Timestamp를 날짜 문자열로 변환하여 오늘 데이터인지 확인
+                            if (data.timestamp) {
+                                const logDate = data.timestamp.toDate().toLocaleDateString('en-CA');
+                                if (logDate === todayStr) {
+                                    if (data.type === 'visit') stats.visit++;
+                                    if (data.type === 'printer') stats.printer += (data.count || 0);
+                                    if (data.type === 'careerZone') stats.career++;
+                                    if (data.type === 'connectRoom') stats.connect++;
+                                }
+                            }
+                        });
+
+                        document.getElementById('statTotalVisit').textContent = `${stats.visit}명`;
+                        document.getElementById('statTotalPrint').textContent = `${stats.printer}장`;
+                        document.getElementById('statTotalCareer').textContent = `${stats.career}건`;
+                        document.getElementById('statTotalConnect').textContent = `${stats.connect}건`;
+                    } catch (e) {
+                        console.error("통계 로드 실패:", e);
+                    }
+                }
+
+                document.getElementById('refreshStatsBtn').addEventListener('click', loadAdminStats);
+
+                // ----------------------------------------------------------------------------------
+                // 온라인 상태 감지 및 제어
+                // ----------------------------------------------------------------------------------
+                // ... (기존에 추가했던 코드들 포함하여 완성)
+                function checkOnlineStatus() {
+                    const warning = document.getElementById('onlineWarning');
+                    const submitButtons = document.querySelectorAll('button[type="submit"]');
+
+                    if (!navigator.onLine) {
+                        warning.style.display = 'block';
+                        submitButtons.forEach(btn => btn.disabled = true);
+                    } else {
+                        warning.style.display = 'none';
+                        submitButtons.forEach(btn => btn.disabled = false);
+                    }
+                }
+
+                window.addEventListener('online', checkOnlineStatus);
+                window.addEventListener('offline', checkOnlineStatus);
+                checkOnlineStatus();
+
+                const privacyModal = document.getElementById('privacyModal');
+                const closeBtn = document.getElementById('closePrivacyModal');
+                const confirmBtn = document.getElementById('modalConfirmBtn');
+
+                function openModal(e) {
+                    if (e) e.preventDefault();
+                    privacyModal.style.display = 'block';
+                }
+
+                function closeModal() {
+                    privacyModal.style.display = 'none';
+                }
+
+                document.addEventListener('click', (e) => {
+                    if (e.target.classList.contains('open-privacy-modal')) {
+                        openModal(e);
+                    }
+                });
+
+                closeBtn.onclick = closeModal;
+                confirmBtn.onclick = closeModal;
+                window.onclick = (event) => {
+                    if (event.target == privacyModal) closeModal();
+                };
             });
-        });
-    </script>
+        </script>
 </body>
 
 </html>
