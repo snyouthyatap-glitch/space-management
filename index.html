@@ -366,6 +366,10 @@
                         <div class="col form-group">
                             <label for="signupBirth">생년월일</label>
                             <input type="date" id="signupBirth" class="form-control" required>
+                            <small
+                                style="color: var(--gray-text); font-size: 0.75rem; display: block; margin-top: 0.25rem;">
+                                ※ 가입 대상: 만 20세 ~ 39세 청년
+                            </small>
                         </div>
                         <div class="col form-group">
                             <label for="signupGender">성별</label>
@@ -436,7 +440,11 @@
                         </div>
                         <div class="form-group">
                             <label for="printerCount">출력 매수 (장)</label>
-                            <input type="number" id="printerCount" class="form-control" min="1" required>
+                            <input type="number" id="printerCount" class="form-control" min="1" max="10" required>
+                            <small
+                                style="color: var(--gray-text); font-size: 0.75rem; display: block; margin-top: 0.25rem;">
+                                ※ 1회 최대 10장까지 가능 (만 20-39세 청년 대상)
+                            </small>
                         </div>
                         <button type="submit" class="btn btn-primary mt-2 submit-btn">제출하기 <div class="spinner"></div>
                         </button>
@@ -803,12 +811,56 @@
         });
 
         // ----------------------------------------------------------------------------------
+        // [수정] 방문 기록 제출 체크 함수 (자정 이후 첫 접속/활동 시 제출 보장)
+        // ----------------------------------------------------------------------------------
+        async function checkAndSubmitDailyVisit(user) {
+            if (!user || !currentUserData) return;
+
+            const todayStr = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD
+            const visitDocRef = doc(db, "users", user.uid, "visitLog", todayStr);
+
+            try {
+                const visitDoc = await getDoc(visitDocRef);
+                if (!visitDoc.exists()) {
+                    console.log("오늘 첫 로그인/활동 - 방문일지 제출 시도");
+                    const success = await submitRecord('visit', {
+                        name: currentUserData.name,
+                        gender: currentUserData.gender,
+                        age: currentUserData.age
+                    }, null);
+
+                    if (success) {
+                        await setDoc(visitDocRef, { submitted: true, timestamp: serverTimestamp() });
+                        document.getElementById('visitAlert').classList.remove('hidden');
+                    }
+                } else {
+                    document.getElementById('visitAlert').classList.remove('hidden');
+                }
+            } catch (e) {
+                console.error("방문일지 처리 오류:", e);
+            }
+        }
+
+        // ----------------------------------------------------------------------------------
         // 인증 및 폼 이벤트 리스너
         // ----------------------------------------------------------------------------------
 
         // Auth 상태 구독
         onAuthStateChanged(auth, async (user) => {
+            const todayStr = new Date().toLocaleDateString('en-CA');
+            const lastLoginDate = localStorage.getItem('lastLoginDate');
+
             if (user) {
+                // [강력 로그아웃] 자정이 지났는데 로그인 상태인 경우 (브라우저 재진입 등)
+                if (lastLoginDate && lastLoginDate !== todayStr) {
+                    console.log("날짜 변경 감지 - 강제 로그아웃");
+                    localStorage.removeItem('lastLoginDate');
+                    signOut(auth);
+                    return;
+                }
+
+                localStorage.setItem('lastLoginDate', todayStr);
+
                 // 1. 기본 정보 설정 (Fallback)
                 currentUserData = {
                     uid: user.uid,
@@ -818,15 +870,13 @@
                     gender: ''
                 };
 
-                // 2. Firestore에서 상세 프로필(나이, 성별 등) 가져오기
+                // 2. Firestore에서 상세 프로필 가져오기
                 const loadProfile = async () => {
                     try {
-                        const { getDoc, doc } = await import("https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js");
                         const userDoc = await getDoc(doc(db, "users", user.uid));
                         if (userDoc.exists()) {
                             const profile = userDoc.data();
                             currentUserData.name = profile.name || currentUserData.name;
-                            // 생년월일이 있으면 현재 날짜 기준 나이 재계산
                             currentUserData.age = profile.birthDate ? calcAge(profile.birthDate) : (profile.age || '');
                             currentUserData.gender = profile.gender || '';
                         }
@@ -844,36 +894,31 @@
                 startLogoutTimer();
                 updateSyncUI();
 
-                // 3. 자동 공간 방문 기록 제출 (하루 1회, Firestore 기준 중복 방지)
-                const todayStr = new Date().toISOString().split('T')[0];
-                const visitDocRef = doc(db, "users", user.uid, "visitLog", todayStr);
-                try {
-                    const visitDoc = await getDoc(visitDocRef);
-                    if (!visitDoc.exists()) {
-                        console.log("오늘 첫 로그인 - 방문일지 제출 시도");
-                        const success = await submitRecord('visit', {
-                            name: currentUserData.name,
-                            gender: currentUserData.gender,
-                            age: currentUserData.age
-                        }, 'loginBtn');
-                        if (success) {
-                            await setDoc(visitDocRef, { submitted: true, timestamp: serverTimestamp() });
-                            document.getElementById('visitAlert').classList.remove('hidden');
-                        }
-                    } else {
-                        console.log("오늘 이미 방문일지가 제출되었습니다.");
-                        document.getElementById('visitAlert').classList.remove('hidden');
-                    }
-                } catch (e) {
-                    console.error("방문일지 처리 오류:", e);
-                }
+                // 3. 자동 공간 방문 기록 제출
+                await checkAndSubmitDailyVisit(user);
             } else {
                 // 로그아웃 상태
                 currentUserData = null;
+                localStorage.removeItem('lastLoginDate');
                 if (logoutTimer) clearInterval(logoutTimer);
                 mainSection.classList.add('hidden');
                 authSection.classList.remove('hidden');
                 document.getElementById('loginForm').reset();
+            }
+        });
+
+        // 사용자가 다시 탭으로 돌아왔을 때 날짜 체크 (브라우저를 켜둔 상태에서 자정이 지난 경우 대응)
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible' && auth.currentUser) {
+                const todayStr = new Date().toLocaleDateString('en-CA');
+                const lastLoginDate = localStorage.getItem('lastLoginDate');
+
+                if (lastLoginDate && lastLoginDate !== todayStr) {
+                    console.log("포커스 시 날짜 변경 감지 - 강제 로그아웃");
+                    signOut(auth);
+                } else {
+                    checkAndSubmitDailyVisit(auth.currentUser);
+                }
             }
         });
 
@@ -889,7 +934,13 @@
             const phone = document.getElementById('signupPhone').value;
 
             // 생년월일로 만 나이 계산
-            const age = calcAge(birthDate);
+            const age = parseInt(calcAge(birthDate), 10);
+
+            // 연령 제한 확인 (만 20세 ~ 39세)
+            if (age < 20 || age > 39) {
+                showAlert('signupAlert', '죄송합니다. 본 프로그램은 만 20세~39세 청년만 가입 가능합니다.', 'error');
+                return;
+            }
 
             toggleLoading('signupBtn', true);
             try {
@@ -965,9 +1016,15 @@
         // 프린터 폼 제출
         document.getElementById('printerForm').addEventListener('submit', (e) => {
             e.preventDefault();
-            const count = document.getElementById('printerCount').value;
+            const count = parseInt(document.getElementById('printerCount').value, 10);
 
-            // 제출 버튼의 ID 설정 (toggleLoading 함수에서 버튼을 찾기 위해)
+            // 매수 제한 확인 (1~10장)
+            if (count < 1 || count > 10) {
+                alert('출력 매수는 1~10장 사이여야 합니다.');
+                return;
+            }
+
+            // 제출 버튼의 ID 설정
             const btn = e.target.querySelector('button[type="submit"]');
             btn.id = btn.id || 'btn_submit_print';
 
