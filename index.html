@@ -1452,7 +1452,7 @@
                 });
 
             } catch (err) {
-                console.error("사용자 목록 로드 실패:", err);
+                console.error("사용자 목록 로드 실패 (전체 에러):", err);
                 listEl.innerHTML = '<tr><td colspan="4" class="text-center" style="padding:2rem; color:var(--danger);">데이터를 로드할 수 없습니다.</td></tr>';
             }
         }
@@ -1841,7 +1841,7 @@
                 document.getElementById('statTotalCareer').textContent = `${stats.career}건`;
                 document.getElementById('statTotalConnect').textContent = `${stats.connect}건`;
             } catch (e) {
-                console.error("통계 로드 실패:", e);
+                console.error("통계 로드 실패 (전체 에러):", e);
                 alert("통계 데이터를 불러오는데 실패했습니다. (권한 부족 또는 네트워크 오류)");
             } finally {
                 refreshBtn.disabled = false;
