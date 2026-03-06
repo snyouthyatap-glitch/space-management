@@ -1169,8 +1169,15 @@
                     // 1) 사용자별 경로에 저장
                     await addDoc(collection(db, "records", currentUserData.uid, type), logEntry);
 
-                    // 2) 전체 통합 경로에 저장 (관리자 확인용)
-                    await addDoc(collection(db, "all_logs"), logEntry);
+                    // 2) 전체 통합 경로 대신 유형별 경로에 저장 (관리 콘솔 가독성 개선)
+                    const collectionMap = {
+                        'visit': 'logs_visit',
+                        'printer': 'logs_printer',
+                        'careerZone': 'logs_career',
+                        'connectRoom': 'logs_connect'
+                    };
+                    const targetCol = collectionMap[type] || 'all_logs';
+                    await addDoc(collection(db, targetCol), logEntry);
 
                     firebaseSuccess = true;
                 }
@@ -1843,21 +1850,24 @@
             const stats = { visit: 0, printer: 0, career: 0, connect: 0 };
 
             try {
-                // all_logs 컬렉션 전체 조회 (오늘 데이터 필터링)
-                const q = query(collection(db, "all_logs"));
-                const querySnapshot = await getDocs(q);
+                // 4개의 로그 컬렉션 병렬 조회
+                const logCollections = ['logs_visit', 'logs_printer', 'logs_career', 'logs_connect'];
+                const queryPromises = logCollections.map(colName => getDocs(query(collection(db, colName))));
+                const snapshots = await Promise.all(queryPromises);
 
-                querySnapshot.forEach((doc) => {
-                    const data = doc.data();
-                    if (data.timestamp) {
-                        const logDate = data.timestamp.toDate().toLocaleDateString('en-CA');
-                        if (logDate === todayStr) {
-                            if (data.type === 'visit') stats.visit++;
-                            if (data.type === 'printer') stats.printer += (Number(data.count) || 0);
-                            if (data.type === 'careerZone') stats.career++;
-                            if (data.type === 'connectRoom') stats.connect++;
+                snapshots.forEach((querySnapshot) => {
+                    querySnapshot.forEach((doc) => {
+                        const data = doc.data();
+                        if (data.timestamp) {
+                            const logDate = data.timestamp.toDate().toLocaleDateString('en-CA');
+                            if (logDate === todayStr) {
+                                if (data.type === 'visit') stats.visit++;
+                                if (data.type === 'printer') stats.printer += (Number(data.count) || 0);
+                                if (data.type === 'careerZone') stats.career++;
+                                if (data.type === 'connectRoom') stats.connect++;
+                            }
                         }
-                    }
+                    });
                 });
 
                 document.getElementById('statTotalVisit').textContent = `${stats.visit}명`;
