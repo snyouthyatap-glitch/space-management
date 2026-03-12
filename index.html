@@ -662,7 +662,7 @@
                         <div id="visitAlert" class="alert alert-success mt-2 mb-0 text-center hidden"
                             style="padding: 0.5rem; font-size: 0.8rem; display:flex; align-items:center; justify-content:center; gap:0.5rem;">
                             <span><i class="fa-solid fa-check-circle"></i> 공간 방문 기록이 자동 제출되었습니다.</span>
-                            <button id="forceVisitBtn" type="button"
+                            <button id="forceVisitBtn" type="button" class="hidden"
                                 style="background:#e2e8f0; border:1px solid #cbd5e0; border-radius:4px; padding:2px 8px; font-size:0.75rem; cursor:pointer; color:#4a5568;"
                                 title="디버그용: 1일 제한 무시하고 방문일지 강제 제출">🐞 강제제출</button>
                         </div>
@@ -1351,11 +1351,13 @@
                                 if (currentUserData.role === 'admin') {
                                     adminBadge?.classList.remove('hidden');
                                     adminModeBtn?.classList.remove('hidden');
+                                    document.getElementById('forceVisitBtn')?.classList.remove('hidden');
                                     loadAdminStats();
                                     loadPendingUsers(); // 관리자 탭 데이터 미리 로드
                                 } else {
                                     adminBadge?.classList.add('hidden');
                                     adminModeBtn?.classList.add('hidden');
+                                    document.getElementById('forceVisitBtn')?.classList.add('hidden');
                                 }
                                 checkAndSubmitDailyVisit(user);
                             } else {
