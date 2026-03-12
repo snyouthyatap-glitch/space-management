@@ -1285,6 +1285,8 @@
         // ----------------------------------------------------------------------------------
         async function checkAndSubmitDailyVisit(user) {
             if (!user || !currentUserData) return;
+            // 관리자 계정은 방문일지 자동 제출 제외
+            if (currentUserData.role === 'admin') return;
 
             const todayStr = getTrustedNow().toLocaleDateString('en-CA'); // YYYY-MM-DD
             const visitDocRef = doc(db, "users", user.uid, "visitLog", todayStr);
@@ -1361,7 +1363,6 @@
                             // 상태에 따른 화면 분기
                             if (currentUserData.status === 'approved' || currentUserData.role === 'admin') {
                                 document.getElementById('pendingArea').classList.add('hidden');
-                                document.getElementById('userArea').classList.remove('hidden');
 
                                 // 관리자 권한 UI 처리
                                 const adminBadge = document.getElementById('adminBadge');
@@ -1369,6 +1370,10 @@
                                 const facilityLogSection = document.getElementById('facilityLogSection');
 
                                 if (currentUserData.role === 'admin') {
+                                    // 관리자는 사용자 모드를 거치지 않고 바로 관리자 영역 표시
+                                    document.getElementById('userArea').classList.add('hidden');
+                                    document.getElementById('adminArea').classList.remove('hidden');
+
                                     adminBadge?.classList.remove('hidden');
                                     adminModeBtn?.classList.remove('hidden');
                                     facilityLogSection?.classList.add('hidden'); // 관리자는 작성 폼 숨김
@@ -1377,23 +1382,28 @@
                                     // 스프레드 시트 버튼 URL 설정
                                     const sheetLink = document.getElementById('spreadsheetBtn');
                                     if (sheetLink) {
-                                        // 사용자가 제공한 실제 스프레드 시트 URL 반영
                                         sheetLink.href = "https://docs.google.com/spreadsheets/d/1ErbIUwhL-UatarQxeYhCP79RF0f0GrlFLaD1WAw13BQ/edit?usp=sharing";
                                     }
 
                                     loadAdminStats('daily');
-                                    loadPendingUsers(); // 관리자 탭 데이터 미리 로드
+                                    loadPendingUsers();
                                 } else {
+                                    // 일반 승인 사용자는 사용자 영역 표시
+                                    document.getElementById('userArea').classList.remove('hidden');
+                                    document.getElementById('adminArea').classList.add('hidden');
+
                                     adminBadge?.classList.add('hidden');
                                     adminModeBtn?.classList.add('hidden');
                                     facilityLogSection?.classList.remove('hidden');
                                     document.getElementById('forceVisitBtn')?.classList.add('hidden');
+
+                                    checkAndSubmitDailyVisit(user); // 일반 사용자만 방문일지 체크
                                 }
-                                checkAndSubmitDailyVisit(user);
                             } else {
                                 // 승인 대기 중
                                 document.getElementById('pendingArea').classList.remove('hidden');
                                 document.getElementById('userArea').classList.add('hidden');
+                                document.getElementById('adminArea').classList.add('hidden');
                                 document.getElementById('facilityLogSection')?.classList.remove('hidden');
                             }
                             checkSiteAccessAuth();
