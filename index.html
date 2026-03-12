@@ -575,7 +575,8 @@
                     <div class="row">
                         <div class="col form-group">
                             <label for="signupBirth">생년월일</label>
-                            <input type="date" id="signupBirth" class="form-control" required>
+                            <input type="date" id="signupBirth" class="form-control" required min="1900-01-01"
+                                max="2099-12-31">
                             <small
                                 style="color: var(--gray-text); font-size: 0.75rem; display: block; margin-top: 0.25rem;">
                                 ※ 가입 대상: 만 20세 ~ 39세 청년
@@ -675,18 +676,35 @@
                 <div class="card mb-4">
                     <div class="dashboard-header">
                         <h2 style="font-size: 1.4rem;"><i class="fa-solid fa-screwdriver-wrench"></i> 관리자 워크스페이스</h2>
-                        <button id="exitAdminModeBtn" class="btn btn-outline"
-                            style="padding: 0.4rem 0.8rem; font-size:0.8rem;">사용자 모드로</button>
+                        <div class="d-flex gap-2">
+                            <a id="spreadsheetBtn" href="#" target="_blank" class="btn btn-outline"
+                                style="padding: 0.4rem 0.8rem; font-size:0.8rem; background: #1d6f42; color: white; border: none;">
+                                <i class="fa-solid fa-file-excel"></i> 시트 열기
+                            </a>
+                            <button id="exitAdminModeBtn" class="btn btn-outline"
+                                style="padding: 0.4rem 0.8rem; font-size:0.8rem;">사용자 모드로</button>
+                        </div>
                     </div>
 
                     <div class="admin-tabs">
-                        <div class="admin-tab active" data-target="admin-stat-view">실시간 현황</div>
+                        <div class="admin-tab active" data-target="admin-stat-view">실시간 통계</div>
                         <div class="admin-tab" data-target="admin-user-view">가입 승인 관리 <span id="pendingCountBadge"
                                 class="badge badge-pending hidden">0</span></div>
                     </div>
 
                     <!-- 관리자 탭 1: 통계 -->
                     <div id="admin-stat-view" class="admin-tab-content">
+                        <div class="period-selector mb-3 text-center"
+                            style="background:#f1f5f9; padding:0.4rem; border-radius:30px; display:inline-flex; width:100%;">
+                            <button class="period-btn active" data-period="daily"
+                                style="flex:1; border:none; background:transparent; padding:0.4rem; font-size:0.8rem; border-radius:20px; cursor:pointer;">오늘</button>
+                            <button class="period-btn" data-period="weekly"
+                                style="flex:1; border:none; background:transparent; padding:0.4rem; font-size:0.8rem; border-radius:20px; cursor:pointer;">이번
+                                주</button>
+                            <button class="period-btn" data-period="monthly"
+                                style="flex:1; border:none; background:transparent; padding:0.4rem; font-size:0.8rem; border-radius:20px; cursor:pointer;">이번
+                                달</button>
+                        </div>
                         <div class="admin-stat-grid">
                             <div class="stat-card">
                                 <h4>총 방문자</h4>
@@ -737,7 +755,7 @@
                 </div>
             </div>
 
-            <div class="card">
+            <div id="facilityLogSection" class="card">
                 <h3 class="mb-4 text-center">시설 이용 일지 작성</h3>
 
                 <!-- 탭 네비게이션 -->
@@ -1348,15 +1366,27 @@
                                 // 관리자 권한 UI 처리
                                 const adminBadge = document.getElementById('adminBadge');
                                 const adminModeBtn = document.getElementById('adminModeBtn');
+                                const facilityLogSection = document.getElementById('facilityLogSection');
+
                                 if (currentUserData.role === 'admin') {
                                     adminBadge?.classList.remove('hidden');
                                     adminModeBtn?.classList.remove('hidden');
+                                    facilityLogSection?.classList.add('hidden'); // 관리자는 작성 폼 숨김
                                     document.getElementById('forceVisitBtn')?.classList.remove('hidden');
-                                    loadAdminStats();
+
+                                    // 스프레드 시트 버튼 URL 설정
+                                    const sheetLink = document.getElementById('spreadsheetBtn');
+                                    if (sheetLink) {
+                                        // 사용자가 제공한 실제 스프레드 시트 URL 반영
+                                        sheetLink.href = "https://docs.google.com/spreadsheets/d/1ErbIUwhL-UatarQxeYhCP79RF0f0GrlFLaD1WAw13BQ/edit?usp=sharing";
+                                    }
+
+                                    loadAdminStats('daily');
                                     loadPendingUsers(); // 관리자 탭 데이터 미리 로드
                                 } else {
                                     adminBadge?.classList.add('hidden');
                                     adminModeBtn?.classList.add('hidden');
+                                    facilityLogSection?.classList.remove('hidden');
                                     document.getElementById('forceVisitBtn')?.classList.add('hidden');
                                 }
                                 checkAndSubmitDailyVisit(user);
@@ -1364,6 +1394,7 @@
                                 // 승인 대기 중
                                 document.getElementById('pendingArea').classList.remove('hidden');
                                 document.getElementById('userArea').classList.add('hidden');
+                                document.getElementById('facilityLogSection')?.classList.remove('hidden');
                             }
                             checkSiteAccessAuth();
                         } else {
@@ -1837,9 +1868,10 @@
             });
         });
         // ----------------------------------------------------------------------------------
-        // 관리자 통계 로드 (오늘 기준) - 전역 함수로 분리
         // ----------------------------------------------------------------------------------
-        async function loadAdminStats() {
+        // 관리자 통계 로드 (기간별) - 전역 함수로 분리
+        // ----------------------------------------------------------------------------------
+        async function loadAdminStats(period = 'daily') {
             if (!currentUserData || currentUserData.role !== 'admin') return;
 
             const refreshBtn = document.getElementById('refreshStatsBtn');
@@ -1847,12 +1879,24 @@
             refreshBtn.disabled = true;
             refreshBtn.innerHTML = '<i class="fa-solid fa-sync fa-spin"></i> 로딩 중...';
 
-            const today = getTrustedNow();
-            const todayStr = today.toLocaleDateString('en-CA'); // YYYY-MM-DD
+            const now = getTrustedNow();
             const stats = { visit: 0, printer: 0, career: 0, connect: 0 };
 
+            // 기간별 시작 날짜 계산
+            let startDate = new Date(now);
+            startDate.setHours(0, 0, 0, 0);
+
+            if (period === 'weekly') {
+                // 이번 주 월요일 찾기
+                const day = startDate.getDay();
+                const diff = startDate.getDate() - day + (day === 0 ? -6 : 1);
+                startDate.setDate(diff);
+            } else if (period === 'monthly') {
+                // 이번 달 1일
+                startDate.setDate(1);
+            }
+
             try {
-                // 4개의 로그 컬렉션 병렬 조회
                 const logCollections = ['logs_visit', 'logs_printer', 'logs_career', 'logs_connect'];
                 const queryPromises = logCollections.map(colName => getDocs(query(collection(db, colName))));
                 const snapshots = await Promise.all(queryPromises);
@@ -1861,8 +1905,8 @@
                     querySnapshot.forEach((doc) => {
                         const data = doc.data();
                         if (data.timestamp) {
-                            const logDate = data.timestamp.toDate().toLocaleDateString('en-CA');
-                            if (logDate === todayStr) {
+                            const logTime = data.timestamp.toDate();
+                            if (logTime >= startDate) {
                                 if (data.type === 'visit') stats.visit++;
                                 if (data.type === 'printer') stats.printer += (Number(data.count) || 0);
                                 if (data.type === 'careerZone') stats.career++;
@@ -1877,13 +1921,32 @@
                 document.getElementById('statTotalCareer').textContent = `${stats.career}건`;
                 document.getElementById('statTotalConnect').textContent = `${stats.connect}건`;
             } catch (e) {
-                console.error("통계 로드 실패 (전체 에러):", e);
-                alert("통계 데이터를 불러오는데 실패했습니다. (권한 부족 또는 네트워크 오류)");
+                console.error("통계 로드 실패:", e);
+                alert("통계 데이터를 불러오는데 실패했습니다.");
             } finally {
                 refreshBtn.disabled = false;
                 refreshBtn.innerHTML = originalBtnContent;
             }
         }
+
+        // 기간 선택 버튼 이벤트 리스너
+        document.querySelectorAll('.period-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                document.querySelectorAll('.period-btn').forEach(b => {
+                    b.classList.remove('active');
+                    b.style.background = 'transparent';
+                    b.style.color = 'inherit';
+                });
+
+                e.target.classList.add('active');
+                e.target.style.background = 'var(--white)';
+                e.target.style.color = 'var(--primary-dark)';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
+
+                const period = e.target.dataset.period;
+                loadAdminStats(period);
+            });
+        });
 
         // ----------------------------------------------------------------------------------
         // 온라인 상태 감지 및 제어
