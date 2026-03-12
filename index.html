@@ -1285,16 +1285,24 @@
         // ----------------------------------------------------------------------------------
         async function checkAndSubmitDailyVisit(user) {
             if (!user || !currentUserData) return;
-            // 관리자 계정은 방문일지 자동 제출 제외
-            if (currentUserData.role === 'admin') return;
 
-            const todayStr = getTrustedNow().toLocaleDateString('en-CA'); // YYYY-MM-DD
+            // 프로필 로딩 대기 (role이 설정될 때까지 최대 2초 대기)
+            let retry = 0;
+            while (!currentUserData.role && retry < 10) {
+                await new Promise(r => setTimeout(r, 200));
+                retry++;
+            }
+
+            // 관리자 계정이거나 여전히 role이 없으면 자동 제출 제외
+            if (currentUserData.role === 'admin' || !currentUserData.role) return;
+
+            // 오늘 날짜 및 문서 참조 설정
+            const todayStr = getTrustedNow().toLocaleDateString('en-CA');
             const visitDocRef = doc(db, "users", user.uid, "visitLog", todayStr);
 
             try {
                 const visitDoc = await getDoc(visitDocRef);
                 if (!visitDoc.exists()) {
-                    console.log("오늘 첫 로그인/활동 - 방문일지 제출 시도");
                     const success = await submitRecord('visit', {
                         date: todayStr,
                         name: currentUserData.name,
@@ -1335,10 +1343,8 @@
                     gender: ''
                 };
 
-                // UI 즉시 업데이트 (로딩 중에도 화면 전환)
+                // UI 즉시 업데이트 (로그인 폼만 먼저 숨김)
                 authSection.classList.add('hidden');
-                mainSection.classList.remove('hidden');
-                userNameDisplay.textContent = currentUserData.name;
                 updateSyncUI();
 
                 // 2. Firestore에서 상세 프로필 가져오기
@@ -1360,26 +1366,23 @@
                             // 프로필 로드 후 UI 업데이트
                             userNameDisplay.textContent = currentUserData.name;
 
-                            // 상태에 따른 화면 분기
+                            // 3. UI 최종 노출 및 상태에 따른 화면 분기
+                            authSection.classList.add('hidden');
+                            mainSection.classList.remove('hidden');
+
                             if (currentUserData.status === 'approved' || currentUserData.role === 'admin') {
                                 document.getElementById('pendingArea').classList.add('hidden');
-
-                                // 관리자 권한 UI 처리
-                                const adminBadge = document.getElementById('adminBadge');
-                                const adminModeBtn = document.getElementById('adminModeBtn');
-                                const facilityLogSection = document.getElementById('facilityLogSection');
 
                                 if (currentUserData.role === 'admin') {
                                     // 관리자는 사용자 모드를 거치지 않고 바로 관리자 영역 표시
                                     document.getElementById('userArea').classList.add('hidden');
                                     document.getElementById('adminArea').classList.remove('hidden');
 
-                                    adminBadge?.classList.remove('hidden');
-                                    adminModeBtn?.classList.remove('hidden');
-                                    facilityLogSection?.classList.add('hidden'); // 관리자는 작성 폼 숨김
+                                    document.getElementById('adminBadge')?.classList.remove('hidden');
+                                    document.getElementById('adminModeBtn')?.classList.remove('hidden');
+                                    document.getElementById('facilityLogSection')?.classList.add('hidden');
                                     document.getElementById('forceVisitBtn')?.classList.remove('hidden');
 
-                                    // 스프레드 시트 버튼 URL 설정
                                     const sheetLink = document.getElementById('spreadsheetBtn');
                                     if (sheetLink) {
                                         sheetLink.href = "https://docs.google.com/spreadsheets/d/1ErbIUwhL-UatarQxeYhCP79RF0f0GrlFLaD1WAw13BQ/edit?usp=sharing";
@@ -1392,12 +1395,12 @@
                                     document.getElementById('userArea').classList.remove('hidden');
                                     document.getElementById('adminArea').classList.add('hidden');
 
-                                    adminBadge?.classList.add('hidden');
-                                    adminModeBtn?.classList.add('hidden');
-                                    facilityLogSection?.classList.remove('hidden');
+                                    document.getElementById('adminBadge')?.classList.add('hidden');
+                                    document.getElementById('adminModeBtn')?.classList.add('hidden');
+                                    document.getElementById('facilityLogSection')?.classList.remove('hidden');
                                     document.getElementById('forceVisitBtn')?.classList.add('hidden');
 
-                                    checkAndSubmitDailyVisit(user); // 일반 사용자만 방문일지 체크
+                                    checkAndSubmitDailyVisit(user);
                                 }
                             } else {
                                 // 승인 대기 중
@@ -1407,10 +1410,14 @@
                                 document.getElementById('facilityLogSection')?.classList.remove('hidden');
                             }
                             checkSiteAccessAuth();
+                            userNameDisplay.textContent = currentUserData.name;
                         } else {
-                            // 프로필이 없는 경우(가입 직후 등) 대기 상태로 간주
+                            // 프로필이 없는 경우 (가입 직후 등)
+                            authSection.classList.add('hidden');
+                            mainSection.classList.remove('hidden');
                             document.getElementById('pendingArea').classList.remove('hidden');
                             document.getElementById('userArea').classList.add('hidden');
+                            document.getElementById('adminArea').classList.add('hidden');
                         }
                     } catch (e) {
                         console.error("프로필 조회 실패:", e);
