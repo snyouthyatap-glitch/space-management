@@ -479,6 +479,54 @@
         #adminModeBtn:hover {
             background: #2d3748;
         }
+
+        /* 토스트 알림 UI */
+        .toast-container {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 10000;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        
+        .toast {
+            background: white;
+            border-left: 4px solid var(--primary-light);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            padding: 1rem 1.5rem;
+            border-radius: 8px;
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            transform: translateX(120%);
+            transition: transform 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+            max-width: 350px;
+        }
+        
+        .toast.show {
+            transform: translateX(0);
+        }
+        
+        .toast-icon {
+            font-size: 1.5rem;
+            color: var(--primary-light);
+            margin-top: 2px;
+        }
+        
+        .toast-content h4 {
+            margin: 0 0 4px 0;
+            font-size: 0.95rem;
+            color: var(--text-color);
+        }
+        
+        .toast-content p {
+            margin: 0;
+            font-size: 0.85rem;
+            color: var(--gray-text);
+            line-height: 1.4;
+        }
     </style>
 </head>
 
@@ -487,6 +535,15 @@
     <div id="onlineWarning" class="online-warning">
         <i class="fa-solid fa-circle-exclamation"></i> 오프라인 상태입니다. 인터넷 연결을 확인해주세요.
     </div>
+
+    <!-- 토스트 알림 컨테이너 -->
+    <div id="toastContainer" class="toast-container"></div>
+    
+    <!-- 알림음 오디오 (가벼운 팝 사운드 데이터 URI) -->
+    <audio id="notificationSound" preload="auto">
+        <source src="data:audio/mp3;base64,//OExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//OExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq" type="audio/mpeg">
+        <source src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3" type="audio/mpeg">
+    </audio>
 
     <div class="app-bg"></div>
 
@@ -943,7 +1000,7 @@
         } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
         import {
             getFirestore, doc, setDoc, getDoc, updateDoc, collection, addDoc, serverTimestamp,
-            query, getDocs, where
+            query, getDocs, where, onSnapshot
         } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
         // TODO: Firebase 콘솔에서 발급받은 실제 설정값으로 변경하세요
@@ -1006,6 +1063,7 @@
         // 사용자 상태 변수
         let currentUserData = null;
         let logoutTimer = null;
+        let isProcessingVisit = false;
 
         // UI 요소
         const authSection = document.getElementById('authSection');
@@ -1305,25 +1363,31 @@
         // [수정] 방문 기록 제출 체크 함수 (자정 이후 첫 접속/활동 시 제출 보장)
         // ----------------------------------------------------------------------------------
         async function checkAndSubmitDailyVisit(user) {
-            if (!user || !currentUserData) return;
-
-            // 프로필 로딩 대기 (role이 설정될 때까지 최대 2초 대기)
-            let retry = 0;
-            while (!currentUserData.role && retry < 10) {
-                await new Promise(r => setTimeout(r, 200));
-                retry++;
-            }
-
-            // 관리자 계정이거나 여전히 role이 없으면 자동 제출 제외
-            if (currentUserData.role === 'admin' || !currentUserData.role) return;
-
-            // 오늘 날짜 및 문서 참조 설정
-            const todayStr = getTrustedNow().toLocaleDateString('en-CA');
-            const visitDocRef = doc(db, "users", user.uid, "visitLog", todayStr);
+            if (!user || !currentUserData || isProcessingVisit) return;
+            
+            // 중복 방지 플래그 완전 선점 (비동기 대기 전)
+            isProcessingVisit = true;
 
             try {
+                // 프로필 로딩 대기 (role이 설정될 때까지 최대 2초 대기)
+                let retry = 0;
+                while (!currentUserData.role && retry < 10) {
+                    await new Promise(r => setTimeout(r, 200));
+                    retry++;
+                }
+
+                // 관리자 계정이거나 여전히 role이 없으면 자동 제출 제외
+                if (currentUserData.role === 'admin' || !currentUserData.role) return;
+
+                // 오늘 날짜 및 문서 참조 설정
+                const todayStr = getTrustedNow().toLocaleDateString('en-CA');
+                const visitDocRef = doc(db, "users", user.uid, "visitLog", todayStr);
+
                 const visitDoc = await getDoc(visitDocRef);
                 if (!visitDoc.exists()) {
+                    // 기기 간 동시 로그인을 방지하기 위해 Firestore 마커 선행 작성
+                    await setDoc(visitDocRef, { submitted: true, timestamp: serverTimestamp() });
+
                     const success = await submitRecord('visit', {
                         date: todayStr,
                         name: currentUserData.name,
@@ -1332,14 +1396,18 @@
                     }, null);
 
                     if (success) {
-                        await setDoc(visitDocRef, { submitted: true, timestamp: serverTimestamp() });
                         document.getElementById('visitAlert').classList.remove('hidden');
+                    } else {
+                        // 실패 시 재시도될 수 있도록 삭제 가능
+                        // await deleteDoc(visitDocRef);
                     }
                 } else {
                     document.getElementById('visitAlert').classList.remove('hidden');
                 }
             } catch (e) {
                 console.error("방문일지 처리 오류:", e);
+            } finally {
+                isProcessingVisit = false;
             }
         }
 
@@ -1411,6 +1479,10 @@
 
                                     loadAdminStats('daily');
                                     loadPendingUsers();
+                                    
+                                    // [실시간 알림 세팅]
+                                    setupAdminListeners();
+
                                 } else {
                                     // 일반 승인 사용자는 사용자 영역 표시
                                     document.getElementById('userArea').classList.remove('hidden');
@@ -1457,6 +1529,10 @@
                 document.getElementById('adminModeBtn')?.classList.add('hidden');
                 authSection.classList.remove('hidden');
                 document.getElementById('loginForm').reset();
+                
+                // 알림 리스너 해제 (존재한다면)
+                if (window.unsubscribeSignups) window.unsubscribeSignups();
+                if (window.unsubscribeVisits) window.unsubscribeVisits();
             }
         });
 
@@ -1581,6 +1657,9 @@
                                     const visitDoc = await getDoc(visitDocRef);
                                     
                                     if (!visitDoc.exists()) {
+                                        // 중복 방지를 위해 Firestore 마커 선행 작성
+                                        await setDoc(visitDocRef, { submitted: true, timestamp: serverTimestamp() });
+
                                         const success = await submitRecord('visit', {
                                             date: todayStr,
                                             name: userData.name,
@@ -1588,8 +1667,9 @@
                                             age: userData.age || calcAge(userData.birthDate)
                                         }, null, false, { uid: targetUid, ...userData });
                                         
-                                        if (success) {
-                                            await setDoc(visitDocRef, { submitted: true, timestamp: serverTimestamp() });
+                                        if (!success) {
+                                            // 성공하지 못한 경우 마커 삭제하여 재시도 가능하게 함 (선택 사항)
+                                            // await deleteDoc(visitDocRef);
                                         }
                                     }
                                     
@@ -1635,6 +1715,9 @@
                                 }
 
                                 if (confirm(`${userData.name} 사용자를 대신하여 방문일지를 제출하시겠습니까?`)) {
+                                    // 중복 방지를 위해 Firestore 마커 선행 작성
+                                    await setDoc(visitDocRef, { submitted: true, timestamp: serverTimestamp() });
+
                                     const success = await submitRecord('visit', {
                                         date: todayStr,
                                         name: userData.name,
@@ -1643,8 +1726,9 @@
                                     }, null, false, { uid: targetUid, ...userData });
                                     
                                     if (success) {
-                                        await setDoc(visitDocRef, { submitted: true, timestamp: serverTimestamp() });
                                         alert('방문일지가 성공적으로 제출되었습니다.');
+                                    } else {
+                                        // 실패 시 마커 삭제 로직 고려 가능
                                     }
                                 }
                             }
@@ -1718,15 +1802,15 @@
                     createdAt: serverTimestamp()
                 });
 
-                // [중요] 가입 완료 후 자동 로그인을 막고 로그인 화면으로 보냅니다.
-                await signOut(auth);
-
+                // 가입 완료 안내 및 UI 전환 (대기 화면으로 브릿지)
                 alert('회원가입 신청이 완료되었습니다!\n관리자 승인 후(최대 24시간 이내) 이용 가능합니다.');
 
-                // UI 초기화 및 로그인 화면으로 전환
+                // [수정] 즉시 로그아웃 대신 펜딩 화면 노출 유도
+                // (onAuthStateChanged가 자동으로 pendingArea를 보여주게 됨)
+                
                 document.getElementById('signupForm').reset();
                 signupView.classList.add('hidden');
-                loginView.classList.remove('hidden');
+                // loginView.classList.remove('hidden'); // 로그인창으로 보내지 않고 상태 유지
                 showAlert('loginAlert', '가입 신청 완료! 관리자 승인을 기다려주세요.', 'success');
 
                 // 회원정보 가입 즉시 UI 및 데이터 업데이트 (onAuthStateChanged 보다 늦게 기록되므로 수동 업데이트)
@@ -1735,22 +1819,6 @@
                     currentUserData.age = age;
                     currentUserData.gender = gender;
                     userNameDisplay.textContent = name;
-
-                    // 가동 방문 기록 재시도 (프로필 생성전에 실행되었을 수 있으므로)
-                    const todayStr = getTrustedNow().toLocaleDateString('en-CA');
-                    const visitDocRef = doc(db, "users", user.uid, "visitLog", todayStr);
-                    const visitDoc = await getDoc(visitDocRef);
-                    if (!visitDoc.exists()) {
-                        const success = await submitRecord('visit', {
-                            date: todayStr,
-                            name: name,
-                            gender: gender,
-                            age: age
-                        }, null);
-                        if (success) {
-                            await setDoc(visitDocRef, { submitted: true, timestamp: serverTimestamp() });
-                        }
-                    }
                 }
             } catch (error) {
                 let msg = error.message;
@@ -2106,6 +2174,111 @@
         window.addEventListener('online', checkOnlineStatus);
         window.addEventListener('offline', checkOnlineStatus);
         checkOnlineStatus();
+
+        // ----------------------------------------------------------------------------------
+        // [신규] 관리자 실시간 알림 로직 (팝업, 소리, 바탕화면 알림)
+        // ----------------------------------------------------------------------------------
+        let isFirstSignupLoad = true;
+        let isFirstVisitLoad = true;
+
+        async function setupAdminListeners() {
+            // 알림 권한 요청 (브라우저 OS 레벨 알림)
+            if ("Notification" in window && Notification.permission !== "granted" && Notification.permission !== "denied") {
+                Notification.requestPermission();
+            }
+
+            const todayStr = getTrustedNow().toLocaleDateString('en-CA');
+            
+            // 1. 가입 신청 (승인 대기자) 실시간 감지
+            const qSignups = query(collection(db, "users"), where("status", "==", "pending"));
+            window.unsubscribeSignups = onSnapshot(qSignups, (snapshot) => {
+                if (isFirstSignupLoad) {
+                    isFirstSignupLoad = false;
+                    return; // 최초 로드 시에는 기존 대기자로 알림을 울리지 않음
+                }
+
+                snapshot.docChanges().forEach((change) => {
+                    if (change.type === "added") {
+                        const data = change.doc.data();
+                        showAdminNotification(
+                            "신규 가입 신청", 
+                            `${data.name} 님이 가입을 신청했습니다. 승인 대기 목록을 확인해 주세요.`,
+                            "fa-user-plus"
+                        );
+                        // 대기자 리스트 및 통계 갱신
+                        loadPendingUsers();
+                    }
+                });
+            });
+
+            // 2. 오늘 방문일지 제출 실시간 감지
+            const qVisits = query(collection(db, "logs_visit")); // 단순함을 위해 전체를 감지하고 프론트에서 날짜 필터링, 또는 별도 복합 인덱스 필요
+            window.unsubscribeVisits = onSnapshot(qVisits, (snapshot) => {
+                if (isFirstVisitLoad) {
+                    isFirstVisitLoad = false;
+                    return;
+                }
+
+                snapshot.docChanges().forEach((change) => {
+                    if (change.type === "added") {
+                        const data = change.doc.data();
+                        if (data.date === todayStr) {
+                            showAdminNotification(
+                                "오늘의 방문일지 추가", 
+                                `${data.name} 님의 방문 기록이 제출되었습니다.`,
+                                "fa-check-circle"
+                            );
+                            // 관리자가 현재 보고있는 탭이 방문기록/통계라면 새로고침 가능
+                            const currentPeriod = document.querySelector('.period-btn.active')?.dataset.period || 'daily';
+                            loadAdminStats(currentPeriod);
+                        }
+                    }
+                });
+            });
+        }
+
+        function showAdminNotification(title, message, iconClass = "fa-bell") {
+            // [1] 소리 재생
+            try {
+                const audio = document.getElementById('notificationSound');
+                if (audio) {
+                    audio.currentTime = 0;
+                    audio.play().catch(e => console.warn('오디오 재생 실패 (사용자 상호작용 필요):', e));
+                }
+            } catch (e) {}
+
+            // [2] 화면 Тоast UI 표시
+            const container = document.getElementById('toastContainer');
+            if (container) {
+                const toast = document.createElement('div');
+                toast.className = 'toast';
+                toast.innerHTML = `
+                    <div class="toast-icon"><i class="fa-solid ${iconClass}"></i></div>
+                    <div class="toast-content">
+                        <h4>${title}</h4>
+                        <p>${message}</p>
+                    </div>
+                `;
+                container.appendChild(toast);
+                
+                // 애니메이션 트리거를 위해 약간의 지연
+                setTimeout(() => toast.classList.add('show'), 10);
+                
+                // 5초 후 자동 제거
+                setTimeout(() => {
+                    toast.classList.remove('show');
+                    setTimeout(() => toast.remove(), 300);
+                }, 5000);
+            }
+
+            // [3] 바탕화면 (OS 레벨) 알림 - 브라우저 최소화 시에도 보임
+            if ("Notification" in window && Notification.permission === "granted") {
+                new Notification("청년이봄: " + title, {
+                    body: message,
+                    icon: "https://cdn-icons-png.flaticon.com/512/3237/3237472.png" // 임시 아이콘 (종모양)
+                });
+            }
+        }
 
         const privacyModal = document.getElementById('privacyModal');
         const closeBtn = document.getElementById('closePrivacyModal');
