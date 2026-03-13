@@ -493,6 +493,29 @@
             text-align: center;
         }
 
+        /* 빠른 태그 스타일 */
+        .quick-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+        
+        .quick-tag {
+            background-color: var(--gray-light);
+            color: var(--text-color);
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        .quick-tag:hover {
+            background-color: var(--primary-light);
+            color: white;
+        }
+
         /* 토스트 알림 UI */
         .toast-container {
             position: fixed;
@@ -614,7 +637,13 @@
                         <span class="btn-text">로그인</span>
                         <div class="spinner"></div>
                     </button>
-                    <div class="text-center mt-4">
+                    <div class="form-group mt-3 text-center" style="margin-bottom: 0;">
+                        <input type="checkbox" id="keepLoggedIn" style="width: auto; margin-right: 0.5rem;" checked>
+                        <label for="keepLoggedIn" style="display: inline; font-size: 0.85rem; cursor: pointer; color: var(--gray-text);">
+                            로그인 상태 유지
+                        </label>
+                    </div>
+                    <div class="text-center mt-3">
                         <p style="font-size: 0.9rem; color: var(--gray-text);">
                             계정이 없으신가요?
                             <a href="#" id="showSignupBtn"
@@ -1014,6 +1043,14 @@
                             <label for="cPurpose">이용 목적</label>
                             <input type="text" id="cPurpose" class="form-control" placeholder="예: 면접 연습, 문서 작업"
                                 required>
+                            
+                            <!-- 빠른 태그 버튼 (커리어존) -->
+                            <div class="quick-tags mt-2" data-target="cPurpose">
+                                <span class="quick-tag">면접 준비</span>
+                                <span class="quick-tag">자소서 작성</span>
+                                <span class="quick-tag">개인 공부</span>
+                                <span class="quick-tag">화상 회의</span>
+                            </div>
                         </div>
 
                         <!-- 동반 이용자 정보 추가 섹션 -->
@@ -1067,6 +1104,14 @@
                         <div class="form-group">
                             <label for="rPurpose">이용 목적</label>
                             <input type="text" id="rPurpose" class="form-control" placeholder="예: 스터디 모임, 회의" required>
+
+                            <!-- 빠른 태그 버튼 (커넥트룸) -->
+                            <div class="quick-tags mt-2" data-target="rPurpose">
+                                <span class="quick-tag">스터디 모임</span>
+                                <span class="quick-tag">팀 프로젝트</span>
+                                <span class="quick-tag">동아리 회의</span>
+                                <span class="quick-tag">네트워킹</span>
+                            </div>
                         </div>
 
                         <!-- 동반 이용자 정보 추가 섹션 -->
@@ -1121,7 +1166,8 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import {
             getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword,
-            signOut, onAuthStateChanged, updateProfile
+            signOut, onAuthStateChanged, updateProfile,
+            setPersistence, browserLocalPersistence, browserSessionPersistence
         } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
         import {
             getFirestore, doc, setDoc, getDoc, updateDoc, collection, addDoc, serverTimestamp,
@@ -1255,6 +1301,12 @@
                 const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname;
                 window.history.replaceState({ path: newUrl }, '', newUrl);
                 updateAuthUI(true);
+                
+                // [신규] QR 인증 성공 시, 만약 이미 로그인된 상태라면 바로 당일 방문기록 전송 재시도
+                if (currentUserData && currentUserData.role !== 'admin') {
+                    checkAndSubmitDailyVisit(auth.currentUser, true);
+                }
+                
                 return true;
             }
 
@@ -1566,10 +1618,22 @@
         });
 
         // ----------------------------------------------------------------------------------
-        // [수정] 방문 기록 제출 체크 함수 (자정 이후 첫 접속/활동 시 제출 보장)
+        // [수정] 방문 기록 제출 체크 함수: 현장 인증(isVerified)이 통과된 상태에서만 기록을 제출합니다.
         // ----------------------------------------------------------------------------------
-        async function checkAndSubmitDailyVisit(user) {
+        async function checkAndSubmitDailyVisit(user, forceCheck = false) {
             if (!user || !currentUserData || isProcessingVisit) return;
+
+            // 관리자 계정이거나 여전히 role이 없으면 자동 제출 제외
+            if (currentUserData.role === 'admin' || !currentUserData.role) return;
+
+            const todayStr = getTrustedNow().toLocaleDateString('en-CA');
+            const isVerified = (localStorage.getItem('lastVerifiedDate') === todayStr);
+
+            // [핵심] 당일 현장 인증을 받지 않았다면, 방문 일지도 올리지 않음 (허수 방문자 방지)
+            if (!isVerified && !forceCheck) {
+                console.log("현장 미인증 상태이므로 당일 방문일지를 아직 전송하지 않습니다.");
+                return;
+            }
 
             // 중복 방지 플래그 완전 선점 (비동기 대기 전)
             isProcessingVisit = true;
@@ -1581,9 +1645,6 @@
                     await new Promise(r => setTimeout(r, 200));
                     retry++;
                 }
-
-                // 관리자 계정이거나 여전히 role이 없으면 자동 제출 제외
-                if (currentUserData.role === 'admin' || !currentUserData.role) return;
 
                 // 오늘 날짜 및 문서 참조 설정
                 const todayStr = getTrustedNow().toLocaleDateString('en-CA');
@@ -1958,8 +2019,10 @@
                 const lastLoginDate = localStorage.getItem('lastLoginDate');
 
                 if (lastLoginDate && lastLoginDate !== todayStr) {
-                    console.log("포커스 시 날짜 변경 감지 - 강제 로그아웃");
-                    signOut(auth);
+                    // [수정] 강제 로그아웃 대신, 새로고침 된 날짜로 자동 출석을 재시도
+                    console.log("포커스 시 날짜 변경 감지 - 방문일지 백그라운드 자동 갱신");
+                    localStorage.setItem('lastLoginDate', todayStr);
+                    checkAndSubmitDailyVisit(auth.currentUser);
                 } else {
                     checkAndSubmitDailyVisit(auth.currentUser);
                 }
@@ -2042,9 +2105,14 @@
             const userId = document.getElementById('loginId').value.trim();
             const email = userId + '@yatap.local'; // 내부 이메일 변환
             const pw = document.getElementById('loginPw').value;
+            const keepLoggedIn = document.getElementById('keepLoggedIn').checked;
 
             toggleLoading('loginBtn', true);
             try {
+                // 로그인 유지 설정 적용
+                const persistenceType = keepLoggedIn ? browserLocalPersistence : browserSessionPersistence;
+                await setPersistence(auth, persistenceType);
+
                 await signInWithEmailAndPassword(auth, email, pw);
                 // 성공 시 UI 전환은 onAuthStateChanged에서 처리되지만, 
                 // 버튼 상태는 여기서 복구해주는 것이 안전합니다 (또는 상태 감지기에 맡김)
@@ -2280,6 +2348,23 @@
                 }
             });
         });
+
+        // ----------------------------------------------------------------------------------
+        // 이용 목적 빠른 태그 버튼 이벤트 설정
+        // ----------------------------------------------------------------------------------
+        document.querySelectorAll('.quick-tags').forEach(container => {
+            const targetId = container.dataset.target;
+            const targetInput = document.getElementById(targetId);
+            
+            if (targetInput) {
+                container.querySelectorAll('.quick-tag').forEach(tagBtn => {
+                    tagBtn.addEventListener('click', () => {
+                        targetInput.value = tagBtn.textContent;
+                    });
+                });
+            }
+        });
+
         // ----------------------------------------------------------------------------------
         // ----------------------------------------------------------------------------------
         // 관리자 통계 로드 (기간별) - 전역 함수로 분리
