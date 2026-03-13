@@ -485,10 +485,11 @@
             display: flex;
             gap: 8px;
         }
-        
+
         .date-group select {
             flex: 1;
-            padding: 0.75rem 0.5rem; /* 조금 더 촘촘하게 */
+            padding: 0.75rem 0.5rem;
+            /* 조금 더 촘촘하게 */
             text-align: center;
         }
 
@@ -502,11 +503,11 @@
             flex-direction: column;
             gap: 10px;
         }
-        
+
         .toast {
             background: white;
             border-left: 4px solid var(--primary-light);
-            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
             padding: 1rem 1.5rem;
             border-radius: 8px;
             display: flex;
@@ -516,23 +517,23 @@
             transition: transform 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
             max-width: 350px;
         }
-        
+
         .toast.show {
             transform: translateX(0);
         }
-        
+
         .toast-icon {
             font-size: 1.5rem;
             color: var(--primary-light);
             margin-top: 2px;
         }
-        
+
         .toast-content h4 {
             margin: 0 0 4px 0;
             font-size: 0.95rem;
             color: var(--text-color);
         }
-        
+
         .toast-content p {
             margin: 0;
             font-size: 0.85rem;
@@ -550,10 +551,12 @@
 
     <!-- 토스트 알림 컨테이너 -->
     <div id="toastContainer" class="toast-container"></div>
-    
+
     <!-- 알림음 오디오 (가벼운 팝 사운드 데이터 URI) -->
     <audio id="notificationSound" preload="auto">
-        <source src="data:audio/mp3;base64,//OExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//OExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq" type="audio/mpeg">
+        <source
+            src="data:audio/mp3;base64,//OExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//OExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq"
+            type="audio/mpeg">
         <source src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3" type="audio/mpeg">
     </audio>
 
@@ -768,6 +771,7 @@
                         <div class="admin-tab active" data-target="admin-stat-view">실시간 통계</div>
                         <div class="admin-tab" data-target="admin-user-view">가입 승인 관리 <span id="pendingCountBadge"
                                 class="badge badge-pending hidden">0</span></div>
+                        <div class="admin-tab" data-target="admin-manual-view">수동 추가(긴급)</div>
                     </div>
 
                     <!-- 관리자 탭 1: 통계 -->
@@ -814,13 +818,16 @@
                         <div class="mb-3">
                             <div class="row" style="gap:0.5rem;">
                                 <div class="col" style="flex:4;">
-                                    <input type="text" id="adminUserSearch" class="form-control" placeholder="이름 또는 아이디로 검색" style="padding:0.6rem;">
+                                    <input type="text" id="adminUserSearch" class="form-control"
+                                        placeholder="이름 또는 아이디로 검색" style="padding:0.6rem;">
                                 </div>
                                 <div class="col" style="flex:1;">
-                                    <button id="adminUserSearchBtn" class="btn btn-primary" style="padding:0.6rem;"><i class="fa-solid fa-search"></i></button>
+                                    <button id="adminUserSearchBtn" class="btn btn-primary" style="padding:0.6rem;"><i
+                                            class="fa-solid fa-search"></i></button>
                                 </div>
                             </div>
-                            <small style="color:var(--gray-text); font-size:0.75rem; display:block; margin-top:0.25rem;">
+                            <small
+                                style="color:var(--gray-text); font-size:0.75rem; display:block; margin-top:0.25rem;">
                                 ※ 검색 시 전체 사용자가 조회되며, '대신 제출'이 가능합니다. 비우고 검색 시 승인 대기자만 표시됩니다.
                             </small>
                         </div>
@@ -841,6 +848,103 @@
                                     </tr>
                                 </tbody>
                             </table>
+                        </div>
+                    </div>
+
+                    <!-- 관리자 탭 3: 수동 대리 작성 폼 (긴급 시 사용) -->
+                    <div id="admin-manual-view" class="admin-tab-content hidden" style="background:#f8fafc; padding:1.5rem; border-radius:8px; border:1px solid #e2e8f0;">
+                        <h3 class="mb-3" style="color:var(--primary-dark); font-size:1.1rem;"><i class="fa-solid fa-pen-to-square"></i> 관리자 대리 작성 (수동 추가)</h3>
+                        <p style="font-size:0.85rem; color:var(--gray-text); margin-bottom:1rem; line-height:1.4;">
+                            네트워크 장애, 스마트폰 미소지 등 긴급 상황 시 관리자가 사용자를 대신하여 이용 대장을 작성합니다.<br>이곳에서 작성된 기록은 구글 시트와 통계에 정상 반영됩니다.
+                        </p>
+                        
+                        <!-- 공통 입력 항목 -->
+                        <div class="row mb-3">
+                            <div class="col form-group">
+                                <label for="adminTargetUser">대상 사용자 이름 <span style="color:red;">*</span></label>
+                                <input type="text" id="adminTargetUser" class="form-control" placeholder="예: 홍길동" required>
+                            </div>
+                            <div class="col form-group">
+                                <label for="adminManualReason">작성 사유 <span style="color:red;">*</span></label>
+                                <input type="text" id="adminManualReason" class="form-control" placeholder="예: 스마트폰 분실, 오류 등" required>
+                            </div>
+                        </div>
+
+                        <!-- 탭 네비게이션 (관리자용 내부 탭) -->
+                        <div class="tabs" style="background:#fff; border-radius:8px;">
+                            <div class="tab admin-sub-tab active" data-target="admin-tab-printer">🖨️ 프린터</div>
+                            <div class="tab admin-sub-tab" data-target="admin-tab-career">💼 커리어존</div>
+                            <div class="tab admin-sub-tab" data-target="admin-tab-connect">🤝 커넥트룸</div>
+                        </div>
+
+                        <!-- 프린터 대리 폼 -->
+                        <div id="admin-tab-printer" class="tab-content">
+                            <form id="admin-printerForm">
+                                <div class="form-group">
+                                    <label for="adminPrinterCount">출력 매수 (장) <span style="color:red;">*</span></label>
+                                    <input type="number" id="adminPrinterCount" class="form-control" min="1" max="100" required>
+                                </div>
+                                <button type="submit" class="btn btn-primary mt-2 submit-btn">
+                                    <span class="btn-text">관리자 권한으로 프린터 일지 제출</span>
+                                    <div class="spinner"></div>
+                                </button>
+                            </form>
+                        </div>
+
+                        <!-- 커리어존 대리 폼 -->
+                        <div id="admin-tab-career" class="tab-content hidden">
+                            <form id="admin-careerForm">
+                                <div class="form-group">
+                                    <label for="adminCPlace">이용 장소 <span style="color:red;">*</span></label>
+                                    <select id="adminCPlace" class="form-control" required>
+                                        <option value="">선택</option>
+                                        <option value="청취Room1">청취Room1</option>
+                                        <option value="청취Room2">청취Room2</option>
+                                    </select>
+                                </div>
+                                <div class="row">
+                                    <div class="col form-group">
+                                        <label for="adminCStartTime">시작 시간 <span style="color:red;">*</span></label>
+                                        <input type="time" id="adminCStartTime" class="form-control" required>
+                                    </div>
+                                    <div class="col form-group">
+                                        <label for="adminCEndTime">종료 시간 <span style="color:red;">*</span></label>
+                                        <input type="time" id="adminCEndTime" class="form-control" required>
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label for="adminCPurpose">이용 목적 <span style="color:red;">*</span></label>
+                                    <input type="text" id="adminCPurpose" class="form-control" placeholder="예: 면접 연습" required>
+                                </div>
+                                <button type="submit" class="btn btn-primary mt-2 submit-btn">
+                                    <span class="btn-text">관리자 권한으로 커리어존 일지 제출</span>
+                                    <div class="spinner"></div>
+                                </button>
+                            </form>
+                        </div>
+
+                        <!-- 커넥트룸 대리 폼 -->
+                        <div id="admin-tab-connect" class="tab-content hidden">
+                            <form id="admin-connectForm">
+                                <div class="row">
+                                    <div class="col form-group">
+                                        <label for="adminRStartTime">시작 시간 <span style="color:red;">*</span></label>
+                                        <input type="time" id="adminRStartTime" class="form-control" required>
+                                    </div>
+                                    <div class="col form-group">
+                                        <label for="adminREndTime">종료 시간 <span style="color:red;">*</span></label>
+                                        <input type="time" id="adminREndTime" class="form-control" required>
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label for="adminRPurpose">이용 목적 <span style="color:red;">*</span></label>
+                                    <input type="text" id="adminRPurpose" class="form-control" placeholder="예: 스터디 모임" required>
+                                </div>
+                                <button type="submit" class="btn btn-primary mt-2 submit-btn">
+                                    <span class="btn-text">관리자 권한으로 커넥트룸 일지 제출</span>
+                                    <div class="spinner"></div>
+                                </button>
+                            </form>
                         </div>
                     </div>
                 </div>
@@ -1187,7 +1291,7 @@
             const yearSelect = document.getElementById('signupBirthYear');
             const monthSelect = document.getElementById('signupBirthMonth');
             const daySelect = document.getElementById('signupBirthDay');
-            
+
             if (!yearSelect || !monthSelect || !daySelect) return;
 
             const currentYear = new Date().getFullYear();
@@ -1220,7 +1324,7 @@
                 const currentDay = daySelect.value;
 
                 daySelect.innerHTML = '<option value="">일</option>';
-                
+
                 if (!y || !m) return;
 
                 // 해당 연/월의 마지막 날짜 계산
@@ -1274,15 +1378,29 @@
             loginView.classList.remove('hidden');
         });
 
-        const tabs = document.querySelectorAll('.tab');
-        const tabContents = document.querySelectorAll('.tab-content');
+        // 일반 탭 처리
+        const tabs = document.querySelectorAll('.tabs:not(#admin-manual-view .tabs) .tab');
+        const tabContents = document.querySelectorAll('#facilityLogSection .tab-content');
         tabs.forEach(tab => {
             tab.addEventListener('click', () => {
                 tabs.forEach(t => t.classList.remove('active'));
                 tab.classList.add('active');
                 const targetId = tab.getAttribute('data-target');
                 tabContents.forEach(content => content.classList.add('hidden'));
-                document.getElementById(targetId).classList.remove('hidden');
+                document.getElementById(targetId)?.classList.remove('hidden');
+            });
+        });
+
+        // 관리자 내부 탭 처리
+        const adminSubTabs = document.querySelectorAll('.admin-sub-tab');
+        const adminSubTabContents = document.documentElement.querySelectorAll('#admin-manual-view .tab-content');
+        adminSubTabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                adminSubTabs.forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                const targetId = tab.getAttribute('data-target');
+                adminSubTabContents.forEach(content => content.classList.add('hidden'));
+                document.getElementById(targetId)?.classList.remove('hidden');
             });
         });
 
@@ -1452,7 +1570,7 @@
         // ----------------------------------------------------------------------------------
         async function checkAndSubmitDailyVisit(user) {
             if (!user || !currentUserData || isProcessingVisit) return;
-            
+
             // 중복 방지 플래그 완전 선점 (비동기 대기 전)
             isProcessingVisit = true;
 
@@ -1567,7 +1685,7 @@
 
                                     loadAdminStats('daily');
                                     loadPendingUsers();
-                                    
+
                                     // [실시간 알림 세팅]
                                     setupAdminListeners();
 
@@ -1617,7 +1735,7 @@
                 document.getElementById('adminModeBtn')?.classList.add('hidden');
                 authSection.classList.remove('hidden');
                 document.getElementById('loginForm').reset();
-                
+
                 // 알림 리스너 해제 (존재한다면)
                 if (window.unsubscribeSignups) window.unsubscribeSignups();
                 if (window.unsubscribeVisits) window.unsubscribeVisits();
@@ -1673,7 +1791,7 @@
                     // 검색어가 없으면 승인 대기자만 표시
                     q = query(collection(db, "users"), where("status", "==", "pending"));
                 }
-                
+
                 const querySnapshot = await getDocs(q);
 
                 let html = '';
@@ -1683,9 +1801,9 @@
                 querySnapshot.forEach((docSnap) => {
                     const u = docSnap.data();
                     const uid = docSnap.id;
-                    
+
                     // 검색 필터링 (아이디 또는 이름)
-                    if (searchTerm && 
+                    if (searchTerm &&
                         !(u.name.toLowerCase().includes(searchTerm) || (u.userId && u.userId.toLowerCase().includes(searchTerm)))) {
                         return;
                     }
@@ -1695,7 +1813,7 @@
                     const date = u.createdAt ? new Date(u.createdAt.seconds * 1000).toLocaleDateString() : '-';
                     const isApproved = u.status === 'approved';
                     const isPending = u.status === 'pending';
-                    
+
                     html += `
                         <tr>
                             <td><strong>${u.name}</strong><br><span style="color:var(--gray-text); font-size:0.7rem;">${u.userId || ''}</span></td>
@@ -1739,11 +1857,11 @@
                                 if (userDoc.exists()) {
                                     const userData = userDoc.data();
                                     await updateDoc(doc(db, "users", targetUid), { status: 'approved' });
-                                    
+
                                     // 방문일지 자동 제출 체크
                                     const visitDocRef = doc(db, "users", targetUid, "visitLog", todayStr);
                                     const visitDoc = await getDoc(visitDocRef);
-                                    
+
                                     if (!visitDoc.exists()) {
                                         // 중복 방지를 위해 Firestore 마커 선행 작성
                                         await setDoc(visitDocRef, { submitted: true, timestamp: serverTimestamp() });
@@ -1754,19 +1872,19 @@
                                             gender: userData.gender,
                                             age: userData.age || calcAge(userData.birthDate)
                                         }, null, false, { uid: targetUid, ...userData });
-                                        
+
                                         if (!success) {
                                             // 성공하지 못한 경우 마커 삭제하여 재시도 가능하게 함 (선택 사항)
                                             // await deleteDoc(visitDocRef);
                                         }
                                     }
-                                    
+
                                     alert('승인 및 방문일지 제출이 완료되었습니다.');
                                     loadPendingUsers();
                                 }
-                            } catch (err) { 
+                            } catch (err) {
                                 console.error(err);
-                                alert('승인 중 오류 발생'); 
+                                alert('승인 중 오류 발생');
                             }
                         }
                     });
@@ -1796,7 +1914,7 @@
                                 const userData = userDoc.data();
                                 const visitDocRef = doc(db, "users", targetUid, "visitLog", todayStr);
                                 const visitDoc = await getDoc(visitDocRef);
-                                
+
                                 if (visitDoc.exists()) {
                                     alert('이미 오늘 방문일지가 제출된 사용자입니다.');
                                     return;
@@ -1812,7 +1930,7 @@
                                         gender: userData.gender,
                                         age: userData.age || calcAge(userData.birthDate)
                                     }, null, false, { uid: targetUid, ...userData });
-                                    
+
                                     if (success) {
                                         alert('방문일지가 성공적으로 제출되었습니다.');
                                     } else {
@@ -1895,7 +2013,7 @@
 
                 // [수정] 즉시 로그아웃 대신 펜딩 화면 노출 유도
                 // (onAuthStateChanged가 자동으로 pendingArea를 보여주게 됨)
-                
+
                 document.getElementById('signupForm').reset();
                 signupView.classList.add('hidden');
                 // loginView.classList.remove('hidden'); // 로그인창으로 보내지 않고 상태 유지
@@ -2244,6 +2362,78 @@
         });
 
         // ----------------------------------------------------------------------------------
+        // [추가] 관리자 대리 작성 폼 리스너 공통 함수
+        async function handleAdminManualSubmit(e, formId, type, btnSelector, getSpecificData) {
+            e.preventDefault();
+            const targetUserName = document.getElementById('adminTargetUser').value.trim();
+            const reason = document.getElementById('adminManualReason').value.trim();
+
+            if (!targetUserName || !reason) {
+                alert("대상 사용자 이름과 작성 사유를 모두 입력해주세요.");
+                return;
+            }
+
+            const todayStr = getTrustedNow().toLocaleDateString('en-CA');
+            const specificData = getSpecificData();
+            
+            // 이름 필드에 사유를 병합하여 저장 (시트 양식 수정 없이 정보 전달)
+            const combinedName = `${targetUserName} (관리자 대리: ${reason})`;
+
+            const data = {
+                date: todayStr,
+                name: combinedName,
+                gender: "미상", // 수동 제출이므로 임의값 처리
+                age: "미상",
+                ...specificData
+            };
+
+            const targetUserFallback = { uid: "admin_manual_submission", name: combinedName }; // 백업용 가상 UID
+            
+            toggleLoading(btnSelector, true);
+            const success = await submitRecord(type, data, btnSelector, false, targetUserFallback);
+            toggleLoading(btnSelector, false);
+
+            if (success) {
+                alert(`[${targetUserName}] 님의 일지가 수동으로 제출되었습니다.`);
+                document.getElementById(formId).reset();
+            } else {
+                alert('일지 제출에 실패했습니다. 네트워크를 확인해주세요.');
+            }
+        }
+
+        // 프린터 대리 폼
+        document.getElementById('admin-printerForm')?.addEventListener('submit', (e) => {
+            handleAdminManualSubmit(e, 'admin-printerForm', 'printer', document.querySelector('#admin-printerForm .submit-btn').id || 'admin-printerForm', () => {
+                return { count: document.getElementById('adminPrinterCount').value };
+            });
+        });
+
+        // 커리어존 대리 폼
+        document.getElementById('admin-careerForm')?.addEventListener('submit', (e) => {
+            handleAdminManualSubmit(e, 'admin-careerForm', 'career', document.querySelector('#admin-careerForm .submit-btn').id || 'admin-careerForm', () => {
+                return {
+                    place: document.getElementById('adminCPlace').value,
+                    startTime: document.getElementById('adminCStartTime').value,
+                    endTime: document.getElementById('adminCEndTime').value,
+                    purpose: document.getElementById('adminCPurpose').value,
+                    companions: "" // 수동은 복잡도를 줄이기 위해 제외
+                };
+            });
+        });
+
+        // 커넥트룸 대리 폼
+        document.getElementById('admin-connectForm')?.addEventListener('submit', (e) => {
+            handleAdminManualSubmit(e, 'admin-connectForm', 'connect', document.querySelector('#admin-connectForm .submit-btn').id || 'admin-connectForm', () => {
+                return {
+                    startTime: document.getElementById('adminRStartTime').value,
+                    endTime: document.getElementById('adminREndTime').value,
+                    purpose: document.getElementById('adminRPurpose').value,
+                    companions: ""
+                };
+            });
+        });
+
+        // ----------------------------------------------------------------------------------
         // 온라인 상태 감지 및 제어
         // ----------------------------------------------------------------------------------
         function checkOnlineStatus() {
@@ -2276,7 +2466,7 @@
             }
 
             const todayStr = getTrustedNow().toLocaleDateString('en-CA');
-            
+
             // 1. 가입 신청 (승인 대기자) 실시간 감지
             const qSignups = query(collection(db, "users"), where("status", "==", "pending"));
             window.unsubscribeSignups = onSnapshot(qSignups, (snapshot) => {
@@ -2289,7 +2479,7 @@
                     if (change.type === "added") {
                         const data = change.doc.data();
                         showAdminNotification(
-                            "신규 가입 신청", 
+                            "신규 가입 신청",
                             `${data.name} 님이 가입을 신청했습니다. 승인 대기 목록을 확인해 주세요.`,
                             "fa-user-plus"
                         );
@@ -2312,7 +2502,7 @@
                         const data = change.doc.data();
                         if (data.date === todayStr) {
                             showAdminNotification(
-                                "오늘의 방문일지 추가", 
+                                "오늘의 방문일지 추가",
                                 `${data.name} 님의 방문 기록이 제출되었습니다.`,
                                 "fa-check-circle"
                             );
@@ -2333,7 +2523,7 @@
                     audio.currentTime = 0;
                     audio.play().catch(e => console.warn('오디오 재생 실패 (사용자 상호작용 필요):', e));
                 }
-            } catch (e) {}
+            } catch (e) { }
 
             // [2] 화면 Тоast UI 표시
             const container = document.getElementById('toastContainer');
@@ -2348,10 +2538,10 @@
                     </div>
                 `;
                 container.appendChild(toast);
-                
+
                 // 애니메이션 트리거를 위해 약간의 지연
                 setTimeout(() => toast.classList.add('show'), 10);
-                
+
                 // 5초 후 자동 제거
                 setTimeout(() => {
                     toast.classList.remove('show');
