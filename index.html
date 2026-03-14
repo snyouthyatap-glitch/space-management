@@ -1554,11 +1554,27 @@
             let sheetSuccess = false;
             try {
                 if (GOOGLE_SCRIPT_URL && GOOGLE_SCRIPT_URL.includes("script.google.com")) {
+                    const userToUse = targetUser || currentUserData;
+                    
+                    // [신규] 앱스크립트 규격에 맞게 데이터 재구성
+                    const typeMap = { 'careerZone': 'career', 'connectRoom': 'connect' };
+                    const mappedType = typeMap[type] || type;
+                    
+                    const sheetPayload = {
+                        sheetType: mappedType,
+                        name: userToUse?.name || data.name || '',
+                        phone: userToUse?.phone || data.phone || '010-0000-0000',
+                        email: userToUse?.email || data.email || 'user@example.com',
+                        date: data.date || todayStr,
+                        notes: data.notes || data.purpose || '',
+                        ...data
+                    };
+
                     await fetch(GOOGLE_SCRIPT_URL, {
                         method: 'POST',
                         mode: 'no-cors',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ type: type, data: data })
+                        body: JSON.stringify(sheetPayload)
                     });
                     sheetSuccess = true;
                 }
@@ -2544,8 +2560,11 @@
             const combinedName = `${targetUserName} (관리자 대리: ${reason})`;
 
             const data = {
-                date: selectedDate,
                 name: combinedName,
+                phone: currentUserData?.phone || "010-0000-0000", // 앱스크립트 기본 컬럼 대응
+                email: currentUserData?.email || "admin@manual",
+                date: selectedDate,
+                notes: reason,
                 ...specificData
             };
 
@@ -2707,11 +2726,24 @@
                         logEntry.innerHTML = `<span style="color:var(--gray-text)">[대기]</span> ${record.type} (${record.id})`;
                         debugLog.appendChild(logEntry);
 
+                        // [신규] 앱스크립트 규격 맵핑 재사용
+                        const typeMap = { 'careerZone': 'career', 'connectRoom': 'connect' };
+                        const mappedType = typeMap[record.type] || record.type;
+                        const sheetPayload = {
+                            sheetType: mappedType,
+                            name: record.data.name || '',
+                            phone: record.data.phone || '010-0000-0000',
+                            email: record.data.email || '',
+                            date: record.data.date || '',
+                            notes: record.data.notes || record.data.purpose || '',
+                            ...record.data
+                        };
+
                         const response = await fetch(GOOGLE_SCRIPT_URL, {
                             method: 'POST',
                             mode: 'no-cors',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ type: record.type, data: record.data })
+                            body: JSON.stringify(sheetPayload)
                         });
                         
                         const docRef = doc(db, record.collection, record.id);
