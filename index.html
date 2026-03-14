@@ -1560,40 +1560,55 @@
 
             // 1. Firebase Firestore 에 백업 저장 (항상 수행)
             let firebaseSuccess = false;
-            let logEntry = null;
-            let docRefs = []; // 생성된 문서 참조들 (성공 시 업데이트용)
+            let docRefs = []; 
 
             try {
                 const userToUse = targetUser || currentUserData;
                 if (userToUse) {
-                    logEntry = {
+                    const logEntry = {
                         ...data,
                         userName: userToUse.name,
                         userId: userToUse.uid,
                         type: type,
                         timestamp: serverTimestamp(),
-                        sheetSent: false // 일단 false로 저장
+                        sheetSent: false
                     };
 
-                    // 1) 사용자별 경로에 저장
-                    const userLogRef = await addDoc(collection(db, "records", userToUse.uid, type), logEntry);
-                    docRefs.push(userLogRef);
+                    // 1) 사용자별 경로에 저장 시도
+                    try {
+                        const userLogRef = await addDoc(collection(db, "records", userToUse.uid, type), logEntry);
+                        docRefs.push(userLogRef);
+                    } catch (e1) {
+                        console.error("사용자별 로그 저장 실패:", e1);
+                    }
 
-                    // 2) 유형별 전체 로그 경로에 저장
-                    const collectionMap = {
-                        'visit': 'logs_visit',
-                        'printer': 'logs_printer',
-                        'careerZone': 'logs_career',
-                        'connectRoom': 'logs_connect'
-                    };
-                    const targetCol = collectionMap[type] || 'all_logs';
-                    const globalLogRef = await addDoc(collection(db, targetCol), logEntry);
-                    docRefs.push(globalLogRef);
+                    // 2) 유형별 전체 로그 경로에 저장 시도
+                    try {
+                        const collectionMap = {
+                            'visit': 'logs_visit',
+                            'printer': 'logs_printer',
+                            'careerZone': 'logs_career',
+                            'connectRoom': 'logs_connect'
+                        };
+                        const targetCol = collectionMap[type] || 'all_logs';
+                        const globalLogRef = await addDoc(collection(db, targetCol), logEntry);
+                        docRefs.push(globalLogRef);
+                    } catch (e2) {
+                        console.error("통합 로그 저장 실패:", e2);
+                    }
 
-                    firebaseSuccess = true;
+                    firebaseSuccess = (docRefs.length > 0);
+                    if (!firebaseSuccess) {
+                        console.error("Firestore 저장 실패 (모든 시도 실패)");
+                        if (isAdmin) showAdminNotification("DB 오류", "데이터베이스 저장에 완전히 실패했습니다. 권한이나 네트워크를 확인해 주세요.", "fa-bug");
+                    }
+                } else {
+                    console.error("사용자 정보 없음 - 저장 불가");
+                    if (isAdmin) showAdminNotification("오류", "사용자 정보를 찾을 수 없어 저장할 수 없습니다.", "fa-user-slash");
                 }
             } catch (error) {
-                console.error("Firebase 저장 실패:", error);
+                console.error("Firestore 전체 저장 로직 오류:", error);
+                if (isAdmin) showAdminNotification("DB 시스템 오류", error.message, "fa-circle-exclamation");
             }
 
             // 2. Google Sheets 로 전송 시도
@@ -1623,15 +1638,22 @@
                     
                     sheetSuccess = true;
                     
-                    // 전송 성공 시 Firestore 에 선기록된 데이터의 sheetSent 를 true로 업데이트
+                    // 전송 성공 시 Firestore 업데이트
                     if (firebaseSuccess && docRefs.length > 0) {
                         for (const ref of docRefs) {
-                            await updateDoc(ref, { sheetSent: true }).catch(e => console.error("SheetSent 업데이트 실패:", e));
+                            await updateDoc(ref, { sheetSent: true }).catch(err => console.error("Update fail:", err));
                         }
                     }
                 }
             } catch (error) {
                 console.error("GSheet 전송 실패:", error);
+                if (isAdmin) showAdminNotification("전송 실패", "구글 시트 전송 중 오류가 발생했습니다.", "fa-wifi");
+            }
+
+            if (!firebaseSuccess && !sheetSuccess) {
+                alert("기록 저장 및 시트 전송에 모두 실패했습니다. 네트워크 또는 권한 설정을 확인해 주세요.");
+                if (btnId) toggleLoading(btnId, false);
+                return false;
             }
 
             // 3. 만약 시트 전송에 실패했다면 LocalStorage에 저장하여 나중에 수동 동기화 가능하게 함
@@ -2507,7 +2529,7 @@
                 // 이번 달 1일
                 startDate.setDate(1);
             }
-            
+
             const startDateStr = startDate.toLocaleDateString('en-CA');
             const todayStr = now.toLocaleDateString('en-CA');
 
@@ -2520,7 +2542,7 @@
                     querySnapshot.forEach((doc) => {
                         const data = doc.data();
                         const recordDate = data.date || ''; // 'YYYY-MM-DD' 형식
-                        
+
                         // [핵심] 제출일(timestamp)이 아닌 기록일(date) 기준으로 필터링
                         let isMatch = false;
                         if (period === 'daily') {
