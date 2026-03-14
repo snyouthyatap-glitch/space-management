@@ -499,7 +499,7 @@
             flex-wrap: wrap;
             gap: 6px;
         }
-        
+
         .quick-tag {
             background-color: var(--gray-light);
             color: var(--text-color);
@@ -639,7 +639,8 @@
                     </button>
                     <div class="form-group mt-3 text-center" style="margin-bottom: 0;">
                         <input type="checkbox" id="keepLoggedIn" style="width: auto; margin-right: 0.5rem;" checked>
-                        <label for="keepLoggedIn" style="display: inline; font-size: 0.85rem; cursor: pointer; color: var(--gray-text);">
+                        <label for="keepLoggedIn"
+                            style="display: inline; font-size: 0.85rem; cursor: pointer; color: var(--gray-text);">
                             로그인 상태 유지
                         </label>
                     </div>
@@ -881,21 +882,30 @@
                     </div>
 
                     <!-- 관리자 탭 3: 수동 대리 작성 폼 (긴급 시 사용) -->
-                    <div id="admin-manual-view" class="admin-tab-content hidden" style="background:#f8fafc; padding:1.5rem; border-radius:8px; border:1px solid #e2e8f0;">
-                        <h3 class="mb-3" style="color:var(--primary-dark); font-size:1.1rem;"><i class="fa-solid fa-pen-to-square"></i> 관리자 대리 작성 (수동 추가)</h3>
+                    <div id="admin-manual-view" class="admin-tab-content hidden"
+                        style="background:#f8fafc; padding:1.5rem; border-radius:8px; border:1px solid #e2e8f0;">
+                        <h3 class="mb-3" style="color:var(--primary-dark); font-size:1.1rem;"><i
+                                class="fa-solid fa-pen-to-square"></i> 관리자 대리 작성 (수동 추가)</h3>
                         <p style="font-size:0.85rem; color:var(--gray-text); margin-bottom:1rem; line-height:1.4;">
-                            네트워크 장애, 스마트폰 미소지 등 긴급 상황 시 관리자가 사용자를 대신하여 이용 대장을 작성합니다.<br>이곳에서 작성된 기록은 구글 시트와 통계에 정상 반영됩니다.
+                            네트워크 장애, 스마트폰 미소지 등 긴급 상황 시 관리자가 사용자를 대신하여 이용 대장을 작성합니다.<br>이곳에서 작성된 기록은 구글 시트와 통계에 정상
+                            반영됩니다.
                         </p>
-                        
+
                         <!-- 공통 입력 항목 -->
                         <div class="row mb-3">
                             <div class="col form-group">
+                                <label for="adminManualDate">이용 날짜 <span style="color:red;">*</span></label>
+                                <input type="date" id="adminManualDate" class="form-control" required>
+                            </div>
+                            <div class="col form-group">
                                 <label for="adminTargetUser">대상 사용자 이름 <span style="color:red;">*</span></label>
-                                <input type="text" id="adminTargetUser" class="form-control" placeholder="예: 홍길동" required>
+                                <input type="text" id="adminTargetUser" class="form-control" placeholder="예: 홍길동"
+                                    required>
                             </div>
                             <div class="col form-group">
                                 <label for="adminManualReason">작성 사유 <span style="color:red;">*</span></label>
-                                <input type="text" id="adminManualReason" class="form-control" placeholder="예: 스마트폰 분실, 오류 등" required>
+                                <input type="text" id="adminManualReason" class="form-control"
+                                    placeholder="예: 스마트폰 분실, 오류 등" required>
                             </div>
                         </div>
 
@@ -925,7 +935,8 @@
                             <form id="admin-printerForm">
                                 <div class="form-group">
                                     <label for="adminPrinterCount">출력 매수 (장) <span style="color:red;">*</span></label>
-                                    <input type="number" id="adminPrinterCount" class="form-control" min="1" max="100" required>
+                                    <input type="number" id="adminPrinterCount" class="form-control" min="1" max="100"
+                                        required>
                                 </div>
                                 <button type="submit" class="btn btn-primary mt-2 submit-btn">
                                     <span class="btn-text">관리자 권한으로 프린터 일지 제출</span>
@@ -957,7 +968,8 @@
                                 </div>
                                 <div class="form-group">
                                     <label for="adminCPurpose">이용 목적 <span style="color:red;">*</span></label>
-                                    <input type="text" id="adminCPurpose" class="form-control" placeholder="예: 면접 연습" required>
+                                    <input type="text" id="adminCPurpose" class="form-control" placeholder="예: 면접 연습"
+                                        required>
                                 </div>
                                 <button type="submit" class="btn btn-primary mt-2 submit-btn">
                                     <span class="btn-text">관리자 권한으로 커리어존 일지 제출</span>
@@ -981,7 +993,8 @@
                                 </div>
                                 <div class="form-group">
                                     <label for="adminRPurpose">이용 목적 <span style="color:red;">*</span></label>
-                                    <input type="text" id="adminRPurpose" class="form-control" placeholder="예: 스터디 모임" required>
+                                    <input type="text" id="adminRPurpose" class="form-control" placeholder="예: 스터디 모임"
+                                        required>
                                 </div>
                                 <button type="submit" class="btn btn-primary mt-2 submit-btn">
                                     <span class="btn-text">관리자 권한으로 커넥트룸 일지 제출</span>
@@ -1057,7 +1070,7 @@
                             <label for="cPurpose">이용 목적</label>
                             <input type="text" id="cPurpose" class="form-control" placeholder="예: 면접 연습, 문서 작업"
                                 required>
-                            
+
                             <!-- 빠른 태그 버튼 (커리어존) -->
                             <div class="quick-tags mt-2" data-target="cPurpose">
                                 <span class="quick-tag">면접 준비</span>
@@ -1243,7 +1256,7 @@
         // [필수] Google Apps Script 웹 앱 URL
         // ----------------------------------------------------------------------------------
         // TODO: apps_script.js 배포 후 생성된 URL을 입력하세요.
-        const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzWK5sEpHjrSR96-bM77K5AmQOgjqi8JNTlYfRbfQIjlCKNX29C9d0Pfe7v7mY553uD1w/exec";
+        const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxSiaWhsNV8eIKhdLSc6r3Y2w1IpG9A7BkLva5dD2dakON2er5AAM-4Ha2YU7R_aF0X_A/exec";
 
         // 사용자 상태 변수
         let currentUserData = null;
@@ -1315,12 +1328,12 @@
                 const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname;
                 window.history.replaceState({ path: newUrl }, '', newUrl);
                 updateAuthUI(true);
-                
+
                 // [신규] QR 인증 성공 시, 만약 이미 로그인된 상태라면 바로 당일 방문기록 전송 재시도
                 if (currentUserData && currentUserData.role !== 'admin') {
                     checkAndSubmitDailyVisit(auth.currentUser, true);
                 }
-                
+
                 return true;
             }
 
@@ -1559,7 +1572,7 @@
             if (sheetSuccess && !isRetry) {
                 // targetUser가 있으면 관리자가 대신 제출한 것이므로 메시지 다르게 표시 가능
                 if (targetUser) {
-                    alert(`${targetUser.name} 사용자의 일지가 성공적으로 제출되었습니다.`);
+                    showAdminNotification("제출 완료", `${targetUser.name} 사용자의 일지가 성공적으로 제출되었습니다.`, "fa-check-circle");
                 } else {
                     alert('일지가 성공적으로 제출되었습니다.');
                 }
@@ -1761,6 +1774,11 @@
                                     loadAdminStats('daily');
                                     loadPendingUsers();
 
+                                    // [추가] 수동 추가 날짜 기본값 세팅
+                                    const todayStr = getTrustedNow().toLocaleDateString('en-CA');
+                                    const manualDateInput = document.getElementById('adminManualDate');
+                                    if (manualDateInput) manualDateInput.value = todayStr;
+
                                     // [실시간 알림 세팅]
                                     setupAdminListeners();
 
@@ -1954,12 +1972,12 @@
                                         }
                                     }
 
-                                    alert('승인 및 방문일지 제출이 완료되었습니다.');
+                                    showAdminNotification("승인 완료", "승인 및 방문일지 제출이 완료되었습니다.", "fa-user-check");
                                     loadPendingUsers();
                                 }
                             } catch (err) {
                                 console.error(err);
-                                alert('승인 중 오류 발생');
+                                showAdminNotification("오류 발생", "승인 처리 중 문제가 발생했습니다.", "fa-exclamation-triangle");
                             }
                         }
                     });
@@ -1972,9 +1990,11 @@
                         if (confirm('이 사용자의 가입을 거절하시겠습니까?')) {
                             try {
                                 await updateDoc(doc(db, "users", targetUid), { status: 'rejected' });
-                                alert('거절 처리되었습니다.');
+                                showAdminNotification("거절 완료", "가입 신청이 거절 처리되었습니다.", "fa-user-minus");
                                 loadPendingUsers();
-                            } catch (err) { alert('처리 중 오류 발생'); }
+                            } catch (err) {
+                                showAdminNotification("오류 발생", "처리 중 문제가 발생했습니다.", "fa-exclamation-triangle");
+                            }
                         }
                     });
                 });
@@ -1991,7 +2011,7 @@
                                 const visitDoc = await getDoc(visitDocRef);
 
                                 if (visitDoc.exists()) {
-                                    alert('이미 오늘 방문일지가 제출된 사용자입니다.');
+                                    showAdminNotification("제출 불가", "이미 오늘 방문일지가 제출된 사용자입니다.", "fa-info-circle");
                                     return;
                                 }
 
@@ -2007,15 +2027,15 @@
                                     }, null, false, { uid: targetUid, ...userData });
 
                                     if (success) {
-                                        alert('방문일지가 성공적으로 제출되었습니다.');
+                                        showAdminNotification("제출 완료", "방문일지가 성공적으로 제출되었습니다.", "fa-check-circle");
                                     } else {
-                                        // 실패 시 마커 삭제 로직 고려 가능
+                                        showAdminNotification("제출 실패", "시트 전송에 실패했습니다. 네트워크를 확인해주세요.", "fa-exclamation-triangle");
                                     }
                                 }
                             }
                         } catch (err) {
                             console.error(err);
-                            alert('제출 중 오류 발생');
+                            showAdminNotification("오류 발생", "제출 처리 중 문제가 발생했습니다.", "fa-exclamation-triangle");
                         }
                     });
                 });
@@ -2023,6 +2043,7 @@
             } catch (err) {
                 console.error("사용자 목록 로드 실패 (전체 에러):", err);
                 listEl.innerHTML = '<tr><td colspan="4" class="text-center" style="padding:2rem; color:var(--danger);">데이터를 로드할 수 없습니다.</td></tr>';
+                showAdminNotification("데이터 로드 실패", "사용자 목록을 불러올 수 없습니다.", "fa-exclamation-triangle");
             }
         }
 
@@ -2369,7 +2390,7 @@
         document.querySelectorAll('.quick-tags').forEach(container => {
             const targetId = container.dataset.target;
             const targetInput = document.getElementById(targetId);
-            
+
             if (targetInput) {
                 container.querySelectorAll('.quick-tag').forEach(tagBtn => {
                     tagBtn.addEventListener('click', () => {
@@ -2434,7 +2455,7 @@
                 document.getElementById('statTotalConnect').textContent = `${stats.connect}건`;
             } catch (e) {
                 console.error("통계 로드 실패:", e);
-                alert("통계 데이터를 불러오는데 실패했습니다.");
+                showAdminNotification("알림", "통계 데이터를 불러오는데 실패했습니다.", "fa-exclamation-triangle");
             } finally {
                 refreshBtn.disabled = false;
                 refreshBtn.innerHTML = originalBtnContent;
@@ -2468,18 +2489,18 @@
             const reason = document.getElementById('adminManualReason').value.trim();
 
             if (!targetUserName || !reason) {
-                alert("대상 사용자 이름과 작성 사유를 모두 입력해주세요.");
+                showAdminNotification("입력 누락", "대상 사용자 이름과 작성 사유를 모두 입력해주세요.", "fa-info-circle");
                 return;
             }
 
-            const todayStr = getTrustedNow().toLocaleDateString('en-CA');
+            const selectedDate = document.getElementById('adminManualDate').value;
             const specificData = getSpecificData();
-            
+
             // 이름 필드에 사유를 병합하여 저장 (시트 양식 수정 없이 정보 전달)
             const combinedName = `${targetUserName} (관리자 대리: ${reason})`;
 
             const data = {
-                date: todayStr,
+                date: selectedDate,
                 name: combinedName,
                 gender: "미상", // 수동 제출이므로 임의값 처리
                 age: "미상",
@@ -2487,16 +2508,19 @@
             };
 
             const targetUserFallback = { uid: "admin_manual_submission", name: combinedName }; // 백업용 가상 UID
-            
+
             toggleLoading(btnSelector, true);
             const success = await submitRecord(type, data, btnSelector, false, targetUserFallback);
             toggleLoading(btnSelector, false);
 
             if (success) {
-                alert(`[${targetUserName}] 님의 일지가 수동으로 제출되었습니다.`);
+                showAdminNotification("수동 제출 완료", `[${targetUserName}] 님의 일지가 성공적으로 제출되었습니다.`, "fa-check-circle");
                 document.getElementById(formId).reset();
+                // 날짜는 유지하는 것이 편의상 좋을 수 있으나, 폼 리셋 정책에 따름
+                const manualDateInput = document.getElementById('adminManualDate');
+                if (manualDateInput) manualDateInput.value = selectedDate;
             } else {
-                alert('일지 제출에 실패했습니다. 네트워크를 확인해주세요.');
+                showAdminNotification("제출 실패", "일지 전송에 실패했습니다. 네트워크를 확인해주세요.", "fa-exclamation-triangle");
             }
         }
 
