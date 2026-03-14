@@ -1505,7 +1505,11 @@
             const isAdmin = (currentUserData && currentUserData.role === 'admin');
 
             if (!isVerified && !isAdmin && !targetUser) {
-                alert('현장 방문 인증이 필요합니다. 센터 내 비치된 QR 코드를 찍어주세요.');
+                if (isAdmin) {
+                    showAdminNotification("인증 필요", "현장 방문 인증이 필요합니다. 센터 내 비치된 QR 코드를 찍어주세요.", "fa-location-dot");
+                } else {
+                    alert('현장 방문 인증이 필요합니다. 센터 내 비치된 QR 코드를 찍어주세요.');
+                }
                 updateAuthUI(false);
                 return false;
             }
@@ -1566,14 +1570,19 @@
                 pending.push({ type, data, timestamp: getTrustedNow().toISOString() });
                 localStorage.setItem('pendingRecords', JSON.stringify(pending));
                 updateSyncUI();
-                if (!isRetry) alert('현재 네트워크가 불안정하여 구글 시트 전송에 실패했습니다. 데이터는 브라우저에 임시 저장되었으며, 나중에 수동 동기화가 가능합니다.');
+                
+                if (isAdmin || targetUser) {
+                    showAdminNotification("전송 지연", "네트워크 불안정으로 구글 시트 전송에 실패했습니다. 데이터는 로컬에 임시 저장되었습니다.", "fa-clock");
+                } else {
+                    alert('현재 네트워크가 불안정하여 구글 시트 전송에 실패했습니다. 데이터는 브라우저에 임시 저장되었으며, 나중에 수동 동기화가 가능합니다.');
+                }
             }
 
             if (sheetSuccess && !isRetry) {
                 // targetUser가 있으면 관리자가 대신 제출한 것이므로 메시지 다르게 표시 가능
                 if (targetUser) {
                     showAdminNotification("제출 완료", `${targetUser.name} 사용자의 일지가 성공적으로 제출되었습니다.`, "fa-check-circle");
-                } else {
+                } else if (!isAdmin) {
                     alert('일지가 성공적으로 제출되었습니다.');
                 }
             }
@@ -2019,18 +2028,12 @@
                                     // 중복 방지를 위해 Firestore 마커 선행 작성
                                     await setDoc(visitDocRef, { submitted: true, timestamp: serverTimestamp() });
 
-                                    const success = await submitRecord('visit', {
+                                    await submitRecord('visit', {
                                         date: todayStr,
                                         name: userData.name,
                                         gender: userData.gender,
                                         age: userData.age || calcAge(userData.birthDate)
                                     }, null, false, { uid: targetUid, ...userData });
-
-                                    if (success) {
-                                        showAdminNotification("제출 완료", "방문일지가 성공적으로 제출되었습니다.", "fa-check-circle");
-                                    } else {
-                                        showAdminNotification("제출 실패", "시트 전송에 실패했습니다. 네트워크를 확인해주세요.", "fa-exclamation-triangle");
-                                    }
                                 }
                             }
                         } catch (err) {
@@ -2179,7 +2182,9 @@
             const btn = e.target.querySelector('button[type="submit"]');
             btn.id = btn.id || 'btn_submit_print';
 
+            const todayStr = getTrustedNow().toLocaleDateString('en-CA');
             submitRecord('printer', {
+                date: todayStr,
                 name: currentUserData.name,
                 count: count
             }, btn.id).then((success) => {
@@ -2330,7 +2335,9 @@
 
             const stats = getCareerZoneStats();
 
+            const todayStr = getTrustedNow().toLocaleDateString('en-CA');
             submitRecord('careerZone', {
+                date: todayStr,
                 name: currentUserData.name,
                 place: document.getElementById('cPlace').value,
                 startTime: document.getElementById('cStartTime').value,
@@ -2363,7 +2370,9 @@
 
             const stats = getConnectRoomStats();
 
+            const todayStr = getTrustedNow().toLocaleDateString('en-CA');
             submitRecord('connectRoom', {
+                date: todayStr,
                 name: currentUserData.name,
                 startTime: document.getElementById('rStartTime').value,
                 endTime: document.getElementById('rEndTime').value,
@@ -2514,13 +2523,10 @@
             toggleLoading(btnSelector, false);
 
             if (success) {
-                showAdminNotification("수동 제출 완료", `[${targetUserName}] 님의 일지가 성공적으로 제출되었습니다.`, "fa-check-circle");
                 document.getElementById(formId).reset();
                 // 날짜는 유지하는 것이 편의상 좋을 수 있으나, 폼 리셋 정책에 따름
                 const manualDateInput = document.getElementById('adminManualDate');
                 if (manualDateInput) manualDateInput.value = selectedDate;
-            } else {
-                showAdminNotification("제출 실패", "일지 전송에 실패했습니다. 네트워크를 확인해주세요.", "fa-exclamation-triangle");
             }
         }
 
