@@ -2731,7 +2731,7 @@
                 try {
                     if (GOOGLE_SCRIPT_URL) {
                         // 전송 전 로그
-                        logEntry.innerHTML = `<span style="color:var(--gray-text)">[대기]</span> ${record.type} (${record.id})`;
+                        logEntry.innerHTML = `<span style="color:var(--gray-text)">[대기]</span> ${record.collection}/${record.id}`;
                         debugLog.appendChild(logEntry);
 
                         // [신규] 앱스크립트 규격 맵핑 재사용
@@ -2757,14 +2757,14 @@
                         const docRef = doc(db, record.collection, record.id);
                         await updateDoc(docRef, { sheetSent: true });
 
-                        logEntry.innerHTML = `<span style="color:var(--success)">[성공]</span> ${record.type} (${record.id})`;
+                        logEntry.innerHTML = `<span style="color:var(--success)">[성공]</span> ${record.collection}/${record.id}`;
                         successCount++;
                     } else {
                         throw new Error("GOOGLE_SCRIPT_URL 이 설정되지 않았습니다.");
                     }
                 } catch (err) {
                     console.error("개별 레코드 동기화 실패:", err);
-                    logEntry.innerHTML = `<span style="color:var(--danger)">[실패]</span> ${record.type} (${record.id}): ${err.message}`;
+                    logEntry.innerHTML = `<span style="color:var(--danger)">[실패]</span> ${record.collection}/${record.id}: ${err.message}`;
                     failCount++;
                 }
                 debugLog.scrollTop = debugLog.scrollHeight;
