@@ -901,13 +901,27 @@
 
                         <!-- 탭 네비게이션 (관리자용 내부 탭) -->
                         <div class="tabs" style="background:#fff; border-radius:8px;">
-                            <div class="tab admin-sub-tab active" data-target="admin-tab-printer">🖨️ 프린터</div>
+                            <div class="tab admin-sub-tab active" data-target="admin-tab-visit">🏠 방문일지</div>
+                            <div class="tab admin-sub-tab" data-target="admin-tab-printer">🖨️ 프린터</div>
                             <div class="tab admin-sub-tab" data-target="admin-tab-career">💼 커리어존</div>
                             <div class="tab admin-sub-tab" data-target="admin-tab-connect">🤝 커넥트룸</div>
                         </div>
 
+                        <!-- 방문일지 대리 폼 -->
+                        <div id="admin-tab-visit" class="tab-content">
+                            <form id="admin-visitForm">
+                                <p style="font-size:0.85rem; color:var(--gray-text); margin-bottom:1rem;">
+                                    대상 사용자의 당일 센터 방문 기록을 수동으로 제출합니다.
+                                </p>
+                                <button type="submit" class="btn btn-primary mt-2 submit-btn">
+                                    <span class="btn-text">관리자 권한으로 방문일지 제출</span>
+                                    <div class="spinner"></div>
+                                </button>
+                            </form>
+                        </div>
+
                         <!-- 프린터 대리 폼 -->
-                        <div id="admin-tab-printer" class="tab-content">
+                        <div id="admin-tab-printer" class="tab-content hidden">
                             <form id="admin-printerForm">
                                 <div class="form-group">
                                     <label for="adminPrinterCount">출력 매수 (장) <span style="color:red;">*</span></label>
@@ -2486,6 +2500,13 @@
             }
         }
 
+        // 방문일지 대리 폼
+        document.getElementById('admin-visitForm')?.addEventListener('submit', (e) => {
+            handleAdminManualSubmit(e, 'admin-visitForm', 'visit', document.querySelector('#admin-visitForm .submit-btn').id || 'admin-visitForm', () => {
+                return {}; // 방문일지는 기본 정보(이름, 날짜)만으로 충분
+            });
+        });
+
         // 프린터 대리 폼
         document.getElementById('admin-printerForm')?.addEventListener('submit', (e) => {
             handleAdminManualSubmit(e, 'admin-printerForm', 'printer', document.querySelector('#admin-printerForm .submit-btn').id || 'admin-printerForm', () => {
@@ -2495,7 +2516,7 @@
 
         // 커리어존 대리 폼
         document.getElementById('admin-careerForm')?.addEventListener('submit', (e) => {
-            handleAdminManualSubmit(e, 'admin-careerForm', 'career', document.querySelector('#admin-careerForm .submit-btn').id || 'admin-careerForm', () => {
+            handleAdminManualSubmit(e, 'admin-careerForm', 'careerZone', document.querySelector('#admin-careerForm .submit-btn').id || 'admin-careerForm', () => {
                 return {
                     place: document.getElementById('adminCPlace').value,
                     startTime: document.getElementById('adminCStartTime').value,
@@ -2508,7 +2529,7 @@
 
         // 커넥트룸 대리 폼
         document.getElementById('admin-connectForm')?.addEventListener('submit', (e) => {
-            handleAdminManualSubmit(e, 'admin-connectForm', 'connect', document.querySelector('#admin-connectForm .submit-btn').id || 'admin-connectForm', () => {
+            handleAdminManualSubmit(e, 'admin-connectForm', 'connectRoom', document.querySelector('#admin-connectForm .submit-btn').id || 'admin-connectForm', () => {
                 return {
                     startTime: document.getElementById('adminRStartTime').value,
                     endTime: document.getElementById('adminREndTime').value,
