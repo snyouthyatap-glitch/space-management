@@ -1558,13 +1558,49 @@
 
             if (btnId) toggleLoading(btnId, true);
 
-            // 1. Google Sheets 로 전송 시도
+            // 1. Firebase Firestore 에 백업 저장 (항상 수행)
+            let firebaseSuccess = false;
+            let logEntry = null;
+            let docRefs = []; // 생성된 문서 참조들 (성공 시 업데이트용)
+
+            try {
+                const userToUse = targetUser || currentUserData;
+                if (userToUse) {
+                    logEntry = {
+                        ...data,
+                        userName: userToUse.name,
+                        userId: userToUse.uid,
+                        type: type,
+                        timestamp: serverTimestamp(),
+                        sheetSent: false // 일단 false로 저장
+                    };
+
+                    // 1) 사용자별 경로에 저장
+                    const userLogRef = await addDoc(collection(db, "records", userToUse.uid, type), logEntry);
+                    docRefs.push(userLogRef);
+
+                    // 2) 유형별 전체 로그 경로에 저장
+                    const collectionMap = {
+                        'visit': 'logs_visit',
+                        'printer': 'logs_printer',
+                        'careerZone': 'logs_career',
+                        'connectRoom': 'logs_connect'
+                    };
+                    const targetCol = collectionMap[type] || 'all_logs';
+                    const globalLogRef = await addDoc(collection(db, targetCol), logEntry);
+                    docRefs.push(globalLogRef);
+
+                    firebaseSuccess = true;
+                }
+            } catch (error) {
+                console.error("Firebase 저장 실패:", error);
+            }
+
+            // 2. Google Sheets 로 전송 시도
             let sheetSuccess = false;
             try {
                 if (GOOGLE_SCRIPT_URL && GOOGLE_SCRIPT_URL.includes("script.google.com")) {
                     const userToUse = targetUser || currentUserData;
-
-                    // [신규] 앱스크립트 규격에 맞게 데이터 재구성
                     const typeMap = { 'careerZone': 'career', 'connectRoom': 'connect' };
                     const mappedType = typeMap[type] || type;
 
@@ -1584,43 +1620,18 @@
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(sheetPayload)
                     });
+                    
                     sheetSuccess = true;
+                    
+                    // 전송 성공 시 Firestore 에 선기록된 데이터의 sheetSent 를 true로 업데이트
+                    if (firebaseSuccess && docRefs.length > 0) {
+                        for (const ref of docRefs) {
+                            await updateDoc(ref, { sheetSent: true }).catch(e => console.error("SheetSent 업데이트 실패:", e));
+                        }
+                    }
                 }
             } catch (error) {
                 console.error("GSheet 전송 실패:", error);
-            }
-
-            // 2. Firebase Firestore 에 백업 저장 (항상 수행)
-            let firebaseSuccess = false;
-            try {
-                const userToUse = targetUser || currentUserData;
-                if (userToUse) {
-                    const logEntry = {
-                        ...data,
-                        userName: userToUse.name,
-                        userId: userToUse.uid,
-                        type: type,
-                        timestamp: serverTimestamp(),
-                        sheetSent: sheetSuccess // [추가] 시트 전송 성공 여부 기록
-                    };
-
-                    // 1) 사용자별 경로에 저장
-                    await addDoc(collection(db, "records", userToUse.uid, type), logEntry);
-
-                    // 2) 전체 통합 경로 대신 유형별 경로에 저장 (관리 콘솔 가독성 개선)
-                    const collectionMap = {
-                        'visit': 'logs_visit',
-                        'printer': 'logs_printer',
-                        'careerZone': 'logs_career',
-                        'connectRoom': 'logs_connect'
-                    };
-                    const targetCol = collectionMap[type] || 'all_logs';
-                    await addDoc(collection(db, targetCol), logEntry);
-
-                    firebaseSuccess = true;
-                }
-            } catch (error) {
-                console.error("Firebase 저장 실패:", error);
             }
 
             // 3. 만약 시트 전송에 실패했다면 LocalStorage에 저장하여 나중에 수동 동기화 가능하게 함
