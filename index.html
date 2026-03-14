@@ -1256,7 +1256,7 @@
         // [필수] Google Apps Script 웹 앱 URL
         // ----------------------------------------------------------------------------------
         // TODO: apps_script.js 배포 후 생성된 URL을 입력하세요.
-        const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxSiaWhsNV8eIKhdLSc6r3Y2w1IpG9A7BkLva5dD2dakON2er5AAM-4Ha2YU7R_aF0X_A/exec";
+        const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbx70Vot0c2uajMlLPJjD9xH08sxhEnYbcOEHLfEp8zqkX1FEd4UKm49zYVBPt5CHyMXXQ/exec";
 
         // 사용자 상태 변수
         let currentUserData = null;
@@ -1570,7 +1570,7 @@
                 pending.push({ type, data, timestamp: getTrustedNow().toISOString() });
                 localStorage.setItem('pendingRecords', JSON.stringify(pending));
                 updateSyncUI();
-                
+
                 if (isAdmin || targetUser) {
                     showAdminNotification("전송 지연", "네트워크 불안정으로 구글 시트 전송에 실패했습니다. 데이터는 로컬에 임시 저장되었습니다.", "fa-clock");
                 } else {
