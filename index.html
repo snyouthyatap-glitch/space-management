@@ -2483,7 +2483,7 @@
             const now = getTrustedNow();
             const stats = { visit: 0, printer: 0, career: 0, connect: 0 };
 
-            // 기간별 시작 날짜 계산
+            // [수정] 기간별 시작 날짜 문자열 계산 (기록일 기준 필터링을 위함)
             let startDate = new Date(now);
             startDate.setHours(0, 0, 0, 0);
 
@@ -2496,6 +2496,9 @@
                 // 이번 달 1일
                 startDate.setDate(1);
             }
+            
+            const startDateStr = startDate.toLocaleDateString('en-CA');
+            const todayStr = now.toLocaleDateString('en-CA');
 
             try {
                 const logCollections = ['logs_visit', 'logs_printer', 'logs_career', 'logs_connect'];
@@ -2505,14 +2508,22 @@
                 snapshots.forEach((querySnapshot) => {
                     querySnapshot.forEach((doc) => {
                         const data = doc.data();
-                        if (data.timestamp) {
-                            const logTime = data.timestamp.toDate();
-                            if (logTime >= startDate) {
-                                if (data.type === 'visit') stats.visit++;
-                                if (data.type === 'printer') stats.printer += (Number(data.count) || 0);
-                                if (data.type === 'careerZone') stats.career++;
-                                if (data.type === 'connectRoom') stats.connect++;
-                            }
+                        const recordDate = data.date || ''; // 'YYYY-MM-DD' 형식
+                        
+                        // [핵심] 제출일(timestamp)이 아닌 기록일(date) 기준으로 필터링
+                        let isMatch = false;
+                        if (period === 'daily') {
+                            isMatch = (recordDate === todayStr);
+                        } else {
+                            // 주간/월간은 시작일 이후인지만 체크 (기록일이 미래일 순 없으므로)
+                            isMatch = (recordDate >= startDateStr);
+                        }
+
+                        if (isMatch) {
+                            if (data.type === 'visit') stats.visit++;
+                            if (data.type === 'printer') stats.printer += (Number(data.count) || 0);
+                            if (data.type === 'careerZone') stats.career++;
+                            if (data.type === 'connectRoom') stats.connect++;
                         }
                     });
                 });
