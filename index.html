@@ -1029,6 +1029,13 @@
                             <span class="btn-text">동기화 시작 (구글 시트로 전송)</span>
                             <div class="spinner"></div>
                         </button>
+
+                        <!-- [추가] 디버그 로그 영역 -->
+                        <div id="syncDebugLogArea" class="mt-4 hidden" style="border-top:1px solid #eee; padding-top:1rem;">
+                            <h4 style="font-size:0.85rem; color:var(--gray-text); margin-bottom:0.5rem;">디버그 로그</h4>
+                            <div id="syncDebugLogs" style="font-family:monospace; font-size:0.7rem; background:#f1f5f9; padding:0.5rem; border-radius:4px; max-height:150px; overflow-y:auto; color:var(--text-color);">
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -2681,15 +2688,25 @@
 
             let successCount = 0;
             let failCount = 0;
+            const debugLog = document.getElementById('syncDebugLogs');
+            const debugArea = document.getElementById('syncDebugLogArea');
+            
+            debugLog.innerHTML = '';
+            debugArea.classList.remove('hidden');
 
             for (let i = 0; i < missingRecords.length; i++) {
                 const record = missingRecords[i];
                 startBtn.innerHTML = `<span class="spinner" style="display:inline-block;"></span> 동기화 중... (${i + 1}/${missingRecords.length})`;
                 
+                const logEntry = document.createElement('div');
+                logEntry.style.marginBottom = '0.2rem';
+                
                 try {
-                    // 1. 구글 시트로 전송 (submitRecord 의 전송 로직 재사용 대신 직접 fetch)
-                    // (submitRecord를 쓰면 Firestore 중복 저장이 되므로 직접 fetch 권장)
                     if (GOOGLE_SCRIPT_URL) {
+                        // 전송 전 로그
+                        logEntry.innerHTML = `<span style="color:var(--gray-text)">[대기]</span> ${record.type} (${record.id})`;
+                        debugLog.appendChild(logEntry);
+
                         const response = await fetch(GOOGLE_SCRIPT_URL, {
                             method: 'POST',
                             mode: 'no-cors',
@@ -2697,16 +2714,20 @@
                             body: JSON.stringify({ type: record.type, data: record.data })
                         });
                         
-                        // no-cors 모드에서는 response.ok를 확인할 수 없으나, 예외가 없으면 성공으로 간주 (또는 서버 설정을 바꿈)
-                        // 여기서는 Firebase 문서를 업데이트하여 성공 표시
                         const docRef = doc(db, record.collection, record.id);
                         await updateDoc(docRef, { sheetSent: true });
+                        
+                        logEntry.innerHTML = `<span style="color:var(--success)">[성공]</span> ${record.type} (${record.id})`;
                         successCount++;
+                    } else {
+                        throw new Error("GOOGLE_SCRIPT_URL 이 설정되지 않았습니다.");
                     }
                 } catch (err) {
                     console.error("개별 레코드 동기화 실패:", err);
+                    logEntry.innerHTML = `<span style="color:var(--danger)">[실패]</span> ${record.type} (${record.id}): ${err.message}`;
                     failCount++;
                 }
+                debugLog.scrollTop = debugLog.scrollHeight;
             }
 
             showAdminNotification("동기화 완료", `성공: ${successCount}건 / 실패: ${failCount}건`, successCount > 0 ? "fa-check-double" : "fa-exclamation-triangle");
