@@ -1006,23 +1006,29 @@
                     </div>
 
                     <!-- 관리자 탭 4: Firestore 데이터 동기화 -->
-                    <div id="admin-sync-view" class="admin-tab-content hidden" style="background:#fff; padding:1.5rem; border-radius:8px; border:1px solid #e2e8f0;">
-                        <h3 class="mb-3" style="color:var(--primary-dark); font-size:1.1rem;"><i class="fa-solid fa-cloud-arrow-up"></i> Firestore ↔ 구글 시트 동기화</h3>
+                    <div id="admin-sync-view" class="admin-tab-content hidden"
+                        style="background:#fff; padding:1.5rem; border-radius:8px; border:1px solid #e2e8f0;">
+                        <h3 class="mb-3" style="color:var(--primary-dark); font-size:1.1rem;"><i
+                                class="fa-solid fa-cloud-arrow-up"></i> Firestore ↔ 구글 시트 동기화</h3>
                         <p style="font-size:0.85rem; color:var(--gray-text); margin-bottom:1.5rem; line-height:1.5;">
                             Firestore(DB)에는 저장되었으나 네트워크 오류 등으로 구글 시트에 누락된 기록을 찾아 전송합니다.
                         </p>
-                        
+
                         <div class="form-group mb-4" style="max-width: 300px;">
                             <label for="syncTargetDate">동기화 대상 날짜</label>
                             <div class="d-flex gap-2">
                                 <input type="date" id="syncTargetDate" class="form-control">
-                                <button id="checkSyncBtn" class="btn btn-outline" style="width: auto; white-space: nowrap;">조회</button>
+                                <button id="checkSyncBtn" class="btn btn-outline"
+                                    style="width: auto; white-space: nowrap;">조회</button>
                             </div>
                         </div>
 
-                        <div id="syncStatusSummary" class="mb-4 hidden" style="background:var(--bg-color); padding:1rem; border-radius:8px;">
-                            <p style="font-size:0.9rem; font-weight:600;">조회 결과: <span id="missingCount" style="color:var(--danger);">0</span>건의 누락 데이터 발견</p>
-                            <p id="syncDetailText" style="font-size:0.75rem; color:var(--gray-text); margin-top:0.5rem;"></p>
+                        <div id="syncStatusSummary" class="mb-4 hidden"
+                            style="background:var(--bg-color); padding:1rem; border-radius:8px;">
+                            <p style="font-size:0.9rem; font-weight:600;">조회 결과: <span id="missingCount"
+                                    style="color:var(--danger);">0</span>건의 누락 데이터 발견</p>
+                            <p id="syncDetailText"
+                                style="font-size:0.75rem; color:var(--gray-text); margin-top:0.5rem;"></p>
                         </div>
 
                         <button id="startFirestoreSyncBtn" class="btn btn-primary" disabled>
@@ -1031,9 +1037,11 @@
                         </button>
 
                         <!-- [추가] 디버그 로그 영역 -->
-                        <div id="syncDebugLogArea" class="mt-4 hidden" style="border-top:1px solid #eee; padding-top:1rem;">
+                        <div id="syncDebugLogArea" class="mt-4 hidden"
+                            style="border-top:1px solid #eee; padding-top:1rem;">
                             <h4 style="font-size:0.85rem; color:var(--gray-text); margin-bottom:0.5rem;">디버그 로그</h4>
-                            <div id="syncDebugLogs" style="font-family:monospace; font-size:0.7rem; background:#f1f5f9; padding:0.5rem; border-radius:4px; max-height:150px; overflow-y:auto; color:var(--text-color);">
+                            <div id="syncDebugLogs"
+                                style="font-family:monospace; font-size:0.7rem; background:#f1f5f9; padding:0.5rem; border-radius:4px; max-height:150px; overflow-y:auto; color:var(--text-color);">
                             </div>
                         </div>
                     </div>
@@ -1290,7 +1298,7 @@
         // [필수] Google Apps Script 웹 앱 URL
         // ----------------------------------------------------------------------------------
         // TODO: apps_script.js 배포 후 생성된 URL을 입력하세요.
-        const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzz9Zj1dZ5VfHm1mDJ4kVG7oJ7QhXxoB45BKIGwQRBsCz-kGEAB7Zl4gCYshDl-QOAE5g/exec";
+        const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwuwBpk3VquhjW5ssXFoXXV9M6zvqNLazakv1R7dzpJrw1mFXXcZADJ6fCiD1KSLm75pw/exec";
 
         // 사용자 상태 변수
         let currentUserData = null;
@@ -1555,11 +1563,11 @@
             try {
                 if (GOOGLE_SCRIPT_URL && GOOGLE_SCRIPT_URL.includes("script.google.com")) {
                     const userToUse = targetUser || currentUserData;
-                    
+
                     // [신규] 앱스크립트 규격에 맞게 데이터 재구성
                     const typeMap = { 'careerZone': 'career', 'connectRoom': 'connect' };
                     const mappedType = typeMap[type] || type;
-                    
+
                     const sheetPayload = {
                         sheetType: mappedType,
                         name: userToUse?.name || data.name || '',
@@ -2588,7 +2596,7 @@
                 return {
                     gender: "미상",
                     age: "미상"
-                }; 
+                };
             });
         });
 
@@ -2662,13 +2670,13 @@
             const checkBtn = document.getElementById('checkSyncBtn');
             const startBtn = document.getElementById('startFirestoreSyncBtn');
             const summary = document.getElementById('syncStatusSummary');
-            
+
             checkBtn.disabled = true;
             checkBtn.innerHTML = '<i class="fa-solid fa-sync fa-spin"></i>';
-            
+
             missingRecords = [];
             const collections = ['logs_visit', 'logs_printer', 'logs_career', 'logs_connect'];
-            
+
             try {
                 for (const colName of collections) {
                     const q = query(collection(db, colName), where("date", "==", dateStr));
@@ -2684,9 +2692,9 @@
 
                 summary.classList.remove('hidden');
                 document.getElementById('missingCount').textContent = missingRecords.length;
-                document.getElementById('syncDetailText').textContent = 
+                document.getElementById('syncDetailText').textContent =
                     missingRecords.length > 0 ? `${dateStr} 자로 총 ${missingRecords.length}건의 미전송 데이터가 있습니다.` : "모든 데이터가 동기화되어 있습니다.";
-                
+
                 startBtn.disabled = (missingRecords.length === 0);
             } catch (err) {
                 console.error("동기화 확인 실패:", err);
@@ -2709,17 +2717,17 @@
             let failCount = 0;
             const debugLog = document.getElementById('syncDebugLogs');
             const debugArea = document.getElementById('syncDebugLogArea');
-            
+
             debugLog.innerHTML = '';
             debugArea.classList.remove('hidden');
 
             for (let i = 0; i < missingRecords.length; i++) {
                 const record = missingRecords[i];
                 startBtn.innerHTML = `<span class="spinner" style="display:inline-block;"></span> 동기화 중... (${i + 1}/${missingRecords.length})`;
-                
+
                 const logEntry = document.createElement('div');
                 logEntry.style.marginBottom = '0.2rem';
-                
+
                 try {
                     if (GOOGLE_SCRIPT_URL) {
                         // 전송 전 로그
@@ -2745,10 +2753,10 @@
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify(sheetPayload)
                         });
-                        
+
                         const docRef = doc(db, record.collection, record.id);
                         await updateDoc(docRef, { sheetSent: true });
-                        
+
                         logEntry.innerHTML = `<span style="color:var(--success)">[성공]</span> ${record.type} (${record.id})`;
                         successCount++;
                     } else {
@@ -2769,7 +2777,7 @@
 
         document.getElementById('checkSyncBtn')?.addEventListener('click', checkFirestoreMissingRecords);
         document.getElementById('startFirestoreSyncBtn')?.addEventListener('click', startFirestoreSync);
-        
+
         // 동기화 탭 진입 시 오늘 날짜 기본 세팅
         document.querySelector('[data-target="admin-sync-view"]')?.addEventListener('click', () => {
             const dateInput = document.getElementById('syncTargetDate');
