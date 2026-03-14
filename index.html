@@ -676,18 +676,8 @@
 
                     <div class="row">
                         <div class="col form-group">
-                            <label for="signupBirth">생년월일</label>
-                            <div class="date-group">
-                                <select id="signupBirthYear" class="form-control" required>
-                                    <option value="">연도</option>
-                                </select>
-                                <select id="signupBirthMonth" class="form-control" required>
-                                    <option value="">월</option>
-                                </select>
-                                <select id="signupBirthDay" class="form-control" required>
-                                    <option value="">일</option>
-                                </select>
-                            </div>
+                            <label for="signupBirth">생년월일 (8자리)</label>
+                            <input type="text" id="signupBirth" class="form-control" placeholder="예: 19980921" required maxlength="8" pattern="[0-9]{8}" inputmode="numeric">
                             <small
                                 style="color: var(--gray-text); font-size: 0.75rem; display: block; margin-top: 0.25rem;">
                                 ※ 가입 대상: 만 20세 ~ 39세 청년
@@ -1408,69 +1398,7 @@
         // ----------------------------------------------------------------------------------
         // [신규] 생년월일 드롭다운 동적 생성 로직
         // ----------------------------------------------------------------------------------
-        function setupDateDropdowns() {
-            const yearSelect = document.getElementById('signupBirthYear');
-            const monthSelect = document.getElementById('signupBirthMonth');
-            const daySelect = document.getElementById('signupBirthDay');
-
-            if (!yearSelect || !monthSelect || !daySelect) return;
-
-            const currentYear = new Date().getFullYear();
-            // 청년 대상이므로 (현재년도 - 15) 부터 (현재년도 - 45) 정도까지를 주로 노출
-            const maxYear = currentYear - 15;
-            const minYear = currentYear - 45;
-
-            // 연도 채우기
-            for (let y = maxYear; y >= minYear; y--) {
-                const option = document.createElement('option');
-                option.value = y;
-                option.text = y + '년';
-                yearSelect.appendChild(option);
-            }
-
-            // 월 채우기
-            for (let m = 1; m <= 12; m++) {
-                const option = document.createElement('option');
-                const val = m < 10 ? '0' + m : m;
-                option.value = val;
-                option.text = m + '월';
-                monthSelect.appendChild(option);
-            }
-
-            // 일 채우기 (동적 연동을 위해 별도 함수 분리)
-            function updateDays() {
-                const y = yearSelect.value;
-                const m = monthSelect.value;
-                // 현재 선택된 '일' 기억
-                const currentDay = daySelect.value;
-
-                daySelect.innerHTML = '<option value="">일</option>';
-
-                if (!y || !m) return;
-
-                // 해당 연/월의 마지막 날짜 계산
-                const daysInMonth = new Date(y, parseInt(m, 10), 0).getDate();
-
-                for (let d = 1; d <= daysInMonth; d++) {
-                    const option = document.createElement('option');
-                    const val = d < 10 ? '0' + d : d;
-                    option.value = val;
-                    option.text = d + '일';
-                    daySelect.appendChild(option);
-                }
-
-                // 이전에 선택한 '일'이 새로운 '월'에도 존재하면 유지
-                if (currentDay && parseInt(currentDay, 10) <= daysInMonth) {
-                    daySelect.value = currentDay;
-                }
-            }
-
-            // 연, 월 변경 시 일 목록 업데이트
-            yearSelect.addEventListener('change', updateDays);
-            monthSelect.addEventListener('change', updateDays);
-        }
-        // 드롭다운 초기화
-        setupDateDropdowns();
+        // [제거] 생년월일 드롭다운 로직이 6자리 입력 방식으로 대체되었습니다.
 
         // 생년월일로 만 나이 계산
         function calcAge(birthStr) {
@@ -2163,15 +2091,32 @@
         document.getElementById('signupForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             const userId = document.getElementById('signupId').value.trim();
-            const email = userId + '@yatap.local'; // Firebase는 이메일 형식만 지원하므로 내부 변환
+            const email = userId + '@yatap.local'; 
             const pw = document.getElementById('signupPw').value;
             const name = document.getElementById('signupName').value;
-            const birthDate = document.getElementById('signupBirth').value; // YYYY-MM-DD
+            
+            // [수정] 8자리 생년월일 처리 (YYYYMMDD -> YYYY-MM-DD)
+            const birthRaw = document.getElementById('signupBirth').value.trim();
+            if (birthRaw.length !== 8 || isNaN(birthRaw)) {
+                showAlert('signupAlert', '생년월일을 8자리 숫자로 입력해주세요. (예: 19980921)', 'error');
+                return;
+            }
+
+            const yyyy = birthRaw.substring(0, 4);
+            const mm = birthRaw.substring(4, 6);
+            const dd = birthRaw.substring(6, 8);
+            const birthDate = `${yyyy}-${mm}-${dd}`;
+
             const gender = document.getElementById('signupGender').value;
             const phone = document.getElementById('signupPhone').value;
 
             // 생년월일로 만 나이 계산
-            const age = parseInt(calcAge(birthDate), 10);
+            const ageString = calcAge(birthDate);
+            if (!ageString) {
+                showAlert('signupAlert', '유효하지 않은 생년월일입니다.', 'error');
+                return;
+            }
+            const age = parseInt(ageString, 10);
 
             // 연령 제한 확인 (만 20세 ~ 39세)
             if (age < 20 || age > 39) {
