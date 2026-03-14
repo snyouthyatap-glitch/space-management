@@ -802,6 +802,7 @@
                         <div class="admin-tab" data-target="admin-user-view">가입 승인 관리 <span id="pendingCountBadge"
                                 class="badge badge-pending hidden">0</span></div>
                         <div class="admin-tab" data-target="admin-manual-view">수동 추가(긴급)</div>
+                        <div class="admin-tab" data-target="admin-sync-view">데이터 동기화</div>
                     </div>
 
                     <!-- 관리자 탭 1: 통계 -->
@@ -1002,6 +1003,32 @@
                                 </button>
                             </form>
                         </div>
+                    </div>
+
+                    <!-- 관리자 탭 4: Firestore 데이터 동기화 -->
+                    <div id="admin-sync-view" class="admin-tab-content hidden" style="background:#fff; padding:1.5rem; border-radius:8px; border:1px solid #e2e8f0;">
+                        <h3 class="mb-3" style="color:var(--primary-dark); font-size:1.1rem;"><i class="fa-solid fa-cloud-arrow-up"></i> Firestore ↔ 구글 시트 동기화</h3>
+                        <p style="font-size:0.85rem; color:var(--gray-text); margin-bottom:1.5rem; line-height:1.5;">
+                            Firestore(DB)에는 저장되었으나 네트워크 오류 등으로 구글 시트에 누락된 기록을 찾아 전송합니다.
+                        </p>
+                        
+                        <div class="form-group mb-4" style="max-width: 300px;">
+                            <label for="syncTargetDate">동기화 대상 날짜</label>
+                            <div class="d-flex gap-2">
+                                <input type="date" id="syncTargetDate" class="form-control">
+                                <button id="checkSyncBtn" class="btn btn-outline" style="width: auto; white-space: nowrap;">조회</button>
+                            </div>
+                        </div>
+
+                        <div id="syncStatusSummary" class="mb-4 hidden" style="background:var(--bg-color); padding:1rem; border-radius:8px;">
+                            <p style="font-size:0.9rem; font-weight:600;">조회 결과: <span id="missingCount" style="color:var(--danger);">0</span>건의 누락 데이터 발견</p>
+                            <p id="syncDetailText" style="font-size:0.75rem; color:var(--gray-text); margin-top:0.5rem;"></p>
+                        </div>
+
+                        <button id="startFirestoreSyncBtn" class="btn btn-primary" disabled>
+                            <span class="btn-text">동기화 시작 (구글 시트로 전송)</span>
+                            <div class="spinner"></div>
+                        </button>
                     </div>
                 </div>
             </div>
@@ -1542,7 +1569,8 @@
                         userName: userToUse.name,
                         userId: userToUse.uid,
                         type: type,
-                        timestamp: serverTimestamp()
+                        timestamp: serverTimestamp(),
+                        sheetSent: sheetSuccess // [추가] 시트 전송 성공 여부 기록
                     };
 
                     // 1) 사용자별 경로에 저장
@@ -2511,8 +2539,6 @@
             const data = {
                 date: selectedDate,
                 name: combinedName,
-                gender: "미상", // 수동 제출이므로 임의값 처리
-                age: "미상",
                 ...specificData
             };
 
@@ -2533,7 +2559,10 @@
         // 방문일지 대리 폼
         document.getElementById('admin-visitForm')?.addEventListener('submit', (e) => {
             handleAdminManualSubmit(e, 'admin-visitForm', 'visit', document.querySelector('#admin-visitForm .submit-btn').id || 'admin-visitForm', () => {
-                return {}; // 방문일지는 기본 정보(이름, 날짜)만으로 충분
+                return {
+                    gender: "미상",
+                    age: "미상"
+                }; 
             });
         });
 
@@ -2552,7 +2581,9 @@
                     startTime: document.getElementById('adminCStartTime').value,
                     endTime: document.getElementById('adminCEndTime').value,
                     purpose: document.getElementById('adminCPurpose').value,
-                    companions: "" // 수동은 복잡도를 줄이기 위해 제외
+                    maleCount: 0,
+                    femaleCount: 0,
+                    companionsDetail: ""
                 };
             });
         });
@@ -2564,7 +2595,8 @@
                     startTime: document.getElementById('adminRStartTime').value,
                     endTime: document.getElementById('adminREndTime').value,
                     purpose: document.getElementById('adminRPurpose').value,
-                    companions: ""
+                    m20: 0, f20: 0, m30: 0, f30: 0, m19: 0, f19: 0,
+                    companionsDetail: ""
                 };
             });
         });
@@ -2588,6 +2620,110 @@
         window.addEventListener('online', checkOnlineStatus);
         window.addEventListener('offline', checkOnlineStatus);
         checkOnlineStatus();
+
+        // ----------------------------------------------------------------------------------
+        // [신규] Firestore ↔ 구글 시트 동기화 로직
+        // ----------------------------------------------------------------------------------
+        let missingRecords = [];
+
+        async function checkFirestoreMissingRecords() {
+            const dateStr = document.getElementById('syncTargetDate').value;
+            if (!dateStr) {
+                showAdminNotification("날짜 선택", "조회할 날짜를 선택해주세요.", "fa-calendar-day");
+                return;
+            }
+
+            const checkBtn = document.getElementById('checkSyncBtn');
+            const startBtn = document.getElementById('startFirestoreSyncBtn');
+            const summary = document.getElementById('syncStatusSummary');
+            
+            checkBtn.disabled = true;
+            checkBtn.innerHTML = '<i class="fa-solid fa-sync fa-spin"></i>';
+            
+            missingRecords = [];
+            const collections = ['logs_visit', 'logs_printer', 'logs_career', 'logs_connect'];
+            
+            try {
+                for (const colName of collections) {
+                    const q = query(collection(db, colName), where("date", "==", dateStr));
+                    const snapshot = await getDocs(q);
+                    snapshot.forEach(doc => {
+                        const data = doc.data();
+                        // sheetSent 가 true가 아니거나(false 또는 undefined)인 것들 필터링
+                        if (data.sheetSent !== true) {
+                            missingRecords.push({ id: doc.id, collection: colName, type: data.type, data: data });
+                        }
+                    });
+                }
+
+                summary.classList.remove('hidden');
+                document.getElementById('missingCount').textContent = missingRecords.length;
+                document.getElementById('syncDetailText').textContent = 
+                    missingRecords.length > 0 ? `${dateStr} 자로 총 ${missingRecords.length}건의 미전송 데이터가 있습니다.` : "모든 데이터가 동기화되어 있습니다.";
+                
+                startBtn.disabled = (missingRecords.length === 0);
+            } catch (err) {
+                console.error("동기화 확인 실패:", err);
+                showAdminNotification("오류", "데이터 조회 중 오류가 발생했습니다.", "fa-exclamation-circle");
+            } finally {
+                checkBtn.disabled = false;
+                checkBtn.innerHTML = '조회';
+            }
+        }
+
+        async function startFirestoreSync() {
+            if (missingRecords.length === 0) return;
+
+            const startBtn = document.getElementById('startFirestoreSyncBtn');
+            const originalText = startBtn.innerHTML;
+            startBtn.disabled = true;
+            startBtn.innerHTML = `<span class="spinner" style="display:inline-block;"></span> 동기화 중... (0/${missingRecords.length})`;
+
+            let successCount = 0;
+            let failCount = 0;
+
+            for (let i = 0; i < missingRecords.length; i++) {
+                const record = missingRecords[i];
+                startBtn.innerHTML = `<span class="spinner" style="display:inline-block;"></span> 동기화 중... (${i + 1}/${missingRecords.length})`;
+                
+                try {
+                    // 1. 구글 시트로 전송 (submitRecord 의 전송 로직 재사용 대신 직접 fetch)
+                    // (submitRecord를 쓰면 Firestore 중복 저장이 되므로 직접 fetch 권장)
+                    if (GOOGLE_SCRIPT_URL) {
+                        const response = await fetch(GOOGLE_SCRIPT_URL, {
+                            method: 'POST',
+                            mode: 'no-cors',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ type: record.type, data: record.data })
+                        });
+                        
+                        // no-cors 모드에서는 response.ok를 확인할 수 없으나, 예외가 없으면 성공으로 간주 (또는 서버 설정을 바꿈)
+                        // 여기서는 Firebase 문서를 업데이트하여 성공 표시
+                        const docRef = doc(db, record.collection, record.id);
+                        await updateDoc(docRef, { sheetSent: true });
+                        successCount++;
+                    }
+                } catch (err) {
+                    console.error("개별 레코드 동기화 실패:", err);
+                    failCount++;
+                }
+            }
+
+            showAdminNotification("동기화 완료", `성공: ${successCount}건 / 실패: ${failCount}건`, successCount > 0 ? "fa-check-double" : "fa-exclamation-triangle");
+            startBtn.innerHTML = originalText;
+            checkFirestoreMissingRecords(); // 리스트 새로고침
+        }
+
+        document.getElementById('checkSyncBtn')?.addEventListener('click', checkFirestoreMissingRecords);
+        document.getElementById('startFirestoreSyncBtn')?.addEventListener('click', startFirestoreSync);
+        
+        // 동기화 탭 진입 시 오늘 날짜 기본 세팅
+        document.querySelector('[data-target="admin-sync-view"]')?.addEventListener('click', () => {
+            const dateInput = document.getElementById('syncTargetDate');
+            if (!dateInput.value) {
+                dateInput.value = getTrustedNow().toLocaleDateString('en-CA');
+            }
+        });
 
         // ----------------------------------------------------------------------------------
         // [신규] 관리자 실시간 알림 로직 (팝업, 소리, 바탕화면 알림)
