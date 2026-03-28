@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>청년이봄 야탑 | 공간 방문 및 시설 이용</title>
+
+    <!-- Open Graph / Link Preview Metadata -->
+    <meta property="og:title" content="청년이봄 야탑">
+    <meta property="og:description" content="공간 방문 및 시설 이용 일지 시스템">
+    <meta property="og:type" content="website">
+    <meta name="description" content="청년이봄 야탑 공간 방문 및 시설 이용 일지 시스템">
+
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@300;400;500;600;700&display=swap"
+        rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <!-- Modularized CSS -->
+    <link rel="stylesheet" href="css/style.css">
+</head>
+
+<body>
+    <!-- 온라인 상태 경고 -->
+    <div id="onlineWarning" class="online-warning">
+        <i class="fa-solid fa-circle-exclamation"></i> 오프라인 상태입니다. 인터넷 연결을 확인해주세요.
+    </div>
+
+    <!-- 토스트 알림 컨테이너 -->
+    <div id="toastContainer" class="toast-container"></div>
+
+    <!-- 알림음 오디오 -->
+    <audio id="notificationSound" preload="auto">
+        <source src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3" type="audio/mpeg">
+    </audio>
+
+    <div class="app-bg"></div>
+
+    <!-- 개인정보 처리방침 모달 -->
+    <div id="privacyModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>개인정보 처리방침</h3>
+                <span class="close-modal" id="closePrivacyModal">&times;</span>
+            </div>
+            <div class="modal-body" style="font-size: 0.85rem; color: var(--text-color);">
+                <p><strong>1. 수집하는 개인정보 항목</strong><br>- 이름, 생년월일, 성별, 연락처, 아이디, 이용 기록</p><br>
+                <p><strong>2. 개인정보의 수집 및 이용 목적</strong><br>- 청년이봄 야탑 공간 및 시설 이용 관리<br>- 이용 통계 분석 및 서비스 개선<br>- 청년 정책 관련
+                    정보 및 소식 안내</p><br>
+                <p><strong>3. 개인정보의 보유 및 이용 기간</strong><br>- 이용일로부터 1년간 보관 후 지체 없이 파기합니다.<br>- 단, 사용자의 요청이 있을 경우 즉시
+                    파기합니다.</p><br>
+                <p><strong>4. 동의 거부 권리 및 불이익</strong><br>- 사용자는 개인정보 수집 및 이용에 대한 동의를 거부할 권리가 있습니다.<br>- 동의 거부 시 공간 이용 및
+                    회원가입이 제한될 수 있습니다.</p>
+            </div>
+            <button class="btn btn-outline mt-4" id="modalConfirmBtn">확인</button>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- 상단 타이틀 -->
+        <div class="header">
+            <h1>청년이봄 야탑</h1>
+            <p>공간 방문 및 시설 이용</p>
+        </div>
+
+        <!-- Section 1: 인증 (로그인/회원가입) -->
+        <div id="authSection">
+            <!-- 로그인 뷰 -->
+            <div id="loginView" class="card">
+                <h2 class="text-center mb-4">로그인</h2>
+                <div id="loginAlert" class="alert alert-error hidden"></div>
+                <form id="loginForm">
+                    <div class="form-group">
+                        <label for="loginId"><i class="fa-solid fa-user"></i> 아이디</label>
+                        <input type="text" id="loginId" class="form-control" placeholder="아이디를 입력하세요" required>
+                    </div>
+                    <div class="form-group" style="position: relative;">
+                        <label for="loginPw"><i class="fa-solid fa-lock"></i> 비밀번호</label>
+                        <input type="password" id="loginPw" class="form-control" placeholder="비밀번호를 입력하세요" required>
+                        <i class="fa-solid fa-eye pw-toggle" data-target="loginPw"
+                            style="position: absolute; right: 15px; top: 43px; cursor: pointer; color: var(--gray-text);"></i>
+                    </div>
+                    <button type="submit" class="btn btn-primary mt-2" id="loginBtn">
+                        <span class="btn-text">로그인</span>
+                        <div class="spinner"></div>
+                    </button>
+                    <div class="form-group mt-3 text-center">
+                        <input type="checkbox" id="keepLoggedIn" style="width: auto; margin-right: 0.5rem;" checked>
+                        <label for="keepLoggedIn"
+                            style="display: inline; font-size: 0.85rem; cursor: pointer; color: var(--gray-text);">
+                            로그인 상태 유지
+                        </label>
+                    </div>
+                    <div class="text-center mt-3">
+                        <p style="font-size: 0.9rem; color: var(--gray-text);">
+                            계정이 없으신가요?
+                            <a href="#" id="showSignupBtn"
+                                style="color: var(--primary-light); text-decoration: none; font-weight: 600;">회원가입</a>
+                        </p>
+                    </div>
+                </form>
+            </div>
+
+            <!-- 회원가입 뷰 -->
+            <div id="signupView" class="card hidden">
+                <h2 class="text-center mb-4">회원가입</h2>
+                <div id="signupAlert" class="alert alert-error hidden"></div>
+                <form id="signupForm">
+                    <div class="form-group">
+                        <label for="signupId">아이디</label>
+                        <input type="text" id="signupId" class="form-control" placeholder="영문/숫자 조합" required
+                            minlength="4">
+                    </div>
+                    <div class="form-group" style="position: relative;">
+                        <label for="signupPw">비밀번호 (6자리 이상)</label>
+                        <input type="password" id="signupPw" class="form-control" required minlength="6">
+                        <i class="fa-solid fa-eye pw-toggle" data-target="signupPw"
+                            style="position: absolute; right: 15px; top: 43px; cursor: pointer; color: var(--gray-text);"></i>
+                    </div>
+                    <div class="form-group" style="position: relative;">
+                        <label for="signupPwConfirm">비밀번호 확인</label>
+                        <input type="password" id="signupPwConfirm" class="form-control" required minlength="6">
+                        <i class="fa-solid fa-eye pw-toggle" data-target="signupPwConfirm"
+                            style="position: absolute; right: 15px; top: 43px; cursor: pointer; color: var(--gray-text);"></i>
+                    </div>
+                    <div class="form-group">
+                        <label for="signupName">이름</label>
+                        <input type="text" id="signupName" class="form-control" required>
+                    </div>
+                    <div class="row">
+                        <div class="col form-group">
+                            <label for="signupBirth">생년월일 (8자리)</label>
+                            <input type="text" id="signupBirth" class="form-control" placeholder="YYYY / MM / DD"
+                                required maxlength="14" inputmode="numeric">
+                        </div>
+                        <div class="col form-group">
+                            <label for="signupGender">성별</label>
+                            <select id="signupGender" class="form-control" required>
+                                <option value="">선택</option>
+                                <option value="남성">남성</option>
+                                <option value="여성">여성</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="signupPhone">연락처</label>
+                        <input type="tel" id="signupPhone" class="form-control" placeholder="010-0000-0000" required
+                            maxlength="13">
+                    </div>
+                    <div class="form-group mt-3" style="background: #f1f5f9; padding: 0.75rem; border-radius: 6px;">
+                        <input type="checkbox" id="signupPrivacy" required style="width: auto; margin-right: 0.5rem;">
+                        <label for="signupPrivacy" style="display: inline; font-size: 0.85rem; cursor: pointer;">개인정보 수집
+                            및 이용에 동의합니다 (필수)</label>
+                    </div>
+                    <button type="submit" class="btn btn-primary mt-3" id="signupBtn">
+                        <span class="btn-text">가입하기</span>
+                        <div class="spinner"></div>
+                    </button>
+                    <button type="button" class="btn btn-outline mt-2" id="showLoginBtn">뒤로가기</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Section 2: 메인 대시보드 (로그인 후) -->
+        <div id="mainSection" class="hidden">
+            <!-- 1) 승인 대기 중 화면 -->
+            <div id="pendingArea" class="card hidden">
+                <div id="pendingSection">
+                    <div class="pending-icon"><i class="fa-solid fa-hourglass-half"></i></div>
+                    <h2 class="mb-3">승인 대기 중</h2>
+                    <p style="color: var(--gray-text); margin-bottom: 1.5rem;">관리자가 정보를 확인한 후 승인 처리를 완료하면 서비스 이용이 가능합니다.
+                    </p>
+                    <button id="pendingLogoutBtn" class="btn btn-outline">로그아웃</button>
+                </div>
+            </div>
+
+            <!-- 2) 정식 이용자 화면 -->
+            <div id="userArea" class="hidden">
+                <div class="card-premium mb-4">
+                    <div class="card-accent-bar"></div>
+                    <div class="dashboard-header">
+                        <div class="user-info">
+                            <h3 class="welcome-name"><span id="userNameDisplay">홍길동</span>님</h3>
+                        </div>
+                        <div class="header-actions">
+                            <button id="adminModeBtn" class="hidden btn-mini" title="관리자 모드"><i
+                                    class="fa-solid fa-screwdriver-wrench"></i></button>
+                            <button id="logoutActionBtn" class="btn-logout-premium"><i
+                                    class="fa-solid fa-power-off"></i> 로그아웃</button>
+                        </div>
+                    </div>
+                    <div id="visitStatusArea" class="usage-status-pill">
+                        <div id="visitRequiredMsg">
+                            <i class="fa-solid fa-qrcode"></i> 방문 인증이 필요합니다.
+                        </div>
+                        <div id="visitAlert" class="hidden">
+                            <i class="fa-solid fa-check-circle"></i> 오늘 방문 인증 완료!
+                        </div>
+                    </div>
+                    <div class="dashboard-footer-actions">
+                        <button id="showHistoryBtn" class="btn-action-pill"><i class="fa-solid fa-receipt"></i> 이용
+                            내역</button>
+                        <button id="showCalendarBtn" class="btn-action-pill"><i class="fa-solid fa-calendar-days"></i>
+                            방문 달력</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 2.5) 나의 히스토리 섹션 (NEW) -->
+            <div id="historySection" class="hidden">
+                <div class="card mb-4">
+                    <div class="dashboard-header" style="border-bottom:none; margin-bottom:0;">
+                        <h2 id="historySectionTitle" style="font-size: 1.3rem; font-weight: 800; color: #451a03;">나의 활동
+                            기록</h2>
+                        <button id="closeHistoryBtn" class="btn-mini"><i class="fa-solid fa-xmark"></i> 닫기</button>
+                    </div>
+
+                    <div class="history-content">
+                        <div id="calendarView" class="history-view-box hidden">
+                            <div class="view-header">
+                                <h4>방문 달력</h4>
+                                <span id="currentMonthLabel" style="font-weight: 700; color: #92400e;"></span>
+                            </div>
+                            <div id="calendarGrid" class="calendar-grid"></div>
+                            <div class="calendar-legend">
+                                <span class="dot-point"></span> 방문일 표시
+                            </div>
+                        </div>
+
+                        <!-- 공간 이용 내역 -->
+                        <div id="timelineView" class="history-view-box hidden">
+                            <div class="view-header">
+                                <h4>공간 이용 내역</h4>
+                            </div>
+                            <div id="usageTimeline" class="timeline-list">
+                                <p class="text-center py-4" style="color: #92400e; font-size: 0.9rem;">기록을 불러오는 중입니다...
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 3) 관리자 전용 대시보드 섹션 -->
+            <div id="adminArea" class="hidden">
+                <div class="card mb-4"
+                    style="border: 2px solid var(--primary-main); box-shadow: 0 10px 40px rgba(245, 196, 0, 0.15);">
+                    <div class="card-accent-bar" style="background: var(--primary-main);"></div>
+                    <div class="dashboard-header">
+                        <div class="user-info">
+                            <span class="badge-admin">ADMIN ONLY</span>
+                            <h3 style="font-size: 1.4rem; font-weight: 900; color: #451a03; border-bottom: none;"><i
+                                    class="fa-solid fa-screwdriver-wrench"></i> 워크스페이스</h3>
+                        </div>
+                        <div class="header-actions">
+                            <a href="https://docs.google.com/spreadsheets/d/1ErbIUwhL-UatarQxeYhCP79RF0f0GrlFLaD1WAw13BQ/edit?usp=sharing"
+                                target="_blank" class="btn-sheet-link"
+                                style="text-decoration: none; margin-right: 10px;">
+                                <i class="fa-solid fa-file-excel"></i> 관리 시트
+                            </a>
+                            <button id="logoutActionBtnAdmin" class="btn-logout-premium" onclick="auth.signOut()"><i
+                                    class="fa-solid fa-power-off"></i> 종료</button>
+                        </div>
+                    </div>
+                    <div class="admin-tabs">
+                        <div class="admin-tab active" data-target="admin-stat-view">실시간 통계</div>
+                        <div class="admin-tab" data-target="admin-user-view">가입 승인 관리</div>
+                        <div class="admin-tab" data-target="admin-member-view">회원 검색/기능</div>
+                    </div>
+                    <div id="admin-stat-view" class="admin-tab-content">
+                        <div class="period-selector">
+                            <button class="period-btn active" data-period="daily">오늘</button>
+                            <button class="period-btn" data-period="weekly">이번 주</button>
+                            <button class="period-btn" data-period="monthly">이번 달</button>
+                            <button id="refreshStatsBtn" class="refresh-btn" title="새로고침"><i
+                                    class="fa-solid fa-sync"></i></button>
+                        </div>
+                        <div class="admin-stat-grid">
+                            <div class="stat-card">
+                                <h4>총 방문자</h4>
+                                <p id="statTotalVisit">0명</p>
+                            </div>
+                            <div class="stat-card">
+                                <h4>프린터 사용</h4>
+                                <p id="statTotalPrint">0건</p>
+                            </div>
+                            <div class="stat-card">
+                                <h4>커리어존</h4>
+                                <p id="statTotalCareer">0건</p>
+                            </div>
+                            <div class="stat-card">
+                                <h4>커넥트룸</h4>
+                                <p id="statTotalConnect">0건</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="admin-user-view" class="admin-tab-content hidden">
+                        <div class="table-responsive">
+                            <table class="admin-table">
+                                <thead>
+                                    <tr>
+                                        <th>이름(아이디)</th>
+                                        <th>정보</th>
+                                        <th>관리</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="pendingUserList">
+                                    <tr>
+                                        <td colspan="3" class="text-center">로딩 중...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div id="admin-member-view" class="admin-tab-content hidden">
+                        <div class="admin-search-wrapper mb-4">
+                            <div class="admin-search-bar">
+                                <i class="fa-solid fa-magnifying-glass search-bar-icon"></i>
+                                <input type="text" id="adminMemberSearchInput" placeholder="회원의 이름을 검색해 보세요..."
+                                    class="admin-search-field">
+                                <button id="adminMemberSearchBtn" class="admin-search-action">검색</button>
+                            </div>
+                        </div>
+
+                        <div id="adminMemberSearchResults" class="admin-results-container mb-4">
+                            <!-- 검색 결과 표시 영역 (카드 형태) -->
+                        </div>
+
+                        <div id="proxyEntryArea" class="hidden">
+                            <div class="proxy-premium-card">
+                                <div class="proxy-card-header">
+                                    <div class="proxy-user-profile">
+                                        <div class="proxy-avatar-ring"><i class="fa-solid fa-user-pen"></i></div>
+                                        <div class="proxy-user-text">
+                                            <h4 id="proxyTargetName" class="m-0">홍길동</h4>
+                                            <span class="proxy-status-tag">대리 작성 모드</span>
+                                        </div>
+                                    </div>
+                                    <button class="proxy-close-btn"
+                                        onclick="document.getElementById('proxyEntryArea').classList.add('hidden')">&times;</button>
+                                </div>
+
+                                <form id="proxyFacilityForm" class="proxy-premium-form">
+                                    <div class="mb-4">
+                                        <label class="proxy-field-label">방문/이용 일자</label>
+                                        <input type="date" name="proxyDate" id="proxyDateInput" required
+                                            class="proxy-field-input">
+                                    </div>
+                                    <div class="mb-4">
+                                        <label class="proxy-field-label">서비스 선택</label>
+                                        <div class="proxy-type-group">
+                                            <input type="radio" name="proxyType" value="visit" id="p_visit" checked
+                                                class="proxy-radio-input">
+                                            <label for="p_visit" class="proxy-type-pill">방문</label>
+                                            <input type="radio" name="proxyType" value="printer" id="p_printer"
+                                                class="proxy-radio-input">
+                                            <label for="p_printer" class="proxy-type-pill">프린터</label>
+                                            <input type="radio" name="proxyType" value="careerZone" id="p_career"
+                                                class="proxy-radio-input">
+                                            <label for="p_career" class="proxy-type-pill">커리어존</label>
+                                            <input type="radio" name="proxyType" value="connectRoom" id="p_connect"
+                                                class="proxy-radio-input">
+                                            <label for="p_connect" class="proxy-type-pill">커넥트룸</label>
+                                        </div>
+                                    </div>
+
+                                    <!-- 방문 섹션 (추가 입력 없음) -->
+                                    <div id="proxy-visit-fields" class="proxy-fields-panel">
+                                        <p class="text-center py-3 opacity-70">단순 방문 기록을 대리로 제출합니다.</p>
+                                    </div>
+
+                                    <!-- 프린터 섹션 -->
+                                    <div id="proxy-printer-fields" class="proxy-fields-panel hidden">
+                                        <div class="mb-4">
+                                            <label class="proxy-field-label">출력 매수 (최대 10장)</label>
+                                            <div class="proxy-counter">
+                                                <button type="button" class="proxy-count-btn"
+                                                    onclick="this.nextElementSibling.stepDown()">-</button>
+                                                <input type="number" name="printerCount" value="1" min="1" max="10"
+                                                    class="proxy-field-input proxy-count-input">
+                                                <button type="button" class="proxy-count-btn"
+                                                    onclick="this.previousElementSibling.stepUp()">+</button>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- 룸 이용 섹션 (기존 필드) -->
+                                    <div id="proxy-room-fields" class="proxy-fields-panel hidden">
+                                        <div class="proxy-row mb-4">
+                                            <div class="proxy-col">
+                                                <label class="proxy-field-label">시작 시간</label>
+                                                <input type="text" name="startTime" class="proxy-field-input time-input"
+                                                    placeholder="예: 1000" maxlength="5">
+                                            </div>
+                                            <div class="proxy-col">
+                                                <label class="proxy-field-label">종료 시간</label>
+                                                <input type="text" name="endTime" class="proxy-field-input time-input"
+                                                    placeholder="예: 1200" maxlength="5">
+                                            </div>
+                                        </div>
+
+                                        <div class="mb-4">
+                                            <label class="proxy-field-label">이용 목적</label>
+                                            <input type="text" name="purpose" placeholder="예: 취업 스터디"
+                                                class="proxy-field-input">
+                                        </div>
+
+                                        <!-- 동행인 세부 정보 섹션 -->
+                                        <div class="mb-4">
+                                            <label class="proxy-field-label">동행인 정보 (성별 / 나이)</label>
+                                            <div id="proxyCompanionsList" class="proxy-companions-list">
+                                                <!-- 동행인 입력 줄이 여기에 동적으로 추가됨 -->
+                                            </div>
+                                            <button type="button" id="addProxyCompanionBtn" class="btn-mini-plus">
+                                                <i class="fa-solid fa-plus"></i> 동행인 추가
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <button type="submit" id="proxySubmitBtn" class="proxy-final-submit">
+                                        <div class="btn-content">
+                                            <div class="spinner"></div>
+                                            <span class="btn-text">대리 일지 제출 완료</span>
+                                        </div>
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="facilityLogSection" class="card">
+                <h3 class="mb-4 text-center">시설 이용 일지 작성</h3>
+                <div class="tabs">
+                    <div class="tab active" data-target="tab-printer">🖨️ 프린터</div>
+                    <div class="tab" data-target="tab-career">💼 커리어존</div>
+                    <div class="tab" data-target="tab-connect">🤝 커넥트룸</div>
+                </div>
+                <!-- Log forms (Simplified structure, refer to user.js for logic) -->
+                <div id="tab-printer" class="tab-content">
+                    <form id="printerForm">
+                        <div class="form-group">
+                            <label for="printerCount">출력 매수 (장)</label>
+                            <input type="number" id="printerCount" class="form-control" min="1" max="10"
+                                placeholder="예: 5" required>
+                            <small style="color: #92400e; display: block; margin-top: 5px; font-weight: 600;">* 1일 최대
+                                10장까지만 출력 가능합니다.</small>
+                        </div>
+                        <button type="submit" id="btn_submit_print" class="btn btn-primary mt-2">
+                            <div class="btn-content">
+                                <div class="spinner"></div>
+                                <span class="btn-text">제출하기</span>
+                            </div>
+                        </button>
+                    </form>
+                </div>
+                <div id="tab-career" class="tab-content hidden">
+                    <form id="careerForm">
+                        <div class="form-group">
+                            <label>장소 선택</label>
+                            <select id="cPlace" class="form-control" required>
+                                <option value="청취 Room 1">청취 Room 1</option>
+                                <option value="청취 Room 2">청취 Room 2</option>
+                            </select>
+                        </div>
+                        <div class="row">
+                            <div class="col form-group">
+                                <label>시작 시간</label>
+                                <input type="text" id="cStartTime" class="form-control time-input" placeholder="예: 1400"
+                                    maxlength="5" required>
+                            </div>
+                            <div class="col form-group">
+                                <label>종료 시간</label>
+                                <input type="text" id="cEndTime" class="form-control time-input" placeholder="예: 1600"
+                                    maxlength="5" required>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>이용 목적</label>
+                            <input type="text" id="cPurpose" class="form-control" placeholder="상세 이용 목적" required>
+                        </div>
+                        <div class="form-group">
+                            <label>동행 인원 (본인 제외)</label>
+                            <div class="stepper-container">
+                                <button type="button" class="stepper-btn minus" data-target="cCompCount">-</button>
+                                <input type="number" id="cCompCount" class="stepper-input" value="0" readonly>
+                                <button type="button" class="stepper-btn plus" data-target="cCompCount">+</button>
+                            </div>
+                        </div>
+                        <div id="cCompList" class="companion-list-container"></div>
+                        <div class="form-group privacy-box">
+                            <input type="checkbox" id="careerPrivacy" required>
+                            <label for="careerPrivacy">동행인의 성별/나이 등 정보 수집에 동의합니다.</label>
+                        </div>
+                        <button type="submit" id="btn_submit_career" class="btn btn-primary mt-2">
+                            <div class="btn-content">
+                                <div class="spinner"></div>
+                                <span class="btn-text">제출하기</span>
+                            </div>
+                        </button>
+                    </form>
+                </div>
+
+                <div id="tab-connect" class="tab-content hidden">
+                    <form id="connectForm">
+                        <div class="row">
+                            <div class="col form-group">
+                                <label>시작 시간</label>
+                                <input type="text" id="rStartTime" class="form-control time-input" placeholder="예: 1030"
+                                    maxlength="5" required>
+                            </div>
+                            <div class="col form-group">
+                                <label>종료 시간</label>
+                                <input type="text" id="rEndTime" class="form-control time-input" placeholder="예: 1230"
+                                    maxlength="5" required>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>이용 목적</label>
+                            <input type="text" id="rPurpose" class="form-control" placeholder="상세 이용 목적" required>
+                        </div>
+                        <div class="form-group">
+                            <label>동행 인원 (본인 제외)</label>
+                            <div class="stepper-container">
+                                <button type="button" class="stepper-btn minus" data-target="rCompCount">-</button>
+                                <input type="number" id="rCompCount" class="stepper-input" value="0" readonly>
+                                <button type="button" class="stepper-btn plus" data-target="rCompCount">+</button>
+                            </div>
+                        </div>
+                        <div id="rCompList" class="companion-list-container"></div>
+                        <div class="form-group privacy-box">
+                            <input type="checkbox" id="connectPrivacy" required>
+                            <label for="connectPrivacy">동행인의 성별/나이 등 정보 수집에 동의합니다.</label>
+                        </div>
+                        <button type="submit" id="btn_submit_connect" class="btn btn-primary mt-2">
+                            <div class="btn-content">
+                                <div class="spinner"></div>
+                                <span class="btn-text">제출하기</span>
+                            </div>
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main JS Module -->
+    <script type="module" src="js/main.js"></script>
+</body>
+
+</html>
