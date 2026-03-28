@@ -11,4 +11,4 @@ export const firebaseConfig = {
 };
 
 // Google Apps Script Web App URL
-export const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwwm7MOuL0wtmb1fghrLN4929uAQ7BsYzmN90mwsBOjYEEzWaEesnMC6jJ1D0R7YZhmMQ/exec";
+export const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzwmHTkrGf14oNSKyYbWzZMD2X11H997lOIsvr_k65IvkDbV15GY11XaZ7YvdFm-bM-3g/exec";
