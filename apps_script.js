@@ -135,23 +135,9 @@ function onOpen() {
     .addItem('📥 CSV 파일만 수동 파싱', 'manualProcessCSV')
     .addSeparator()
     .addItem('📊 데이터 Excel 다운로드', 'downloadAsExcel')
-    .addItem('⚙️ 자동 처리 트리거 설정', 'setupTriggers')
     .addToUi();
 }
 
-function setupTriggers() {
-  const triggers = ScriptApp.getProjectTriggers();
-  triggers.forEach(t => {
-    if (t.getHandlerFunction() === 'processUploadedFilesAuto') {
-      ScriptApp.deleteTrigger(t);
-    }
-  });
-  ScriptApp.newTrigger('processUploadedFilesAuto')
-    .timeBased()
-    .everyMinutes(5)
-    .create();
-  SpreadsheetApp.getUi().alert('✅ 5분 단위 자동 처리 트리거가 설정되었습니다.');
-}
 
 // ==================== CSV 자동 처리 (드라이브 감시) ====================
 function processUploadedFilesAuto() {
