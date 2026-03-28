@@ -1,0 +1,6 @@
+# Ignore scratch files and workspace data
+RoutineTool/
+*.xlsx
+*.vbs
+*.txt
+yatap-footcenter.html
