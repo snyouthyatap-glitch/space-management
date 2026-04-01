@@ -7,11 +7,24 @@ import { GOOGLE_SCRIPT_URL } from "./config.js";
 
 // Global helper for user-related state
 let isProcessingVisit = false;
+let internalUserData = null; // 최신 유저 데이터 전역 관리용 변수 추가
+
+/**
+ * 전역 유저 데이터를 동기화하는 함수
+ * @param {Object} data 
+ */
+export function updateUserData(data) {
+    internalUserData = data;
+    console.log("User data updated in module:", data?.name);
+}
 
 export async function submitRecord(db, type, data, btnId, currentUserData, isRetry = false, targetUser = null) {
     const todayStr = getTrustedNow().toLocaleDateString('en-CA');
     const isVerified = (localStorage.getItem('lastVerifiedDate') === todayStr);
-    const isAdmin = (currentUserData && currentUserData.role === 'admin');
+    
+    // 현재 유저 데이터 우선순위: targetUser > currentUserData (매개변수) > internalUserData (전역)
+    const uData = targetUser || currentUserData || internalUserData;
+    const isAdmin = (uData && uData.role === 'admin');
 
     if (!isVerified && !isAdmin && !targetUser) {
         alert('현장 방문 인증이 필요합니다. 센터 내 비치된 QR 코드를 찍어주세요.');
@@ -27,8 +40,9 @@ export async function submitRecord(db, type, data, btnId, currentUserData, isRet
         }
     }
 
-    const u = targetUser || currentUserData;
+    const u = targetUser || currentUserData || internalUserData;
     if (!u) {
+        console.error("Submit error: No user data available", {targetUser, currentUserData, internalUserData});
         if (btnId) toggleLoading(btnId, false);
         return false;
     }
@@ -427,7 +441,8 @@ export function setupUserListeners(db, auth, currentUserData) {
     document.getElementById('printerForm')?.addEventListener('submit', async (e) => {
         e.preventDefault();
         const count = parseInt(document.getElementById('printerCount').value, 10);
-        const uid = auth.currentUser?.uid || currentUserData?.uid;
+        // auth.currentUser가 있으면 우선 사용, 없으면 internalUserData에서 추출
+        const uid = auth?.currentUser?.uid || internalUserData?.uid;
         
         if (!uid) {
             alert('사용자 정보를 찾을 수 없습니다.');
@@ -498,7 +513,7 @@ export function setupUserListeners(db, auth, currentUserData) {
             purpose: document.getElementById('cPurpose').value,
             companionCount: compCount,
             companions: companions
-        }, btn.id, currentUserData).then(success => {
+        }, btn.id, internalUserData).then(success => {
             if (success) {
                 e.target.reset();
                 document.getElementById('cCompList').innerHTML = '';
@@ -530,7 +545,7 @@ export function setupUserListeners(db, auth, currentUserData) {
             purpose: document.getElementById('rPurpose').value,
             companionCount: compCount,
             companions: companions
-        }, btn.id, currentUserData).then(success => {
+        }, btn.id, internalUserData).then(success => {
             if (success) {
                 e.target.reset();
                 document.getElementById('rCompList').innerHTML = '';

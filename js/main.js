@@ -4,7 +4,7 @@ import { getFirestore, doc, getDoc } from "https://www.gstatic.com/firebasejs/10
 import { firebaseConfig } from "./config.js";
 import { syncSystemTime, calcAge, getTrustedNow } from "./utils.js";
 import { setupAuthListeners } from "./auth.js";
-import { setupUserListeners, checkAndSubmitDailyVisit } from "./user.js";
+import { setupUserListeners, checkAndSubmitDailyVisit, updateUserData } from "./user.js";
 import { loadAdminStats, loadPendingUsers, setupAdminListeners } from "./admin.js";
 
 // Initialize Firebase
@@ -89,10 +89,12 @@ onAuthStateChanged(auth, async (user) => {
                     age: profile.birthDate ? calcAge(profile.birthDate) : (profile.age || '')
                 };
                 updateUIForRole(currentUserData);
+                updateUserData(currentUserData); // 기록 제출 모듈에 유저 데이터 주입
             }
         } catch (e) { console.error("Profile load fail:", e); }
     } else {
         currentUserData = null;
+        updateUserData(null); // 로그아웃 시 데이터 초기화
         mainSection?.classList.add('hidden');
         authSection?.classList.remove('hidden');
     }

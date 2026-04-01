@@ -247,19 +247,31 @@ body {
     background: rgba(255, 215, 0, 0.1);
 }
 
-/* 로딩 스피너 */
+/* 로딩 스피너 기본 스타일 */
 .spinner {
-    width: 22px;
-    height: 22px;
+    width: 20px;
+    height: 20px;
     border: 3px solid rgba(146, 64, 14, 0.2);
     border-radius: 50%;
-    border-top-color: #92400e;
-    animation: spin 1s linear infinite;
+    border-top-color: #451a03; 
+    animation: spin 0.8s linear infinite;
     display: none;
 }
 
-@keyframes spin {
-    to { transform: rotate(360deg); }
+/* 버튼 내 컨텐츠 배치 고도화 */
+.btn-content {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+}
+
+/* 버튼 로딩/비활성화 상태 피드백 */
+.btn:disabled, .btn.loading {
+    opacity: 0.75;
+    cursor: wait;
+    transform: none !important;
 }
 
 /* 알림 메시지 */

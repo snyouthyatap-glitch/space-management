@@ -50,13 +50,15 @@ export function toggleLoading(btnId, isLoading) {
 
     if (isLoading) {
         btn.disabled = true;
+        btn.classList.add('loading');
         if (btnText) {
             btn.setAttribute('data-original-text', btnText.textContent);
             btnText.textContent = '제출 중...';
         }
-        if (spinner) spinner.style.display = 'block';
+        if (spinner) spinner.style.display = 'inline-block';
     } else {
         btn.disabled = false;
+        btn.classList.remove('loading');
         if (btnText) {
             const originalText = btn.getAttribute('data-original-text');
             if (originalText) btnText.textContent = originalText;
