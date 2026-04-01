@@ -5,7 +5,7 @@ import { firebaseConfig } from "./config.js";
 import { syncSystemTime, calcAge, getTrustedNow } from "./utils.js";
 import { setupAuthListeners } from "./auth.js";
 import { setupUserListeners, checkAndSubmitDailyVisit, updateUserData } from "./user.js";
-import { loadAdminStats, loadPendingUsers, setupAdminListeners } from "./admin.js";
+import { loadAdminStats, loadPendingUsers, setupAdminListeners, updateAdminProfile } from "./admin.js";
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
@@ -88,13 +88,15 @@ onAuthStateChanged(auth, async (user) => {
                     uid: user.uid, email: user.email, ...profile,
                     age: profile.birthDate ? calcAge(profile.birthDate) : (profile.age || '')
                 };
-                updateUIForRole(currentUserData);
-                updateUserData(currentUserData); // 기록 제출 모듈에 유저 데이터 주입
+                updateUserData(currentUserData); // 1. 유저 데이터 전역 주입 선행
+                updateAdminProfile(currentUserData); // 1.5 관리자 데이터 전역 주입
+                updateUIForRole(currentUserData); // 2. 이후 UI 및 시설 일지 체크 진행
             }
         } catch (e) { console.error("Profile load fail:", e); }
     } else {
         currentUserData = null;
         updateUserData(null); // 로그아웃 시 데이터 초기화
+        updateAdminProfile(null); // 로그아웃 시 데이터 초기화
         mainSection?.classList.add('hidden');
         authSection?.classList.remove('hidden');
     }

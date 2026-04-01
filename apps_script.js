@@ -25,7 +25,13 @@ function doPost(e) {
 
     const sheet = getOrCreateSheet(ss, sheetName, sheetType);
     const lastRow = sheet.getLastRow();
-    const seq = lastRow > 0 ? (lastRow) : 1;
+    
+    // 순번(seq) 계산 고도화: 마지막 행의 순번 값에 +1 (헤더만 있을 경우 1부터 시작)
+    let seq = 1;
+    if (lastRow > 1) {
+      const lastSeq = sheet.getRange(lastRow, 1).getValue();
+      seq = (typeof lastSeq === 'number') ? lastSeq + 1 : lastRow;
+    }
 
     let values = [];
 

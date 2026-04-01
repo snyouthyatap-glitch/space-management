@@ -3,9 +3,19 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import { getTrustedNow } from "./utils.js";
 import { submitRecord, ensureVisitLog } from "./user.js";
+ 
+let adminProfile = null; // 관리자 데이터 동기화용
+
+export function updateAdminProfile(data) {
+    adminProfile = data;
+}
 
 export async function loadAdminStats(db, currentUserData, period = 'daily') {
-    if (!currentUserData || currentUserData.role !== 'admin') return;
+    const uData = currentUserData || adminProfile;
+    if (!uData || uData.role !== 'admin') {
+        console.warn("loadAdminStats skipped: Missing admin profile", {currentUserData, adminProfile});
+        return;
+    }
 
     const refreshBtn = document.getElementById('refreshStatsBtn');
     let originalBtnContent = '';
@@ -231,8 +241,7 @@ export function setupAdminListeners(db) {
             document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
             e.currentTarget.classList.add('active');
             
-            // 전역 변수가 아닌 파라미터로 명시적 전달
-            loadAdminStats(db, { role: 'admin' }, period);
+            loadAdminStats(db, adminProfile, period);
         });
     });
 
@@ -251,7 +260,7 @@ export function setupAdminListeners(db) {
         document.getElementById('userArea').classList.add('hidden');
         document.getElementById('facilityLogSection').classList.add('hidden');
         document.getElementById('adminArea').classList.remove('hidden');
-        loadAdminStats(db, null, 'daily');
+        loadAdminStats(db, adminProfile, 'daily');
         loadPendingUsers(db);
     });
 
@@ -263,7 +272,7 @@ export function setupAdminListeners(db) {
 
     // Refresh button
     document.getElementById('refreshStatsBtn')?.addEventListener('click', () => {
-        loadAdminStats(db, { role: 'admin' }, 'daily');
+        loadAdminStats(db, adminProfile, 'daily');
     });
 
     // Member Search listeners
