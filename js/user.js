@@ -482,11 +482,14 @@ export function setupUserListeners(db, auth, currentUserData) {
             return;
         }
         
-        const companionRows = Array.from(e.target.querySelectorAll('.companion-row'));
+        const companionRows = Array.from(e.target.querySelectorAll('.companion-item'));
         const companions = companionRows.map(row => ({
             gender: row.querySelector('.comp-gender').value,
             age: row.querySelector('.comp-age').value
         }));
+        
+        const btn = e.target.querySelector('button[type="submit"]');
+        btn.id = btn.id || 'btn_submit_career';
 
         submitRecord(db, 'careerZone', {
             place: document.getElementById('cPlace').value,
@@ -512,11 +515,14 @@ export function setupUserListeners(db, auth, currentUserData) {
             return;
         }
         
-        const companionRows = Array.from(e.target.querySelectorAll('.companion-row'));
+        const companionRows = Array.from(e.target.querySelectorAll('.companion-item'));
         const companions = companionRows.map(row => ({
             gender: row.querySelector('.comp-gender').value,
             age: row.querySelector('.comp-age').value
         }));
+        
+        const btn = e.target.querySelector('button[type="submit"]');
+        btn.id = btn.id || 'btn_submit_connect';
 
         submitRecord(db, 'connectRoom', {
             startTime: document.getElementById('rStartTime').value,

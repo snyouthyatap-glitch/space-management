@@ -52,7 +52,7 @@ export function toggleLoading(btnId, isLoading) {
         btn.disabled = true;
         if (btnText) {
             btn.setAttribute('data-original-text', btnText.textContent);
-            btnText.textContent = '처리 중...';
+            btnText.textContent = '제출 중...';
         }
         if (spinner) spinner.style.display = 'block';
     } else {
