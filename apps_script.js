@@ -32,8 +32,8 @@ function doPost(e) {
     if (sheetType === 'visit') {
       values = [[seq, data.date || '', data.name || '', data.gender || '', data.age || '']];
     } else if (sheetType === 'printer') {
-      // 프린터 일지에 성별 및 나이 정보 포함하여 저장
-      values = [[seq, data.date || '', data.name || '', data.gender || '', data.age || '', data.count || '']];
+      // 프린터 일지: [순번, 날짜, 이름, 매수, 성별] 순으로 저장 (나이 제외)
+      values = [[seq, data.date || '', data.name || '', data.count || '', data.gender || '']];
     } else if (sheetType === 'career') {
       values = [[
         seq,
@@ -112,7 +112,7 @@ function getOrCreateSheet(ss, sheetName, type) {
     sheet = ss.insertSheet(sheetName);
     let headers = [];
     if (type === 'visit') headers = ['순번', '날짜', '성명', '성별', '나이'];
-    else if (type === 'printer') headers = ['순번', '날짜', '이름', '성별', '나이', '매수'];
+    else if (type === 'printer') headers = ['순번', '날짜', '이름', '매수', '성별'];
     else if (type === 'career') headers = ['순번', '날짜', '이용공간', '이용 시작 시간', '이용 종료 시간', '남', '여', '대표자성명', '이용 목적', '동반자정보상세(숨김)'];
     else if (type === 'connect') headers = ['순번', '날짜', '시작시간', '종료시간', '20~29세(남)', '20~29세(여)', '30~39세(남)', '30~39세(여)', '~19세(남)', '~19세(여)', '이용목적', '대표자성명', '동반자정보상세(숨김)'];
 
