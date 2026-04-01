@@ -468,7 +468,8 @@ export function setupUserListeners(db, auth, currentUserData) {
             });
         } catch (err) {
             console.error("Printer validation error:", err);
-            alert('출력량을 확인하는 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.');
+            // 에러 메시지에 구체적인 원인을 포함하여 사용자(또는 개발자가) 원인을 알 수 있게 함
+            alert(`출력량을 확인하는 중 오류가 발생했습니다: ${err.message}\n(인터넷 연결을 확인하거나 잠시 후 다시 시도해 주세요.)`);
         }
     });
 
