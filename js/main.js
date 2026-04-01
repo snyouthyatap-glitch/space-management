@@ -36,7 +36,7 @@ async function updateUIForRole(profile) {
     });
 
     if (role === 'admin') {
-        // [Admin 전용 모드] 관리자는 오직 관리자 영역만 노출
+        // [Admin 전용 모드] 관리자는 관리자 영역과 사용자 기능(일지 작성)모두 노출
         document.getElementById('adminArea')?.classList.remove('hidden');
         document.getElementById('adminBadge')?.classList.remove('hidden');
         
@@ -47,6 +47,11 @@ async function updateUIForRole(profile) {
 
         loadAdminStats(db, currentUserData, 'daily');
         loadPendingUsers(db);
+
+        // 관리자도 자가 일지 작성이 가능하도록 섹션 노출 (인증 우회 적용됨)
+        document.getElementById('facilityLogSection')?.classList.remove('hidden');
+        document.getElementById('visitAlert')?.classList.remove('hidden');
+        document.getElementById('visitRequiredMsg')?.classList.add('hidden');
     } else if (status === 'approved') {
         // [User 모드] 관리자가 아닐 때만 사용자 기능 노출
         document.getElementById('userArea')?.classList.remove('hidden');
@@ -95,6 +100,18 @@ onAuthStateChanged(auth, async (user) => {
 
 // Bootstrap
 async function init() {
+    // QR 인증 파라미터 확인 (?auth=yatap)
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('auth') === 'yatap') {
+        const todayStr = getTrustedNow().toLocaleDateString('en-CA');
+        localStorage.setItem('lastVerifiedDate', todayStr);
+        console.log("QR 인증 성공: " + todayStr);
+        
+        // URL에서 파라미터 제거하여 주소창을 깔끔하게 유지
+        const newUrl = window.location.pathname;
+        window.history.replaceState({}, document.title, newUrl);
+    }
+
     // 리스너를 먼저 등록하여 오프라인 상태에서도 UI 전환이 즉시 가능하도록 함
     setupAuthListeners(auth, db, currentUserData, { updateUIForRole });
     setupUserListeners(db, auth, currentUserData);

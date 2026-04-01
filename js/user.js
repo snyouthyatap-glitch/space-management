@@ -101,11 +101,13 @@ export async function ensureVisitLog(db, targetUid, userData, currentUserData) {
 
 export async function checkAndSubmitDailyVisit(db, user, currentUserData) {
     if (!user || !currentUserData || isProcessingVisit) return false;
-    if (currentUserData.role === 'admin' || !currentUserData.role) return false;
 
+    // 관리자이거나 오늘 이미 인증을 완료한 경우 허용
     const todayStr = getTrustedNow().toLocaleDateString('en-CA');
     const isVerified = (localStorage.getItem('lastVerifiedDate') === todayStr);
-    if (!isVerified) return false;
+    const isAdmin = (currentUserData.role === 'admin');
+
+    if (!isVerified && !isAdmin) return false;
 
     isProcessingVisit = true;
     try {
