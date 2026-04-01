@@ -1,7 +1,7 @@
 import { 
     collection, query, where, getDocs, updateDoc, doc, getDoc, limit, onSnapshot, serverTimestamp 
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
-import { getTrustedNow } from "./utils.js";
+import { getTrustedNow, showToast } from "./utils.js";
 import { submitRecord, ensureVisitLog } from "./user.js";
  
 let adminProfile = null; // 관리자 데이터 동기화용
@@ -374,12 +374,12 @@ export function setupAdminListeners(db) {
             
             if (success) {
                 const typeName = { visit: '방문', printer: '프린터', careerZone: '커리어존', connectRoom: '커넥트룸' }[type];
-                alert(`${selectedProxyUser.name} 회원님의 [${typeName}] 일지가 제출되었습니다.`);
+                showToast(`${selectedProxyUser.name} 회원님의 [${typeName}] 일지가 제출되었습니다.`, 'success');
                 proxyForm.reset();
                 document.getElementById('proxyEntryArea').classList.add('hidden');
                 selectedProxyUser = null;
             } else {
-                alert('대리 제출에 실패했습니다. 다시 시도해 주세요.');
+                showToast('대리 제출에 실패했습니다. 다시 시도해 주세요.', 'error');
             }
         });
     }

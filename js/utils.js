@@ -100,3 +100,36 @@ export function categorizeMember(gender, age) {
     if (ageNum >= 30 && ageNum <= 39) return prefix + '30';
     return prefix + '30'; // 40대 이상도 30대 칸에 합산 (시트 규격 준수)
 }
+
+/**
+ * 토스트 알림 표시 함수
+ * @param {string} message - 표시할 메시지
+ * @param {string} type - 'success' | 'error'
+ */
+export function showToast(message, type = 'success') {
+    const container = document.getElementById('toastContainer');
+    if (!container) return;
+
+    const toast = document.createElement('div');
+    toast.className = `toast-item ${type}`;
+    
+    // 아이콘 설정
+    const icon = type === 'success' 
+        ? '<i class="fa-solid fa-circle-check" style="color: #10b981;"></i>' 
+        : '<i class="fa-solid fa-circle-xmark" style="color: #ef4444;"></i>';
+
+    toast.innerHTML = `${icon} <span>${message}</span>`;
+    container.appendChild(toast);
+
+    // 알림음 재생 (선택 사항)
+    const sound = document.getElementById('notificationSound');
+    if (sound) {
+        sound.currentTime = 0;
+        sound.play().catch(() => {}); // 유저 상호작용 없으면 차단될 수 있음
+    }
+
+    // 4초 후 자동 제거
+    setTimeout(() => {
+        toast.remove();
+    }, 4000);
+}

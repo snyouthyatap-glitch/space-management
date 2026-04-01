@@ -2,7 +2,7 @@ import {
     doc, getDoc, setDoc, addDoc, collection, serverTimestamp, updateDoc,
     query, where, orderBy, getDocs, limit, Timestamp
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
-import { getTrustedNow, toggleLoading, showAlert, calcAge, categorizeMember } from "./utils.js";
+import { getTrustedNow, toggleLoading, showAlert, calcAge, categorizeMember, showToast } from "./utils.js";
 import { GOOGLE_SCRIPT_URL } from "./config.js";
 
 // Global helper for user-related state
@@ -128,6 +128,7 @@ export async function checkAndSubmitDailyVisit(db, user, currentUserData) {
         const success = await ensureVisitLog(db, user.uid, currentUserData, currentUserData);
         if (success) {
             document.getElementById('visitAlert')?.classList.remove('hidden');
+            showToast('공간 방문 인증이 완료되었습니다!', 'success');
         }
         return success;
     } finally {
@@ -135,7 +136,7 @@ export async function checkAndSubmitDailyVisit(db, user, currentUserData) {
     }
 }
 
-export function setupUserListeners(db, auth, currentUserData) {
+export function setupUserListeners(db, auth) {
     // Tab Switching
     document.querySelectorAll('.tab').forEach(tab => {
         tab.addEventListener('click', (e) => {
@@ -304,9 +305,8 @@ export function setupUserListeners(db, auth, currentUserData) {
             }
 
             // 데이터 로드 시작
-            const uid = auth.currentUser?.uid;
+            const uid = auth.currentUser?.uid || internalUserData?.uid;
             if (uid) loadUserHistory(db, uid);
-            else if (currentUserData?.uid) loadUserHistory(db, currentUserData.uid);
             else loadUserHistory(db, 'preview-user-id');
         } else {
             userArea?.classList.remove('hidden');
@@ -476,10 +476,12 @@ export function setupUserListeners(db, auth, currentUserData) {
                 return;
             }
 
-            const btn = e.target.querySelector('button[type="submit"]');
             btn.id = btn.id || 'btn_submit_print';
-            submitRecord(db, 'printer', { count }, btn.id, currentUserData).then(success => {
-                if (success) e.target.reset();
+            submitRecord(db, 'printer', { count }, btn.id, internalUserData).then(success => {
+                if (success) {
+                    showToast('프린터 이용 기록이 제출되었습니다.', 'success');
+                    e.target.reset();
+                }
             });
         } catch (err) {
             console.error("Printer validation error:", err);
@@ -515,6 +517,7 @@ export function setupUserListeners(db, auth, currentUserData) {
             companions: companions
         }, btn.id, internalUserData).then(success => {
             if (success) {
+                showToast('커리어존 이용 일지가 제출되었습니다.', 'success');
                 e.target.reset();
                 document.getElementById('cCompList').innerHTML = '';
             }
@@ -547,6 +550,7 @@ export function setupUserListeners(db, auth, currentUserData) {
             companions: companions
         }, btn.id, internalUserData).then(success => {
             if (success) {
+                showToast('커넥트룸 이용 일지가 제출되었습니다.', 'success');
                 e.target.reset();
                 document.getElementById('rCompList').innerHTML = '';
             }
