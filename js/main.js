@@ -118,7 +118,7 @@ async function init() {
 
     // 리스너를 먼저 등록하여 오프라인 상태에서도 UI 전환이 즉시 가능하도록 함
     setupAuthListeners(auth, db, currentUserData, { updateUIForRole });
-    setupUserListeners(db, auth, currentUserData);
+    setupUserListeners(db, auth);
     setupAdminListeners(db);
     
     // 시간 동기화는 비동기로 진행 (초기화 블록 방지)

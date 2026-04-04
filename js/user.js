@@ -476,6 +476,7 @@ export function setupUserListeners(db, auth) {
                 return;
             }
 
+            const btn = e.target.querySelector('button[type="submit"]');
             btn.id = btn.id || 'btn_submit_print';
             submitRecord(db, 'printer', { count }, btn.id, internalUserData).then(success => {
                 if (success) {
