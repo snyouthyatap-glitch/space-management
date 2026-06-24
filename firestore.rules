@@ -1,0 +1,102 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isTrustedWrite() {
+      return request.time < timestamp.date(2027, 1, 1);
+    }
+
+    // Public flow collections used by the QR page.
+    // NOTE:
+    // - These rules are intentionally narrow, but unauthenticated client-side
+    //   access is still vulnerable to abuse/spam because the browser talks to
+    //   Firestore directly.
+    // - For production, move public lookup/write flows behind Apps Script or
+    //   another server-side endpoint and lock these collections back down.
+
+    match /users/{userId} {
+      allow get: if true;
+      allow list: if true;
+      allow create: if isTrustedWrite()
+        && request.resource.data.role == "user"
+        && request.resource.data.status == "approved"
+        && request.resource.data.name is string
+        && request.resource.data.gender is string
+        && request.resource.data.age is int
+        && request.resource.data.phone is string
+        && request.resource.data.phoneLastDigits is string;
+      allow update, delete: if false;
+    }
+
+    match /lounge_guests/{guestId} {
+      allow get: if true;
+      allow create: if isTrustedWrite()
+        && request.resource.data.role == "lounge_guest"
+        && request.resource.data.gender is string
+        && request.resource.data.birthDate is string
+        && request.resource.data.age is int
+        && request.resource.data.validDate is string;
+      allow list, update, delete: if false;
+    }
+
+    match /logs_visit/{logId} {
+      allow get: if false;
+      allow list: if false;
+      allow create: if isTrustedWrite()
+        && request.resource.data.name is string
+        && request.resource.data.gender is string
+        && request.resource.data.age is int
+        && request.resource.data.date is string
+        && request.resource.data.source is string;
+      allow update, delete: if false;
+    }
+
+    match /logs_printer/{logId} {
+      allow get: if false;
+      allow list: if false;
+      allow create: if isTrustedWrite()
+        && request.resource.data.name is string
+        && request.resource.data.gender is string
+        && request.resource.data.age is int
+        && request.resource.data.date is string
+        && request.resource.data.count is int;
+      allow update, delete: if false;
+    }
+
+    match /logs_career/{logId} {
+      allow get: if false;
+      allow list: if false;
+      allow create: if isTrustedWrite()
+        && request.resource.data.name is string
+        && request.resource.data.gender is string
+        && request.resource.data.age is int
+        && request.resource.data.date is string
+        && request.resource.data.startTime is string
+        && request.resource.data.endTime is string
+        && request.resource.data.purpose is string;
+      allow update, delete: if false;
+    }
+
+    match /logs_connect/{logId} {
+      allow get: if false;
+      allow list: if false;
+      allow create: if isTrustedWrite()
+        && request.resource.data.name is string
+        && request.resource.data.gender is string
+        && request.resource.data.age is int
+        && request.resource.data.date is string
+        && request.resource.data.startTime is string
+        && request.resource.data.endTime is string
+        && request.resource.data.purpose is string;
+      allow update, delete: if false;
+    }
+
+    // Do NOT expose admin settings publicly in production.
+    match /settings/{docId} {
+      allow read, write: if false;
+    }
+  }
+}
