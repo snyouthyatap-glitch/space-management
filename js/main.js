@@ -5,6 +5,7 @@ const STORAGE_KEY = "space-management-session";
 const REMEMBERED_MEMBER_KEY = "space-management-remembered-member";
 const REMEMBERED_LOUNGE_KEY = "space-management-remembered-lounge";
 const LAST_VISIT_LOG_KEY = "space-management-last-visit-log";
+const QR_ENTRY_SESSION_KEY = "space-management-qr-entry-ok";
 
 const state = {
     currentMember: null,
@@ -35,11 +36,20 @@ function isLocalPreview() {
 }
 
 function hasValidQrEntryToken() {
+    if (sessionStorage.getItem(QR_ENTRY_SESSION_KEY) === "true") {
+        return true;
+    }
     if (isLocalPreview()) {
         return true;
     }
     const params = new URLSearchParams(window.location.search);
-    return params.get(QR_ENTRY_PARAM) === QR_ENTRY_TOKEN;
+    const isValid = params.get(QR_ENTRY_PARAM) === QR_ENTRY_TOKEN;
+    if (isValid) {
+        sessionStorage.setItem(QR_ENTRY_SESSION_KEY, "true");
+        const cleanUrl = `${window.location.origin}${window.location.pathname}${window.location.hash || ""}`;
+        window.history.replaceState({}, document.title, cleanUrl);
+    }
+    return isValid;
 }
 
 function showEntryGate() {
