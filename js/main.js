@@ -1,4 +1,4 @@
-import { GOOGLE_SCRIPT_URL } from "./config.js";
+import { GOOGLE_SCRIPT_URL, QR_ENTRY_PARAM, QR_ENTRY_TOKEN } from "./config.js";
 import { getTrustedNow, showToast, syncSystemTime, toggleLoading } from "./utils.js";
 
 const STORAGE_KEY = "space-management-session";
@@ -15,6 +15,7 @@ const state = {
 };
 
 const sections = {
+    gate: document.getElementById("entryGateSection"),
     choice: document.getElementById("choiceSection"),
     facilityEntry: document.getElementById("entrySection"),
     facilitySignup: document.getElementById("signupSection"),
@@ -26,6 +27,24 @@ const sections = {
 
 function normalizeDigits(value) {
     return String(value || "").replace(/\D/g, "");
+}
+
+function isLocalPreview() {
+    const { protocol, hostname } = window.location;
+    return protocol === "file:" || hostname === "127.0.0.1" || hostname === "localhost";
+}
+
+function hasValidQrEntryToken() {
+    if (isLocalPreview()) {
+        return true;
+    }
+    const params = new URLSearchParams(window.location.search);
+    return params.get(QR_ENTRY_PARAM) === QR_ENTRY_TOKEN;
+}
+
+function showEntryGate() {
+    document.querySelector(".app-shell")?.classList.add("hidden");
+    sections.gate?.classList.remove("hidden");
 }
 
 function todayString() {
@@ -1092,6 +1111,11 @@ function setupListeners() {
 }
 
 async function init() {
+    if (!hasValidQrEntryToken()) {
+        showEntryGate();
+        return;
+    }
+
     await syncSystemTime();
     clearExpiredVisitLogRecord();
     await loadAppSettings();

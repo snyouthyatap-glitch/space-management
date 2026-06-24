@@ -206,6 +206,34 @@ body {
 .mt-4 { margin-top: 1.5rem; }
 .mb-4 { margin-bottom: 1.5rem; }
 
+.empty-state {
+    text-align: center;
+    padding: 1.5rem 0;
+}
+
+.empty-icon {
+    width: 72px;
+    height: 72px;
+    border-radius: 16px;
+    margin: 0 auto 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 215, 0, 0.22);
+    color: #92400e;
+    font-size: 1.8rem;
+}
+
+.empty-state h2 {
+    font-size: 1.45rem;
+    color: #78350f;
+    margin-bottom: 0.5rem;
+}
+
+.empty-state p {
+    color: #92400e;
+}
+
 /* 토스트 컨테이너 */
 .toast-container {
     position: fixed;
