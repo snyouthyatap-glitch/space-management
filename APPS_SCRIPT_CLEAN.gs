@@ -172,26 +172,32 @@ function handleRegisterFacilityMember_(payload) {
     throw new Error('성함, 성별, 나이, 연락처를 모두 입력해 주세요.');
   }
 
-  const existing = findMembersByExactPhone_(member.phone);
-  if (existing.length > 0) {
-    return { ok: true, existing: true, member: existing[0] };
-  }
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const existing = findMembersByExactPhone_(member.phone);
+    if (existing.length > 0) {
+      return { ok: true, existing: true, member: existing[0] };
+    }
 
-  const row = {
-    memberId: Utilities.getUuid(),
-    name: member.name,
-    gender: member.gender,
-    age: member.age,
-    phone: member.phone,
-    phoneLastDigits: member.phoneLastDigits,
-    isSeongnamResident: member.isSeongnamResident,
-    status: 'approved',
-    role: 'user',
-    createdAt: nowText_(),
-    updatedAt: nowText_()
-  };
-  appendObjectRow_(SHEET_NAMES.MEMBERS, HEADERS.members, row);
-  return { ok: true, existing: false, member: memberRowToObject_(row) };
+    const row = {
+      memberId: Utilities.getUuid(),
+      name: member.name,
+      gender: member.gender,
+      age: member.age,
+      phone: member.phone,
+      phoneLastDigits: member.phoneLastDigits,
+      isSeongnamResident: member.isSeongnamResident,
+      status: 'approved',
+      role: 'user',
+      createdAt: nowText_(),
+      updatedAt: nowText_()
+    };
+    appendObjectRow_(SHEET_NAMES.MEMBERS, HEADERS.members, row);
+    return { ok: true, existing: false, member: memberRowToObject_(row) };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function handleRegisterLoungeGuest_(payload) {

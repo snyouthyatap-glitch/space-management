@@ -210,6 +210,10 @@ function formatTimeInputValue(value) {
     return `${digits.slice(0, 2)}:${digits.slice(2, 4)}`;
 }
 
+function isValidSignupPhone(phone) {
+    return /^010\d{8}$/.test(phone);
+}
+
 function createFacilityMemberPayload(base) {
     const phone = normalizeDigits(base.phone);
     return {
@@ -455,7 +459,7 @@ async function withPageLoading(buttonId, message, task) {
 function fillSignupPhone(value) {
     const phoneInput = document.getElementById("signupPhone");
     if (phoneInput) {
-        phoneInput.value = normalizeDigits(value);
+        phoneInput.value = "";
     }
 }
 
@@ -657,6 +661,11 @@ async function registerFacilityMember() {
 
     if (!payload.name || !payload.gender || !payload.age || !payload.phone) {
         setAlert("signupAlert", "입력 항목을 모두 확인해 주세요.");
+        return;
+    }
+
+    if (!isValidSignupPhone(payload.phone)) {
+        setAlert("signupAlert", "연락처는 01012341234 형식의 휴대폰 번호만 입력할 수 있습니다.");
         return;
     }
 
@@ -1015,6 +1024,11 @@ function setupListeners() {
         }
     });
 
+    document.getElementById("signupPhone")?.addEventListener("input", (event) => {
+        const input = event.target;
+        input.value = normalizeDigits(input.value).slice(0, 11);
+    });
+
     document.getElementById("refreshStatsBtn")?.addEventListener("click", () => loadStats(state.statsPeriod));
     document.getElementById("adminMemberSearchBtn")?.addEventListener("click", () => searchMembers());
     document.getElementById("closeProxyBtn")?.addEventListener("click", () => {
@@ -1130,9 +1144,6 @@ async function init() {
         return;
     }
 
-    await syncSystemTime();
-    clearExpiredVisitLogRecord();
-    await loadAppSettings();
     setupTabs();
     setupTimeInputs();
     setupNetworkWarning();
@@ -1145,7 +1156,26 @@ async function init() {
     updateManualFieldVisibility();
     document.getElementById("proxyDateInput").value = todayString();
     document.getElementById("manualDate").value = todayString();
-    await restoreSession();
+
+    const syncTimePromise = syncSystemTime()
+        .catch((error) => console.warn("Time sync failed:", error))
+        .finally(() => {
+            clearExpiredVisitLogRecord();
+            const proxyDateInput = document.getElementById("proxyDateInput");
+            const manualDateInput = document.getElementById("manualDate");
+            if (proxyDateInput) proxyDateInput.value = todayString();
+            if (manualDateInput) manualDateInput.value = todayString();
+        });
+
+    loadAppSettings().catch((error) => {
+        console.warn("App settings load failed:", error);
+    });
+
+    restoreSession().catch((error) => {
+        console.warn("Session restore failed:", error);
+    });
+
+    await syncTimePromise;
 }
 
 init().catch((error) => {

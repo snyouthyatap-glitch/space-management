@@ -16,7 +16,7 @@
 </head>
 
 <body>
-    <div id="debugVersionBadge" class="debug-version-badge">v20260708-1</div>
+    <div id="debugVersionBadge" class="debug-version-badge">v20260708-2</div>
     <div id="onlineWarning" class="online-warning hidden">
         <i class="fa-solid fa-circle-exclamation"></i> 인터넷 연결 상태를 확인해주세요.
     </div>
@@ -132,7 +132,8 @@
                 <div class="form-group">
                     <label for="signupPhone">연락처</label>
                     <input type="tel" id="signupPhone" class="form-control" inputmode="numeric"
-                        placeholder="01012345678" required>
+                        placeholder="01012341234" maxlength="11" required>
+                    <small class="helper-text">숫자만 입력해 주세요. 예: 01012341234</small>
                 </div>
                 <label class="checkbox-row">
                     <input type="checkbox" id="signupSeongnamResident">
@@ -519,7 +520,7 @@
         </div>
     </div>
 
-    <script type="module" src="js/main.js?v=20260708-1"></script>
+    <script type="module" src="js/main.js?v=20260708-2"></script>
 </body>
 
 </html>
