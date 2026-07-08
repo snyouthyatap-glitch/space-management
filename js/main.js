@@ -228,7 +228,7 @@ function createFacilityMemberPayload(base) {
         age: birthDateToAge(birthDate),
         phone,
         phoneLastDigits: phone.slice(-4),
-        isSeongnamResident: base.optionalConsent ? Boolean(base.isSeongnamResident) : "",
+        isSeongnamResident: base.optionalConsent ? (base.isSeongnamResident ? "관내" : "관외") : "비공개",
         privacyConsent: Boolean(base.privacyConsent),
         optionalConsent: Boolean(base.optionalConsent),
         consentAt: new Date().toISOString(),
@@ -244,7 +244,7 @@ function createLoungeGuestPayload(base) {
         gender: String(base.gender || "").trim(),
         birthDate,
         age: birthDateToAge(birthDate),
-        isSeongnamResident: base.optionalConsent ? Boolean(base.isSeongnamResident) : "",
+        isSeongnamResident: base.optionalConsent ? (base.isSeongnamResident ? "관내" : "관외") : "비공개",
         privacyConsent: Boolean(base.privacyConsent),
         optionalConsent: Boolean(base.optionalConsent),
         consentAt: new Date().toISOString(),
@@ -740,7 +740,7 @@ async function registerLoungeGuest() {
         gender: payload.gender,
         birthDate: payload.birthDate,
         age: payload.age,
-        isSeongnamResident: payload.isSeongnamResident === true,
+        isSeongnamResident: payload.isSeongnamResident,
         role: "lounge_guest"
     };
     await ensureVisitLog(guest, todayString(), "lounge");
@@ -750,7 +750,7 @@ async function registerLoungeGuest() {
         gender: guest.gender,
         birthDate: guest.birthDate,
         age: guest.age,
-        isSeongnamResident: guest.isSeongnamResident === true
+        isSeongnamResident: guest.isSeongnamResident
     });
     showToast("라운지 방문이 기록되었습니다.", "success");
     showLoungeComplete(guest, false);
@@ -1047,13 +1047,10 @@ function setupListeners() {
         const residentEl = document.getElementById(residentId);
         if (!consentEl || !residentEl) return;
 
-        const refresh = () => {
-            residentEl.disabled = !consentEl.checked;
-            if (!consentEl.checked) residentEl.checked = false;
-        };
-
-        consentEl.addEventListener("change", refresh);
-        refresh();
+        consentEl.addEventListener("change", () => {
+            residentEl.dataset.optionalConsent = consentEl.checked ? "true" : "false";
+        });
+        residentEl.dataset.optionalConsent = consentEl.checked ? "true" : "false";
     };
 
     syncOptionalConsent("signupOptionalConsent", "signupSeongnamResident");

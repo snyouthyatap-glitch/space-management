@@ -1002,6 +1002,14 @@ function nextSeq_(sheet) {
 
 function normalizeFacilityMember_(member) {
   const phone = digits_(member.phone);
+  const residentRaw = str_(member.isSeongnamResident);
+  const residentValue = residentRaw === '비공개'
+    ? '비공개'
+    : residentRaw === '관내'
+      ? '관내'
+      : residentRaw === '관외'
+        ? '관외'
+        : (residentRaw === '' ? '' : (String(member.isSeongnamResident).toLowerCase() === 'true' ? '관내' : '관외'));
   return {
     name: str_(member.name),
     gender: str_(member.gender),
@@ -1009,7 +1017,7 @@ function normalizeFacilityMember_(member) {
     age: Number(member.age || 0),
     phone: phone,
     phoneLastDigits: phone.slice(-4),
-    isSeongnamResident: member.isSeongnamResident === '' ? '' : Boolean(member.isSeongnamResident),
+    isSeongnamResident: residentValue,
     privacyConsent: Boolean(member.privacyConsent),
     optionalConsent: Boolean(member.optionalConsent),
     consentAt: str_(member.consentAt, nowText_())
@@ -1030,6 +1038,7 @@ function normalizeSubject_(member) {
 }
 
 function memberRowToObject_(row) {
+  const residentRaw = str_(row.isSeongnamResident);
   return {
     id: str_(row.memberId),
     name: str_(row.name),
@@ -1038,7 +1047,14 @@ function memberRowToObject_(row) {
     age: Number(row.age || 0),
     phone: digits_(row.phone),
     phoneLastDigits: str_(row.phoneLastDigits),
-    isSeongnamResident: String(row.isSeongnamResident).toLowerCase() === 'true',
+    isSeongnamResident:
+      residentRaw === '비공개'
+        ? '비공개'
+        : residentRaw === '관내'
+          ? '관내'
+          : residentRaw === '관외'
+            ? '관외'
+            : (residentRaw.toLowerCase() === 'true' ? '관내' : '관외'),
     status: str_(row.status, 'approved'),
     role: str_(row.role, 'user')
   };
