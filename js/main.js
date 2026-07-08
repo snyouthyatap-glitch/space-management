@@ -218,6 +218,7 @@ function createFacilityMemberPayload(base) {
         age: Number(base.age || 0),
         phone,
         phoneLastDigits: phone.slice(-4),
+        isSeongnamResident: Boolean(base.isSeongnamResident),
         role: "user",
         status: "approved"
     };
@@ -229,6 +230,7 @@ function createLoungeGuestPayload(base) {
         gender: String(base.gender || "").trim(),
         birthDate,
         age: birthDateToAge(birthDate),
+        isSeongnamResident: Boolean(base.isSeongnamResident),
         role: "lounge_guest"
     };
 }
@@ -649,7 +651,8 @@ async function registerFacilityMember() {
         name: document.getElementById("signupName")?.value,
         gender: document.getElementById("signupGender")?.value,
         age: document.getElementById("signupAge")?.value,
-        phone: document.getElementById("signupPhone")?.value
+        phone: document.getElementById("signupPhone")?.value,
+        isSeongnamResident: document.getElementById("signupSeongnamResident")?.checked
     });
 
     if (!payload.name || !payload.gender || !payload.age || !payload.phone) {
@@ -693,7 +696,8 @@ async function registerLoungeGuest() {
     setAlert("loungeAlert");
     const payload = createLoungeGuestPayload({
         gender: document.getElementById("loungeGender")?.value,
-        birthDate: document.getElementById("loungeBirthDate")?.value
+        birthDate: document.getElementById("loungeBirthDate")?.value,
+        isSeongnamResident: document.getElementById("loungeSeongnamResident")?.checked
     });
 
     if (!payload.gender || !payload.birthDate || payload.age < 0) {

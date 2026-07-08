@@ -26,8 +26,8 @@ const HEADERS = {
     '연번', '날짜', '사용목적', '인원수', '비고', '시작시간', '종료시간',
     '20~29세(남)', '20~29세(여)', '30~39세(남)', '30~39세(여)', '~19세(남)', '~19세(여)'
   ],
-  members: ['memberId', 'name', 'gender', 'age', 'phone', 'phoneLastDigits', 'status', 'role', 'createdAt', 'updatedAt'],
-  loungeGuests: ['guestId', 'name', 'gender', 'birthDate', 'age', 'role', 'validDate', 'createdAt'],
+  members: ['memberId', 'name', 'gender', 'age', 'phone', 'phoneLastDigits', 'isSeongnamResident', 'status', 'role', 'createdAt', 'updatedAt'],
+  loungeGuests: ['guestId', 'name', 'gender', 'birthDate', 'age', 'isSeongnamResident', 'role', 'validDate', 'createdAt'],
   settings: ['key', 'value', 'updatedAt'],
   visitLogs: ['logId', 'userId', 'memberType', 'name', 'gender', 'age', 'phone', 'phoneLastDigits', 'date', 'source', 'createdBy', 'createdAt'],
   printerLogs: ['logId', 'userId', 'name', 'gender', 'age', 'phone', 'phoneLastDigits', 'date', 'count', 'createdBy', 'createdAt'],
@@ -184,6 +184,7 @@ function handleRegisterFacilityMember_(payload) {
     age: member.age,
     phone: member.phone,
     phoneLastDigits: member.phoneLastDigits,
+    isSeongnamResident: member.isSeongnamResident,
     status: 'approved',
     role: 'user',
     createdAt: nowText_(),
@@ -208,6 +209,7 @@ function handleRegisterLoungeGuest_(payload) {
     gender: gender,
     birthDate: birthDate,
     age: age,
+    isSeongnamResident: Boolean(guest.isSeongnamResident),
     role: 'lounge_guest',
     validDate: today_(),
     createdAt: nowText_()
@@ -1029,7 +1031,8 @@ function normalizeFacilityMember_(member) {
     gender: str_(member.gender),
     age: Number(member.age || 0),
     phone: phone,
-    phoneLastDigits: phone.slice(-4)
+    phoneLastDigits: phone.slice(-4),
+    isSeongnamResident: Boolean(member.isSeongnamResident)
   };
 }
 
@@ -1054,6 +1057,7 @@ function memberRowToObject_(row) {
     age: Number(row.age || 0),
     phone: digits_(row.phone),
     phoneLastDigits: str_(row.phoneLastDigits),
+    isSeongnamResident: String(row.isSeongnamResident).toLowerCase() === 'true',
     status: str_(row.status, 'approved'),
     role: str_(row.role, 'user')
   };
@@ -1066,6 +1070,7 @@ function loungeRowToObject_(row) {
     gender: str_(row.gender),
     birthDate: str_(row.birthDate),
     age: Number(row.age || 0),
+    isSeongnamResident: String(row.isSeongnamResident).toLowerCase() === 'true',
     role: str_(row.role, 'lounge_guest'),
     validDate: str_(row.validDate)
   };

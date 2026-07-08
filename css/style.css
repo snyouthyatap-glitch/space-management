@@ -234,6 +234,27 @@ body {
     color: #92400e;
 }
 
+.checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    margin: 0.4rem 0 1.4rem;
+    color: #92400e;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.checkbox-row input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: #f5c400;
+    flex: 0 0 auto;
+}
+
+.checkbox-row span {
+    line-height: 1.4;
+}
+
 /* 토스트 컨테이너 */
 .toast-container {
     position: fixed;

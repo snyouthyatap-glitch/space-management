@@ -16,7 +16,7 @@
 </head>
 
 <body>
-    <div id="debugVersionBadge" class="debug-version-badge">v20260624-3</div>
+    <div id="debugVersionBadge" class="debug-version-badge">v20260708-1</div>
     <div id="onlineWarning" class="online-warning hidden">
         <i class="fa-solid fa-circle-exclamation"></i> 인터넷 연결 상태를 확인해주세요.
     </div>
@@ -134,6 +134,10 @@
                     <input type="tel" id="signupPhone" class="form-control" inputmode="numeric"
                         placeholder="01012345678" required>
                 </div>
+                <label class="checkbox-row">
+                    <input type="checkbox" id="signupSeongnamResident">
+                    <span>성남시 관내 거주자입니다</span>
+                </label>
                 <button type="submit" id="signupSubmitBtn" class="btn btn-primary">
                     <span class="btn-text">등록하고 시설 이용하기</span>
                     <div class="spinner"></div>
@@ -168,6 +172,10 @@
                         <input type="date" id="loungeBirthDate" class="form-control" required>
                     </div>
                 </div>
+                <label class="checkbox-row">
+                    <input type="checkbox" id="loungeSeongnamResident">
+                    <span>성남시 관내 거주자입니다</span>
+                </label>
                 <button type="submit" id="loungeSubmitBtn" class="btn btn-primary">
                     <span class="btn-text">라운지 방문 기록하기</span>
                     <div class="spinner"></div>
@@ -511,7 +519,7 @@
         </div>
     </div>
 
-    <script type="module" src="js/main.js?v=20260624-3"></script>
+    <script type="module" src="js/main.js?v=20260708-1"></script>
 </body>
 
 </html>
