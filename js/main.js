@@ -153,6 +153,10 @@ function clearRememberedLoungeGuest() {
     localStorage.removeItem(REMEMBERED_LOUNGE_KEY);
 }
 
+function isRememberedLoungeVisitForToday(remembered) {
+    return Boolean(remembered && remembered.validDate === todayString());
+}
+
 function showSection(name) {
     Object.entries(sections).forEach(([key, element]) => {
         if (element) {
@@ -216,13 +220,18 @@ function isValidSignupPhone(phone) {
 
 function createFacilityMemberPayload(base) {
     const phone = normalizeDigits(base.phone);
+    const birthDate = String(base.birthDate || "").trim();
     return {
         name: String(base.name || "").trim(),
         gender: String(base.gender || "").trim(),
-        age: Number(base.age || 0),
+        birthDate,
+        age: birthDateToAge(birthDate),
         phone,
         phoneLastDigits: phone.slice(-4),
-        isSeongnamResident: Boolean(base.isSeongnamResident),
+        isSeongnamResident: base.optionalConsent ? Boolean(base.isSeongnamResident) : "",
+        privacyConsent: Boolean(base.privacyConsent),
+        optionalConsent: Boolean(base.optionalConsent),
+        consentAt: new Date().toISOString(),
         role: "user",
         status: "approved"
     };
@@ -231,10 +240,14 @@ function createFacilityMemberPayload(base) {
 function createLoungeGuestPayload(base) {
     const birthDate = String(base.birthDate || "").trim();
     return {
+        name: "라운지 이용자",
         gender: String(base.gender || "").trim(),
         birthDate,
         age: birthDateToAge(birthDate),
-        isSeongnamResident: Boolean(base.isSeongnamResident),
+        isSeongnamResident: base.optionalConsent ? Boolean(base.isSeongnamResident) : "",
+        privacyConsent: Boolean(base.privacyConsent),
+        optionalConsent: Boolean(base.optionalConsent),
+        consentAt: new Date().toISOString(),
         role: "lounge_guest"
     };
 }
@@ -654,18 +667,25 @@ async function registerFacilityMember() {
     const payload = createFacilityMemberPayload({
         name: document.getElementById("signupName")?.value,
         gender: document.getElementById("signupGender")?.value,
-        age: document.getElementById("signupAge")?.value,
+        birthDate: document.getElementById("signupBirthDate")?.value,
         phone: document.getElementById("signupPhone")?.value,
-        isSeongnamResident: document.getElementById("signupSeongnamResident")?.checked
+        isSeongnamResident: document.getElementById("signupSeongnamResident")?.checked,
+        privacyConsent: document.getElementById("signupPrivacyConsent")?.checked,
+        optionalConsent: document.getElementById("signupOptionalConsent")?.checked
     });
 
-    if (!payload.name || !payload.gender || !payload.age || !payload.phone) {
+    if (!payload.name || !payload.gender || !payload.birthDate || !payload.age || !payload.phone) {
         setAlert("signupAlert", "입력 항목을 모두 확인해 주세요.");
         return;
     }
 
     if (!isValidSignupPhone(payload.phone)) {
         setAlert("signupAlert", "연락처는 01012341234 형식의 휴대폰 번호만 입력할 수 있습니다.");
+        return;
+    }
+
+    if (!payload.privacyConsent) {
+        setAlert("signupAlert", "개인정보 수집·이용(필수) 동의가 필요합니다.");
         return;
     }
 
@@ -679,26 +699,13 @@ async function registerFacilityMember() {
 
 async function handleLoungeEntry() {
     const remembered = getRememberedLoungeGuest();
-    if (!remembered || remembered.validDate !== todayString()) {
+    if (!isRememberedLoungeVisitForToday(remembered)) {
         clearRememberedLoungeGuest();
         document.getElementById("loungeForm")?.reset();
         showSection("loungeEntry");
         return;
     }
-
-    const response = await callScript("getLoungeGuestById", {
-        guestId: remembered.guestId
-    });
-
-    if (!response.guest || response.guest.validDate !== todayString()) {
-        clearRememberedLoungeGuest();
-        document.getElementById("loungeForm")?.reset();
-        showSection("loungeEntry");
-        return;
-    }
-
-    await ensureVisitLog(response.guest, todayString(), "lounge-remembered");
-    showLoungeComplete(response.guest, true);
+    showLoungeComplete(remembered, true);
 }
 
 async function registerLoungeGuest() {
@@ -706,7 +713,9 @@ async function registerLoungeGuest() {
     const payload = createLoungeGuestPayload({
         gender: document.getElementById("loungeGender")?.value,
         birthDate: document.getElementById("loungeBirthDate")?.value,
-        isSeongnamResident: document.getElementById("loungeSeongnamResident")?.checked
+        isSeongnamResident: document.getElementById("loungeSeongnamResident")?.checked,
+        privacyConsent: document.getElementById("loungePrivacyConsent")?.checked,
+        optionalConsent: document.getElementById("loungeOptionalConsent")?.checked
     });
 
     if (!payload.gender || !payload.birthDate || payload.age < 0) {
@@ -714,30 +723,34 @@ async function registerLoungeGuest() {
         return;
     }
 
-    const existingRemembered = getRememberedLoungeGuest();
-    if (existingRemembered?.validDate === todayString()) {
-        const existingResponse = await callScript("getLoungeGuestById", {
-            guestId: existingRemembered.guestId
-        });
-        if (existingResponse.guest?.validDate === todayString()) {
-            await ensureVisitLog(existingResponse.guest, todayString(), "lounge-repeat");
-            showLoungeComplete(existingResponse.guest, true);
-            return;
-        }
-        clearRememberedLoungeGuest();
+    if (!payload.privacyConsent) {
+        setAlert("loungeAlert", "개인정보 수집·이용(필수) 동의가 필요합니다.");
+        return;
     }
 
-    const response = await callScript("registerLoungeGuest", {
-        guest: payload
-    });
-    const guest = response.guest;
+    const existingRemembered = getRememberedLoungeGuest();
+    if (isRememberedLoungeVisitForToday(existingRemembered)) {
+        showLoungeComplete(existingRemembered, true);
+        return;
+    }
+
+    const guest = {
+        id: "",
+        name: payload.name,
+        gender: payload.gender,
+        birthDate: payload.birthDate,
+        age: payload.age,
+        isSeongnamResident: payload.isSeongnamResident === true,
+        role: "lounge_guest"
+    };
     await ensureVisitLog(guest, todayString(), "lounge");
     rememberLoungeGuest({
-        guestId: guest.id,
         validDate: todayString(),
+        name: guest.name,
         gender: guest.gender,
         birthDate: guest.birthDate,
-        age: guest.age
+        age: guest.age,
+        isSeongnamResident: guest.isSeongnamResident === true
     });
     showToast("라운지 방문이 기록되었습니다.", "success");
     showLoungeComplete(guest, false);
@@ -1028,6 +1041,23 @@ function setupListeners() {
         const input = event.target;
         input.value = normalizeDigits(input.value).slice(0, 11);
     });
+
+    const syncOptionalConsent = (consentId, residentId) => {
+        const consentEl = document.getElementById(consentId);
+        const residentEl = document.getElementById(residentId);
+        if (!consentEl || !residentEl) return;
+
+        const refresh = () => {
+            residentEl.disabled = !consentEl.checked;
+            if (!consentEl.checked) residentEl.checked = false;
+        };
+
+        consentEl.addEventListener("change", refresh);
+        refresh();
+    };
+
+    syncOptionalConsent("signupOptionalConsent", "signupSeongnamResident");
+    syncOptionalConsent("loungeOptionalConsent", "loungeSeongnamResident");
 
     document.getElementById("refreshStatsBtn")?.addEventListener("click", () => loadStats(state.statsPeriod));
     document.getElementById("adminMemberSearchBtn")?.addEventListener("click", () => searchMembers());

@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>라운지 이용 화면 미리보기</title>
+    <link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@300;400;500;600;700&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        body {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+        }
+
+        .preview-wrap {
+            width: min(100%, 960px);
+        }
+
+        .preview-note {
+            margin-bottom: 16px;
+            color: #78350f;
+            font-weight: 600;
+            text-align: center;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="app-bg"></div>
+    <div class="preview-wrap">
+        <p class="preview-note">라운지 이용 화면 미리보기</p>
+
+        <div class="card">
+            <div class="section-header-inline">
+                <div>
+                    <span class="eyebrow">LOUNGE VISIT</span>
+                    <h2>라운지 방문 기록</h2>
+                </div>
+                <button type="button" class="btn-chip">처음으로</button>
+            </div>
+
+            <p class="section-description">라운지 이용은 임시 이용자로 하루 동안만 기록됩니다.</p>
+            <div class="alert alert-error hidden">오류 메시지 예시</div>
+
+            <form>
+                <div class="row">
+                    <div class="col form-group">
+                        <label for="loungeGenderPreview">성별</label>
+                        <select id="loungeGenderPreview" class="form-control">
+                            <option value="">선택</option>
+                            <option value="남성">남성</option>
+                            <option value="여성">여성</option>
+                        </select>
+                    </div>
+                    <div class="col form-group">
+                        <label for="loungeBirthDatePreview">생년월일</label>
+                        <input type="date" id="loungeBirthDatePreview" class="form-control">
+                    </div>
+                </div>
+
+                <label class="checkbox-row">
+                    <input type="checkbox" id="loungeSeongnamResidentPreview">
+                    <span>성남시 관내 거주자입니다</span>
+                </label>
+
+                <details class="consent-box" open>
+                    <summary>개인정보 수집·이용 안내 보기</summary>
+                    <div class="consent-body">
+                        <p><strong>필수 수집 항목</strong>: 성별, 생년월일</p>
+                        <p><strong>선택 수집 항목</strong>: 성남시 관내 거주 여부</p>
+                        <p><strong>수집·이용 목적</strong>: 라운지 이용 확인, 방문 이력 관리, 운영 통계 작성</p>
+                        <p><strong>보유·이용 기간</strong>: 수집일로부터 1년 또는 운영 목적 달성 시까지</p>
+                        <p><strong>동의 거부 권리</strong>: 필수 항목 동의를 거부할 수 있으나, 이 경우 라운지 방문 등록이 제한될 수 있습니다. 선택 항목은 동의하지 않아도 이용할 수 있습니다.</p>
+                    </div>
+                </details>
+
+                <label class="checkbox-row">
+                    <input type="checkbox" id="loungePrivacyConsentPreview" checked>
+                    <span>개인정보 수집·이용(필수)에 동의합니다</span>
+                </label>
+
+                <label class="checkbox-row">
+                    <input type="checkbox" id="loungeOptionalConsentPreview" checked>
+                    <span>성남시 관내 거주 여부 수집·이용(선택)에 동의합니다</span>
+                </label>
+
+                <button type="button" class="btn btn-primary">
+                    <span class="btn-text">라운지 방문 기록하기</span>
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        const optionalConsent = document.getElementById("loungeOptionalConsentPreview");
+        const residentCheckbox = document.getElementById("loungeSeongnamResidentPreview");
+
+        function syncOptional() {
+            residentCheckbox.disabled = !optionalConsent.checked;
+            if (!optionalConsent.checked) {
+                residentCheckbox.checked = false;
+            }
+        }
+
+        optionalConsent.addEventListener("change", syncOptional);
+        syncOptional();
+    </script>
+</body>
+
+</html>

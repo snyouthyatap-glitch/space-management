@@ -6,7 +6,6 @@ const SHEET_NAMES = {
   CAREER: '커리어존',
   CONNECT: '커넥트룸',
   MEMBERS: 'APP_MEMBERS',
-  LOUNGE_GUESTS: 'APP_LOUNGE_GUESTS',
   SETTINGS: 'APP_SETTINGS',
   VISIT_LOGS: 'APP_VISIT_LOGS',
   PRINTER_LOGS: 'APP_PRINTER_LOGS',
@@ -26,8 +25,7 @@ const HEADERS = {
     '연번', '날짜', '사용목적', '인원수', '비고', '시작시간', '종료시간',
     '20~29세(남)', '20~29세(여)', '30~39세(남)', '30~39세(여)', '~19세(남)', '~19세(여)'
   ],
-  members: ['memberId', 'name', 'gender', 'age', 'phone', 'phoneLastDigits', 'isSeongnamResident', 'status', 'role', 'createdAt', 'updatedAt'],
-  loungeGuests: ['guestId', 'name', 'gender', 'birthDate', 'age', 'isSeongnamResident', 'role', 'validDate', 'createdAt'],
+  members: ['memberId', 'name', 'gender', 'birthDate', 'age', 'phone', 'phoneLastDigits', 'isSeongnamResident', 'privacyConsent', 'optionalConsent', 'consentAt', 'status', 'role', 'createdAt', 'updatedAt'],
   settings: ['key', 'value', 'updatedAt'],
   visitLogs: ['logId', 'userId', 'memberType', 'name', 'gender', 'age', 'phone', 'phoneLastDigits', 'date', 'source', 'createdBy', 'createdAt'],
   printerLogs: ['logId', 'userId', 'name', 'gender', 'age', 'phone', 'phoneLastDigits', 'date', 'count', 'createdBy', 'createdAt'],
@@ -125,10 +123,6 @@ function dispatchWebAction_(action, payload) {
       return { ok: true, member: getMemberById_(str_(payload.memberId)) };
     case 'registerFacilityMember':
       return handleRegisterFacilityMember_(payload);
-    case 'getLoungeGuestById':
-      return { ok: true, guest: getLoungeGuestById_(str_(payload.guestId)) };
-    case 'registerLoungeGuest':
-      return handleRegisterLoungeGuest_(payload);
     case 'submitVisitLog':
       return handleSubmitVisitLog_(payload);
     case 'submitUsageRecord':
@@ -168,8 +162,11 @@ function handleResolveFacilityEntry_(payload) {
 
 function handleRegisterFacilityMember_(payload) {
   const member = normalizeFacilityMember_(payload.member || {});
-  if (!member.name || !member.gender || !member.age || !member.phone) {
-    throw new Error('성함, 성별, 나이, 연락처를 모두 입력해 주세요.');
+  if (!member.name || !member.gender || !member.birthDate || !member.age || !member.phone) {
+    throw new Error('성함, 성별, 생년월일, 연락처를 모두 입력해 주세요.');
+  }
+  if (!member.privacyConsent) {
+    throw new Error('개인정보 수집·이용(필수) 동의가 필요합니다.');
   }
 
   const lock = LockService.getScriptLock();
@@ -184,10 +181,14 @@ function handleRegisterFacilityMember_(payload) {
       memberId: Utilities.getUuid(),
       name: member.name,
       gender: member.gender,
+      birthDate: member.birthDate,
       age: member.age,
       phone: member.phone,
       phoneLastDigits: member.phoneLastDigits,
       isSeongnamResident: member.isSeongnamResident,
+      privacyConsent: member.privacyConsent,
+      optionalConsent: member.optionalConsent,
+      consentAt: member.consentAt,
       status: 'approved',
       role: 'user',
       createdAt: nowText_(),
@@ -198,30 +199,6 @@ function handleRegisterFacilityMember_(payload) {
   } finally {
     lock.releaseLock();
   }
-}
-
-function handleRegisterLoungeGuest_(payload) {
-  const guest = payload.guest || {};
-  const birthDate = str_(guest.birthDate);
-  const gender = str_(guest.gender);
-  const age = Number(guest.age || calcAge_(birthDate));
-  if (!birthDate || !gender || !age) {
-    throw new Error('성별과 생년월일을 확인해 주세요.');
-  }
-
-  const row = {
-    guestId: Utilities.getUuid(),
-    name: '라운지 이용자',
-    gender: gender,
-    birthDate: birthDate,
-    age: age,
-    isSeongnamResident: Boolean(guest.isSeongnamResident),
-    role: 'lounge_guest',
-    validDate: today_(),
-    createdAt: nowText_()
-  };
-  appendObjectRow_(SHEET_NAMES.LOUNGE_GUESTS, HEADERS.loungeGuests, row);
-  return { ok: true, guest: loungeRowToObject_(row) };
 }
 
 function handleSubmitVisitLog_(payload) {
@@ -820,13 +797,6 @@ function getMemberById_(memberId) {
   return row ? memberRowToObject_(row) : null;
 }
 
-function getLoungeGuestById_(guestId) {
-  const row = getRowsAsObjects_(SHEET_NAMES.LOUNGE_GUESTS, HEADERS.loungeGuests).find(function(item) {
-    return str_(item.guestId) === guestId;
-  });
-  return row ? loungeRowToObject_(row) : null;
-}
-
 function findMembersByExactPhone_(phone) {
   return getRowsAsObjects_(SHEET_NAMES.MEMBERS, HEADERS.members)
     .map(memberRowToObject_)
@@ -1035,17 +1005,21 @@ function normalizeFacilityMember_(member) {
   return {
     name: str_(member.name),
     gender: str_(member.gender),
+    birthDate: str_(member.birthDate),
     age: Number(member.age || 0),
     phone: phone,
     phoneLastDigits: phone.slice(-4),
-    isSeongnamResident: Boolean(member.isSeongnamResident)
+    isSeongnamResident: member.isSeongnamResident === '' ? '' : Boolean(member.isSeongnamResident),
+    privacyConsent: Boolean(member.privacyConsent),
+    optionalConsent: Boolean(member.optionalConsent),
+    consentAt: str_(member.consentAt, nowText_())
   };
 }
 
 function normalizeSubject_(member) {
   const phone = digits_(member.phone);
   return {
-    id: str_(member.id || member.memberId || member.guestId),
+    id: str_(member.id || member.memberId),
     name: str_(member.name),
     gender: str_(member.gender),
     age: Number(member.age || 0),
@@ -1060,25 +1034,13 @@ function memberRowToObject_(row) {
     id: str_(row.memberId),
     name: str_(row.name),
     gender: str_(row.gender),
+    birthDate: str_(row.birthDate),
     age: Number(row.age || 0),
     phone: digits_(row.phone),
     phoneLastDigits: str_(row.phoneLastDigits),
     isSeongnamResident: String(row.isSeongnamResident).toLowerCase() === 'true',
     status: str_(row.status, 'approved'),
     role: str_(row.role, 'user')
-  };
-}
-
-function loungeRowToObject_(row) {
-  return {
-    id: str_(row.guestId),
-    name: str_(row.name, '라운지 이용자'),
-    gender: str_(row.gender),
-    birthDate: str_(row.birthDate),
-    age: Number(row.age || 0),
-    isSeongnamResident: String(row.isSeongnamResident).toLowerCase() === 'true',
-    role: str_(row.role, 'lounge_guest'),
-    validDate: str_(row.validDate)
   };
 }
 
