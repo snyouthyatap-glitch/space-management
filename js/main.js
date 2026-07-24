@@ -1,8 +1,8 @@
 import { GOOGLE_SCRIPT_URL, QR_ENTRY_PARAM } from "./config.js?v=20260724-3";
 import { showToast, toggleLoading } from "./utils.js?v=20260724-3";
 
-const LAST_VISIT_LOG_KEY = "space-management-last-visit-log";
 const QR_ENTRY_SESSION_KEY = "space-management-qr-entry-ok";
+const PENDING_PRINTER_SUBMISSION_KEY = "space-management-pending-printer-submission";
 const SCRIPT_REQUEST_TIMEOUT_MS = 25000;
 let inMemoryEntryToken = "";
 
@@ -14,7 +14,8 @@ const state = {
     candidateSource: "facility-qr",
     verifiedSignupPhone: "",
     todayReservations: [],
-    selectedReservationId: ""
+    selectedReservationId: "",
+    pendingPrinterSubmission: null
 };
 
 const sections = {
@@ -75,6 +76,48 @@ function setSessionValue(key, value) {
     } catch {
         // Restricted storage must not block the current QR visit.
     }
+}
+
+function removeSessionValue(key) {
+    try {
+        sessionStorage.removeItem(key);
+    } catch {
+        // In-memory state still prevents duplicate requests during this page session.
+    }
+}
+
+function createRequestId() {
+    if (window.crypto?.randomUUID) {
+        return window.crypto.randomUUID();
+    }
+    return `request-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function getPrinterSubmission(memberId, count) {
+    const signature = `${memberId}:${todayString()}:${count}`;
+    let pending = state.pendingPrinterSubmission;
+    if (!pending) {
+        try {
+            pending = JSON.parse(getSessionValue(PENDING_PRINTER_SUBMISSION_KEY) || "null");
+        } catch {
+            pending = null;
+        }
+    }
+    if (pending?.signature === signature && pending.requestId) {
+        state.pendingPrinterSubmission = pending;
+        return pending;
+    }
+
+    pending = { signature, requestId: createRequestId() };
+    state.pendingPrinterSubmission = pending;
+    setSessionValue(PENDING_PRINTER_SUBMISSION_KEY, JSON.stringify(pending));
+    return pending;
+}
+
+function clearPrinterSubmission(requestId) {
+    if (state.pendingPrinterSubmission?.requestId !== requestId) return;
+    state.pendingPrinterSubmission = null;
+    removeSessionValue(PENDING_PRINTER_SUBMISSION_KEY);
 }
 
 function showEntryGate() {
@@ -141,36 +184,6 @@ function parseBirthDateInput(value) {
     }
 
     return birthDate;
-}
-
-function getLastVisitLogRecord() {
-    try {
-        return JSON.parse(localStorage.getItem(LAST_VISIT_LOG_KEY) || "null");
-    } catch {
-        return null;
-    }
-}
-
-function setLastVisitLogRecord(record) {
-    try {
-        localStorage.setItem(LAST_VISIT_LOG_KEY, JSON.stringify(record));
-    } catch {
-        // Server-side duplicate prevention remains authoritative.
-    }
-}
-
-function clearExpiredVisitLogRecord() {
-    const lastVisit = getLastVisitLogRecord();
-    if (!lastVisit) {
-        return;
-    }
-    if (lastVisit.date !== todayString()) {
-        try {
-            localStorage.removeItem(LAST_VISIT_LOG_KEY);
-        } catch {
-            // Ignore unavailable browser storage.
-        }
-    }
 }
 
 function showSection(name) {
@@ -352,7 +365,7 @@ function setupTimeInputs() {
 }
 
 function setupBirthDateInputs() {
-    ["signupBirthDate", "birthUpdateInput", "withdrawBirthDate"].forEach((inputId) => {
+    ["signupBirthDate", "birthUpdateInput"].forEach((inputId) => {
         const input = document.getElementById(inputId);
         if (!input) {
             return;
@@ -530,9 +543,7 @@ function resetToChoice() {
     document.getElementById("printerForm")?.reset();
     document.getElementById("careerForm")?.reset();
     document.getElementById("connectForm")?.reset();
-    document.getElementById("withdrawForm")?.reset();
     renderTodayReservations([]);
-    document.getElementById("withdrawDialog")?.close();
     ["careerCompanionCount", "connectCompanionCount"].forEach((id) => {
         const input = document.getElementById(id);
         if (input) input.value = 0;
@@ -607,14 +618,10 @@ function callScript(action, payload = {}) {
     });
 }
 
-async function ensureVisitLog(member, dateStr, source = "facility-qr") {
+async function ensureVisitLog(member, source = "facility-qr") {
     const response = await callScript("submitVisitLog", {
         memberId: member.id,
         source
-    });
-    setLastVisitLogRecord({
-        memberId: member.id,
-        date: response.date || dateStr
     });
     return response;
 }
@@ -632,7 +639,7 @@ async function routeFacilityMember(member, source = "facility-qr") {
         return;
     }
 
-    const visitResponse = await ensureVisitLog(member, todayString(), source);
+    const visitResponse = await ensureVisitLog(member, source);
     state.pendingMember = null;
     setCurrentMember(member, "facility");
     renderTodayReservations(visitResponse.reservations || []);
@@ -832,7 +839,6 @@ async function updateMissingBirthDate() {
     if (!birthDate || birthDateToAge(birthDate) < 0) {
         const message = "생년월일을 YYYYMMDD 형식으로 정확히 입력해 주세요.";
         setAlert("birthUpdateAlert", message);
-        showToast(message, "error");
         return;
     }
 
@@ -847,10 +853,6 @@ async function updateMissingBirthDate() {
 
     state.pendingMember = response.member;
     if (response.visit) {
-        setLastVisitLogRecord({
-            memberId: response.member.id,
-            date: response.visit.date || todayString()
-        });
         state.pendingMember = null;
         setCurrentMember(response.member, "facility");
         renderTodayReservations(response.visit.reservations || []);
@@ -900,7 +902,7 @@ async function registerFacilityMember() {
     showToast("회원 등록과 방문 확인이 완료되었습니다.", "success");
 }
 
-async function submitUsageRecord(type, data, member) {
+async function submitUsageRecord(type, data, member, requestId = "") {
     return callScript("submitUsageRecord", {
         type,
         data: {
@@ -908,67 +910,14 @@ async function submitUsageRecord(type, data, member) {
             startTime: data.startTime ? sanitizeTime(data.startTime) : "",
             endTime: data.endTime ? sanitizeTime(data.endTime) : ""
         },
-        memberId: member.id
-    });
-}
-
-function openWithdrawDialog() {
-    const dialog = document.getElementById("withdrawDialog");
-    if (!dialog || !state.currentMember) {
-        showToast("회원 정보를 다시 확인해 주세요.", "error");
-        return;
-    }
-    document.getElementById("withdrawForm")?.reset();
-    dialog.showModal();
-    document.getElementById("withdrawPhone")?.focus();
-}
-
-function closeWithdrawDialog() {
-    document.getElementById("withdrawDialog")?.close();
-    document.getElementById("withdrawForm")?.reset();
-}
-
-async function withdrawCurrentMember() {
-    const member = getCurrentMemberOrThrow();
-    const phone = normalizeDigits(document.getElementById("withdrawPhone")?.value);
-    const birthDate = parseBirthDateInput(document.getElementById("withdrawBirthDate")?.value);
-    if (!isValidSignupPhone(phone)) {
-        throw new Error("가입한 휴대폰 번호 11자리를 정확히 입력해 주세요.");
-    }
-    if (!birthDate || birthDateToAge(birthDate) < 0) {
-        throw new Error("생년월일을 YYYYMMDD 형식으로 정확히 입력해 주세요.");
-    }
-
-    await callScript("withdrawMember", {
         memberId: member.id,
-        phone,
-        birthDate
+        requestId
     });
-    closeWithdrawDialog();
-    resetToChoice();
-    showToast("회원 탈퇴가 완료되었습니다.", "success");
 }
 
 function setupListeners() {
     document.getElementById("signupBackBtn")?.addEventListener("click", () => resetToChoice());
     document.getElementById("facilityExitBtn")?.addEventListener("click", () => resetToChoice());
-    document.getElementById("withdrawOpenBtn")?.addEventListener("click", openWithdrawDialog);
-    document.getElementById("withdrawCancelBtn")?.addEventListener("click", closeWithdrawDialog);
-    document.getElementById("withdrawPhone")?.addEventListener("input", (event) => {
-        event.target.value = normalizeDigits(event.target.value).slice(0, 11);
-    });
-    document.getElementById("withdrawForm")?.addEventListener("submit", async (event) => {
-        event.preventDefault();
-        toggleLoading("withdrawSubmitBtn", true);
-        try {
-            await withdrawCurrentMember();
-        } catch (error) {
-            console.error(error);
-            showToast(error.message || "회원 탈퇴 중 문제가 발생했습니다.", "error");
-        } finally {
-            toggleLoading("withdrawSubmitBtn", false);
-        }
-    });
 
     document.getElementById("reservationSubmitBtn")?.addEventListener("click", async () => {
         toggleLoading("reservationSubmitBtn", true);
@@ -1055,7 +1004,6 @@ function setupListeners() {
             console.error(error);
             const message = error.message || "생년월일 저장 중 문제가 발생했습니다.";
             setAlert("birthUpdateAlert", message);
-            showToast(message, "error");
         } finally {
             toggleLoading("birthUpdateSubmitBtn", false);
         }
@@ -1099,10 +1047,16 @@ function setupListeners() {
         toggleLoading("printerSubmitBtn", true);
         try {
             const member = getCurrentMemberOrThrow();
-            await submitUsageRecord("printer", {
-                count: Number(document.getElementById("printerCount")?.value || 0)
-            }, member);
-            showToast("프린터 사용 기록을 제출했습니다.", "success");
+            const count = Number(document.getElementById("printerCount")?.value || 0);
+            const submission = getPrinterSubmission(member.id, count);
+            const response = await submitUsageRecord("printer", { count }, member, submission.requestId);
+            clearPrinterSubmission(submission.requestId);
+            showToast(
+                response.created === false
+                    ? "이미 반영된 프린터 기록입니다."
+                    : "프린터 사용 기록을 제출했습니다.",
+                "success"
+            );
             event.target.reset();
             document.getElementById("printerCount").value = 1;
         } catch (error) {
@@ -1192,8 +1146,6 @@ function init() {
     setupStepper("careerCompanionCount", "careerCompanions");
     setupStepper("connectCompanionCount", "connectCompanions");
     setupListeners();
-
-    clearExpiredVisitLogRecord();
 }
 
 try {

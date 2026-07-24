@@ -9,7 +9,7 @@
     <meta property="og:description" content="QR 기반 방문 확인과 시설 이용 기록 페이지">
     <meta property="og:type" content="website">
     <meta name="description" content="청년이봄 야탑 QR 방문 확인과 시설 이용 기록 페이지">
-    <link rel="stylesheet" href="css/style.css?v=20260724-4">
+    <link rel="stylesheet" href="css/style.css?v=20260724-5">
 </head>
 
 <body>
@@ -151,7 +151,7 @@
                         <p><strong>수집·이용 목적</strong>: 공간 이용자 확인, 방문 이력 관리, 운영 통계 작성</p>
                         <p><strong>회원가입 안내</strong>: 성남시 관내 거주 여부는 운영 통계를 위해 수집하며, 관내·관외 거주자 모두 가입하고 시설을 이용할 수 있습니다.</p>
                         <p><strong>보유·이용 기간</strong>: 마지막 시설 이용일로부터 3년</p>
-                        <p><strong>파기 안내</strong>: 보유기간이 지나거나 회원이 탈퇴하면 회원정보를 삭제하고, 상세 이용기록에서는 이름·전화번호·회원번호를 제거합니다. 해당 항목이 제거된 이용 통계는 시설 운영 및 통계 목적으로 계속 보관할 수 있습니다.</p>
+                        <p><strong>파기 안내</strong>: 보유기간이 지나거나 담당자를 통해 회원 탈퇴가 처리되면 회원정보를 삭제하고, 상세 이용기록에서는 이름·전화번호·회원번호를 제거합니다. 회원 탈퇴를 원하시면 담당자에게 문의해 주세요. 해당 항목이 제거된 이용 통계는 시설 운영 및 통계 목적으로 계속 보관할 수 있습니다.</p>
                         <p><strong>동의 거부 권리</strong>: 수집·이용에 동의하지 않을 수 있으나, 이 경우 회원가입 및 시설 이용 등록이 제한될 수 있습니다.</p>
                     </div>
                 </details>
@@ -195,7 +195,7 @@
                         <p id="facilityMemberInfo" class="section-description compact"></p>
                     </div>
                     <div class="header-actions">
-                        <button type="button" id="withdrawOpenBtn" class="btn-chip btn-chip-danger">회원 탈퇴</button>
+                        <span class="membership-contact">회원 탈퇴는 담당자 문의</span>
                         <button type="button" id="facilityExitBtn" class="btn-chip">이용 종료</button>
                     </div>
                 </div>
@@ -327,35 +327,7 @@
 
     </div>
 
-    <dialog id="withdrawDialog" class="confirm-dialog">
-        <form id="withdrawForm" class="dialog-content">
-            <div class="dialog-heading">
-                <span class="eyebrow">MEMBERSHIP</span>
-                <h2>회원 탈퇴</h2>
-                <p>탈퇴하면 회원정보가 삭제되며 되돌릴 수 없습니다. 기존 이용기록에서는 이름·전화번호·회원번호를 제거하고 통계 값만 유지합니다.</p>
-            </div>
-            <div class="form-group">
-                <label for="withdrawPhone">휴대폰 번호 전체</label>
-                <input type="tel" id="withdrawPhone" class="form-control" inputmode="numeric"
-                    placeholder="01012341234" maxlength="11" autocomplete="tel" required>
-            </div>
-            <div class="form-group">
-                <label for="withdrawBirthDate">생년월일</label>
-                <input type="text" id="withdrawBirthDate" class="form-control birthdate-input" inputmode="numeric"
-                    placeholder="YYYYMMDD" maxlength="8" autocomplete="bday" required>
-                <small class="helper-text">본인 확인을 위해 가입한 정보와 동일하게 입력해 주세요.</small>
-            </div>
-            <div class="dialog-actions">
-                <button type="button" id="withdrawCancelBtn" class="btn btn-outline">취소</button>
-                <button type="submit" id="withdrawSubmitBtn" class="btn btn-danger">
-                    <span class="btn-text">탈퇴하기</span>
-                    <div class="spinner"></div>
-                </button>
-            </div>
-        </form>
-    </dialog>
-
-    <script type="module" src="js/main.js?v=20260724-6"></script>
+    <script type="module" src="js/main.js?v=20260724-7"></script>
 </body>
 
 </html>
