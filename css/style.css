@@ -1212,3 +1212,423 @@ button:disabled {
     filter: grayscale(0.5);
     transform: none !important;
 }
+
+/* Cheongnyeonibom brand theme */
+:root {
+    --primary-main: #e63d70;
+    --primary-dark: #c92f5d;
+    --primary-light: #fde8ef;
+    --text-color: #302b29;
+    --bg-color: #f8f6f3;
+    --gray-light: #eee8e4;
+    --gray-text: #756d69;
+    --danger: #c93445;
+    --success: #4a9943;
+    --brand-green: #4a9943;
+    --brand-green-dark: #347c33;
+    --brand-green-light: #eaf5e7;
+    --brand-pink-light: #fff1f5;
+    --surface-muted: #fbfaf8;
+    --border-color: #e6dfda;
+    --shadow: 0 16px 44px rgba(48, 43, 41, 0.09);
+    --transition: all 0.2s ease;
+}
+
+body {
+    position: relative;
+    background: var(--bg-color);
+    color: var(--text-color);
+}
+
+body::before,
+body::after {
+    content: "";
+    position: fixed;
+    top: 0;
+    height: 6px;
+    z-index: 10001;
+}
+
+body::before {
+    left: 0;
+    width: 72%;
+    background: var(--primary-main);
+}
+
+body::after {
+    right: 0;
+    width: 28%;
+    background: var(--brand-green);
+}
+
+.app-bg {
+    background: var(--bg-color);
+}
+
+.container.app-shell {
+    width: min(100% - 32px, 760px);
+    padding: 30px 0 64px;
+}
+
+.header {
+    position: relative;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    width: fit-content;
+    margin: 0 auto 24px;
+    padding: 4px 0 8px;
+}
+
+.brand-logo {
+    display: block;
+    width: clamp(220px, 40vw, 310px);
+    height: auto;
+}
+
+.branch-label {
+    position: absolute;
+    right: 2px;
+    bottom: -2px;
+    color: var(--brand-green-dark);
+    font-size: 0.67rem;
+    font-weight: 800;
+    letter-spacing: 0.14em;
+}
+
+.card {
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: #fff;
+    box-shadow: var(--shadow);
+}
+
+.checkin-card {
+    position: relative;
+    overflow: hidden;
+    margin-top: 3vh;
+}
+
+.checkin-card::before,
+.checkin-card::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    height: 5px;
+}
+
+.checkin-card::before {
+    left: 0;
+    width: 72%;
+    background: var(--primary-main);
+}
+
+.checkin-card::after {
+    right: 0;
+    width: 28%;
+    background: var(--brand-green);
+}
+
+.eyebrow {
+    color: var(--primary-main);
+}
+
+.card h2,
+.card h3,
+.form-group label,
+.checkbox-row {
+    color: var(--text-color);
+}
+
+.section-description,
+.helper-text {
+    color: var(--gray-text);
+}
+
+.pin-input {
+    border-color: #d9d1cc;
+    background: var(--surface-muted);
+    caret-color: var(--primary-main);
+}
+
+.pin-input:hover {
+    border-color: #c8bdb6;
+}
+
+.pin-input:focus,
+.pin-input:not(:placeholder-shown) {
+    border-color: var(--primary-main);
+    background: #fff;
+    box-shadow: 0 0 0 4px rgba(230, 61, 112, 0.12);
+}
+
+.form-control {
+    border-color: #d9d1cc;
+    background: var(--surface-muted);
+}
+
+.form-control:hover {
+    border-color: #c8bdb6;
+}
+
+.form-control:focus {
+    border-color: var(--primary-main);
+    background: #fff;
+    box-shadow: 0 0 0 4px rgba(230, 61, 112, 0.12);
+}
+
+.btn-primary {
+    background: var(--primary-main);
+    color: #fff;
+}
+
+.btn-primary:hover {
+    background: var(--primary-dark);
+}
+
+.btn-outline {
+    border-color: var(--primary-main);
+    background: #fff;
+    color: var(--primary-dark);
+}
+
+.btn-outline:hover {
+    background: var(--brand-pink-light);
+    color: var(--primary-dark);
+}
+
+.checkbox-row input[type="checkbox"] {
+    accent-color: var(--primary-main);
+}
+
+.consent-box {
+    border-color: var(--border-color);
+    background: var(--surface-muted);
+}
+
+.consent-box summary,
+.consent-body {
+    color: var(--text-color);
+}
+
+.step-divider::before,
+.step-divider::after {
+    background: var(--border-color);
+}
+
+.btn-text-action {
+    color: var(--primary-dark);
+}
+
+.btn-chip {
+    border-color: #d9d1cc;
+    border-radius: 6px;
+    background: #fff;
+    color: var(--text-color);
+}
+
+.btn-chip:hover {
+    border-color: var(--primary-main);
+    color: var(--primary-dark);
+}
+
+.btn-chip-danger {
+    border-color: #efc8cf;
+    background: #fff8fa;
+    color: #a72f43;
+}
+
+.empty-icon {
+    border-radius: 8px;
+    background: var(--brand-green-light);
+    color: var(--brand-green-dark);
+}
+
+.empty-state h2,
+.empty-state p {
+    color: var(--text-color);
+}
+
+.profile-update-icon {
+    border-radius: 8px;
+    background: var(--brand-pink-light);
+    color: var(--primary-main);
+}
+
+.verified-phone-row {
+    border-color: #cfe2cb;
+    background: var(--brand-green-light);
+    color: var(--brand-green-dark);
+}
+
+.verified-phone-row .btn-text-action {
+    color: var(--brand-green-dark);
+}
+
+.card-premium {
+    border: 1px solid var(--border-color);
+    border-top: 4px solid var(--brand-green);
+    border-radius: 8px;
+    background: #fff;
+    box-shadow: var(--shadow);
+}
+
+.status-pill {
+    border-color: var(--border-color);
+    border-radius: 6px;
+    background: var(--surface-muted);
+    color: var(--text-color);
+}
+
+.status-pill.success {
+    border-color: #cfe2cb;
+    background: var(--brand-green-light);
+    color: var(--brand-green-dark);
+}
+
+.status-pill.neutral {
+    background: var(--surface-muted);
+}
+
+.tabs {
+    position: static;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 4px;
+    margin-bottom: 28px;
+    padding: 4px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--surface-muted);
+}
+
+.tab {
+    min-width: 0;
+    min-height: 46px;
+    padding: 11px 8px;
+    border: 0;
+    border-radius: 5px;
+    color: var(--gray-text);
+}
+
+.tab.active {
+    border: 0;
+    background: var(--brand-green);
+    color: #fff;
+}
+
+.stepper-container {
+    border-color: #cfe2cb;
+    border-radius: 8px;
+    background: var(--brand-green-light);
+    box-shadow: none;
+}
+
+.stepper-btn {
+    border-radius: 6px;
+    background: var(--brand-green);
+    color: #fff;
+}
+
+.stepper-btn:hover {
+    background: var(--brand-green-dark);
+}
+
+.stepper-input,
+.companion-item label {
+    color: var(--text-color);
+}
+
+.companion-item {
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--surface-muted);
+    padding: 12px;
+}
+
+.reservation-section {
+    border-color: var(--border-color);
+}
+
+.reservation-companion-section {
+    border-color: var(--border-color);
+}
+
+.reservation-item {
+    border-color: #d9d1cc;
+    border-radius: 8px;
+}
+
+.reservation-item:hover {
+    border-color: var(--brand-green);
+}
+
+.reservation-item.selected {
+    border-color: var(--brand-green);
+    background: var(--brand-green-light);
+}
+
+.reservation-time,
+.reservation-state {
+    color: var(--brand-green-dark);
+}
+
+.confirm-dialog {
+    border-radius: 8px;
+    box-shadow: 0 24px 72px rgba(48, 43, 41, 0.26);
+}
+
+.confirm-dialog::backdrop {
+    background: rgba(48, 43, 41, 0.58);
+}
+
+.toast-item {
+    border-color: var(--border-color);
+    border-left-color: var(--gray-text);
+    box-shadow: 0 14px 36px rgba(48, 43, 41, 0.16);
+}
+
+.toast-item.success {
+    border-left-color: var(--success);
+}
+
+.alert {
+    border-radius: 6px;
+}
+
+@media (max-width: 520px) {
+    .container.app-shell {
+        width: min(100% - 24px, 760px);
+        padding-top: 22px;
+    }
+
+    .header {
+        margin-bottom: 18px;
+    }
+
+    .brand-logo {
+        width: min(68vw, 250px);
+    }
+
+    .branch-label {
+        right: 0;
+        font-size: 0.6rem;
+    }
+
+    .checkin-card {
+        margin-top: 2vh;
+    }
+
+    .card {
+        padding: 26px 18px;
+    }
+
+    .tabs {
+        gap: 3px;
+    }
+
+    .tab {
+        padding-inline: 4px;
+        font-size: 0.86rem;
+    }
+}
