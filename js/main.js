@@ -447,8 +447,10 @@ function showVerifiedSignupDetails(phone) {
     state.verifiedSignupPhone = phone;
     document.getElementById("signupPhoneCheckForm")?.classList.add("hidden");
     document.getElementById("signupForm")?.classList.remove("hidden");
+    const description = document.getElementById("signupDescription");
+    if (description) description.textContent = "등록된 회원 정보가 없어 신규 회원 등록을 진행합니다.";
     const verifiedText = document.getElementById("verifiedSignupPhoneText");
-    if (verifiedText) verifiedText.textContent = `${phone.slice(0, 3)}-${phone.slice(3, 7)}-${phone.slice(7)} 확인됨`;
+    if (verifiedText) verifiedText.textContent = `신규 등록 번호 ${phone.slice(0, 3)}-${phone.slice(3, 7)}-${phone.slice(7)}`;
     document.getElementById("signupName")?.focus();
 }
 
@@ -459,6 +461,8 @@ function openSignupPhoneStep(value = "", isVerified = false) {
         phoneInput.value = phone.length === 11 ? phone : "";
     }
     state.verifiedSignupPhone = "";
+    const description = document.getElementById("signupDescription");
+    if (description) description.textContent = "전체 전화번호로 기존 가입 여부를 먼저 확인합니다.";
     document.getElementById("signupPhoneCheckForm")?.classList.remove("hidden");
     document.getElementById("signupForm")?.classList.add("hidden");
     document.getElementById("signupForm")?.reset();
@@ -826,20 +830,34 @@ async function updateMissingBirthDate() {
 
     const birthDate = parseBirthDateInput(document.getElementById("birthUpdateInput")?.value);
     if (!birthDate || birthDateToAge(birthDate) < 0) {
-        setAlert("birthUpdateAlert", "생년월일을 YYYYMMDD 형식으로 정확히 입력해 주세요.");
+        const message = "생년월일을 YYYYMMDD 형식으로 정확히 입력해 주세요.";
+        setAlert("birthUpdateAlert", message);
+        showToast(message, "error");
         return;
     }
 
     const response = await callScript("updateMemberBirthDate", {
         memberId: state.pendingMember.id,
-        birthDate
+        birthDate,
+        source: "facility-birthdate-update"
     });
     if (!response.member) {
         throw new Error("생년월일을 저장하지 못했습니다.");
     }
 
     state.pendingMember = response.member;
-    await routeFacilityMember(response.member, "facility-birthdate-update");
+    if (response.visit) {
+        setLastVisitLogRecord({
+            memberId: response.member.id,
+            date: response.visit.date || todayString()
+        });
+        state.pendingMember = null;
+        setCurrentMember(response.member, "facility");
+        renderTodayReservations(response.visit.reservations || []);
+        showSection("facility");
+    } else {
+        await routeFacilityMember(response.member, "facility-birthdate-update");
+    }
     showToast("생년월일이 저장되었습니다.", "success");
 }
 
@@ -1035,7 +1053,9 @@ function setupListeners() {
             await updateMissingBirthDate();
         } catch (error) {
             console.error(error);
-            setAlert("birthUpdateAlert", error.message || "생년월일 저장 중 문제가 발생했습니다.");
+            const message = error.message || "생년월일 저장 중 문제가 발생했습니다.";
+            setAlert("birthUpdateAlert", message);
+            showToast(message, "error");
         } finally {
             toggleLoading("birthUpdateSubmitBtn", false);
         }
