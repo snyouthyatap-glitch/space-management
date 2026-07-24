@@ -1,5 +1,5 @@
-import { GOOGLE_SCRIPT_URL, QR_ENTRY_PARAM } from "./config.js?v=20260724-2";
-import { showToast, toggleLoading } from "./utils.js?v=20260724-2";
+import { GOOGLE_SCRIPT_URL, QR_ENTRY_PARAM } from "./config.js?v=20260724-3";
+import { showToast, toggleLoading } from "./utils.js?v=20260724-3";
 
 const LAST_VISIT_LOG_KEY = "space-management-last-visit-log";
 const QR_ENTRY_SESSION_KEY = "space-management-qr-entry-ok";
