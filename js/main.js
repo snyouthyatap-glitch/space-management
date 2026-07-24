@@ -1,33 +1,40 @@
-import { GOOGLE_SCRIPT_URL, QR_ENTRY_PARAM, QR_ENTRY_TOKEN } from "./config.js";
-import { getTrustedNow, showToast, syncSystemTime, toggleLoading } from "./utils.js";
+import { GOOGLE_SCRIPT_URL, QR_ENTRY_PARAM } from "./config.js?v=20260724-2";
+import { showToast, toggleLoading } from "./utils.js?v=20260724-2";
 
-const STORAGE_KEY = "space-management-session";
-const REMEMBERED_MEMBER_KEY = "space-management-remembered-member";
-const REMEMBERED_LOUNGE_KEY = "space-management-remembered-lounge";
 const LAST_VISIT_LOG_KEY = "space-management-last-visit-log";
 const QR_ENTRY_SESSION_KEY = "space-management-qr-entry-ok";
+const SCRIPT_REQUEST_TIMEOUT_MS = 25000;
+let inMemoryEntryToken = "";
 
 const state = {
     currentMember: null,
     currentMode: null,
-    proxyMember: null,
-    adminSheetUrl: "",
-    statsPeriod: "daily"
+    pendingMember: null,
+    candidateMember: null,
+    candidateSource: "facility-qr",
+    verifiedSignupPhone: "",
+    todayReservations: [],
+    selectedReservationId: ""
 };
 
 const sections = {
     gate: document.getElementById("entryGateSection"),
-    choice: document.getElementById("choiceSection"),
     facilityEntry: document.getElementById("entrySection"),
+    memberConfirm: document.getElementById("memberConfirmSection"),
     facilitySignup: document.getElementById("signupSection"),
-    loungeEntry: document.getElementById("loungeSection"),
-    loungeComplete: document.getElementById("loungeCompleteSection"),
-    facility: document.getElementById("facilitySection"),
-    admin: document.getElementById("adminSection")
+    birthUpdate: document.getElementById("birthUpdateSection"),
+    facility: document.getElementById("facilitySection")
 };
 
 function normalizeDigits(value) {
     return String(value || "").replace(/\D/g, "");
+}
+
+function maskMemberName(name) {
+    const value = String(name || "회원").trim();
+    if (value.length <= 1) return value;
+    if (value.length === 2) return `${value[0]}○`;
+    return `${value[0]}${"○".repeat(value.length - 2)}${value[value.length - 1]}`;
 }
 
 function isLocalPreview() {
@@ -36,20 +43,38 @@ function isLocalPreview() {
 }
 
 function hasValidQrEntryToken() {
-    if (sessionStorage.getItem(QR_ENTRY_SESSION_KEY) === "true") {
-        return true;
-    }
-    if (isLocalPreview()) {
+    if (getEntryToken()) {
         return true;
     }
     const params = new URLSearchParams(window.location.search);
-    const isValid = params.get(QR_ENTRY_PARAM) === QR_ENTRY_TOKEN;
-    if (isValid) {
-        sessionStorage.setItem(QR_ENTRY_SESSION_KEY, "true");
+    const entryToken = String(params.get(QR_ENTRY_PARAM) || "").trim();
+    if (entryToken) {
+        setSessionValue(QR_ENTRY_SESSION_KEY, entryToken);
         const cleanUrl = `${window.location.origin}${window.location.pathname}${window.location.hash || ""}`;
         window.history.replaceState({}, document.title, cleanUrl);
     }
-    return isValid;
+    return Boolean(entryToken) || isLocalPreview();
+}
+
+function getEntryToken() {
+    return getSessionValue(QR_ENTRY_SESSION_KEY) || inMemoryEntryToken;
+}
+
+function getSessionValue(key) {
+    try {
+        return sessionStorage.getItem(key) || "";
+    } catch {
+        return "";
+    }
+}
+
+function setSessionValue(key, value) {
+    if (key === QR_ENTRY_SESSION_KEY) inMemoryEntryToken = value;
+    try {
+        sessionStorage.setItem(key, value);
+    } catch {
+        // Restricted storage must not block the current QR visit.
+    }
 }
 
 function showEntryGate() {
@@ -57,46 +82,65 @@ function showEntryGate() {
     sections.gate?.classList.remove("hidden");
 }
 
+function getSeoulDateParts() {
+    const parts = new Intl.DateTimeFormat("en-US", {
+        timeZone: "Asia/Seoul",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit"
+    }).formatToParts(new Date());
+    const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    return {
+        year: Number(values.year),
+        month: Number(values.month),
+        day: Number(values.day)
+    };
+}
+
 function todayString() {
-    return getTrustedNow().toLocaleDateString("en-CA");
+    const { year, month, day } = getSeoulDateParts();
+    return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
 function formatDisplayDate(dateStr = todayString()) {
-    return new Date(dateStr).toLocaleDateString("ko-KR", {
-        year: "numeric",
-        month: "long",
-        day: "numeric"
-    });
+    const [year, month, day] = dateStr.split("-").map(Number);
+    return `${year}년 ${month}월 ${day}일`;
 }
 
 function birthDateToAge(birthDate) {
     if (!birthDate) {
         return 0;
     }
-    const birth = new Date(birthDate);
-    const today = getTrustedNow();
-    let age = today.getFullYear() - birth.getFullYear();
-    const monthDiff = today.getMonth() - birth.getMonth();
-    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) {
+    const [birthYear, birthMonth, birthDay] = birthDate.split("-").map(Number);
+    const today = getSeoulDateParts();
+    let age = today.year - birthYear;
+    if (today.month < birthMonth || (today.month === birthMonth && today.day < birthDay)) {
         age -= 1;
     }
     return age;
 }
 
-function setSession(payload) {
-    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-}
-
-function getSession() {
-    try {
-        return JSON.parse(sessionStorage.getItem(STORAGE_KEY) || "null");
-    } catch {
-        return null;
+function parseBirthDateInput(value) {
+    const digits = normalizeDigits(value);
+    if (digits.length !== 8) {
+        return "";
     }
-}
 
-function clearSession() {
-    sessionStorage.removeItem(STORAGE_KEY);
+    const year = Number(digits.slice(0, 4));
+    const month = Number(digits.slice(4, 6));
+    const day = Number(digits.slice(6, 8));
+
+    if (year < 1900 || year > 2100 || month < 1 || month > 12 || day < 1 || day > 31) {
+        return "";
+    }
+
+    const birthDate = `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    const date = new Date(Date.UTC(year, month - 1, day));
+    if (date.getUTCFullYear() !== year || date.getUTCMonth() + 1 !== month || date.getUTCDate() !== day) {
+        return "";
+    }
+
+    return birthDate;
 }
 
 function getLastVisitLogRecord() {
@@ -108,7 +152,11 @@ function getLastVisitLogRecord() {
 }
 
 function setLastVisitLogRecord(record) {
-    localStorage.setItem(LAST_VISIT_LOG_KEY, JSON.stringify(record));
+    try {
+        localStorage.setItem(LAST_VISIT_LOG_KEY, JSON.stringify(record));
+    } catch {
+        // Server-side duplicate prevention remains authoritative.
+    }
 }
 
 function clearExpiredVisitLogRecord() {
@@ -117,44 +165,12 @@ function clearExpiredVisitLogRecord() {
         return;
     }
     if (lastVisit.date !== todayString()) {
-        localStorage.removeItem(LAST_VISIT_LOG_KEY);
+        try {
+            localStorage.removeItem(LAST_VISIT_LOG_KEY);
+        } catch {
+            // Ignore unavailable browser storage.
+        }
     }
-}
-
-function rememberFacilityMember(memberId, verifiedDate = todayString()) {
-    localStorage.setItem(REMEMBERED_MEMBER_KEY, JSON.stringify({ memberId, verifiedDate }));
-}
-
-function getRememberedFacilityMember() {
-    try {
-        return JSON.parse(localStorage.getItem(REMEMBERED_MEMBER_KEY) || "null");
-    } catch {
-        return null;
-    }
-}
-
-function clearRememberedFacilityMember() {
-    localStorage.removeItem(REMEMBERED_MEMBER_KEY);
-}
-
-function rememberLoungeGuest(guest) {
-    localStorage.setItem(REMEMBERED_LOUNGE_KEY, JSON.stringify(guest));
-}
-
-function getRememberedLoungeGuest() {
-    try {
-        return JSON.parse(localStorage.getItem(REMEMBERED_LOUNGE_KEY) || "null");
-    } catch {
-        return null;
-    }
-}
-
-function clearRememberedLoungeGuest() {
-    localStorage.removeItem(REMEMBERED_LOUNGE_KEY);
-}
-
-function isRememberedLoungeVisitForToday(remembered) {
-    return Boolean(remembered && remembered.validDate === todayString());
 }
 
 function showSection(name) {
@@ -167,16 +183,13 @@ function showSection(name) {
 
 function setAlert(elementId, message = "", type = "error") {
     const element = document.getElementById(elementId);
-    if (!element) {
-        return;
-    }
-    if (!message) {
+    if (element) {
         element.className = "alert hidden";
         element.textContent = "";
-        return;
     }
-    element.textContent = message;
-    element.className = `alert alert-${type}`;
+    if (message) {
+        showToast(message, type);
+    }
 }
 
 function sanitizeTime(value) {
@@ -185,24 +198,13 @@ function sanitizeTime(value) {
         return "";
     }
 
-    if (digits.length <= 2) {
-        return digits;
-    }
-
-    const clipped = digits.slice(0, 4);
-    let rawHour = "";
-    let rawMinute = "";
-
-    if (clipped.length === 3) {
-        rawHour = clipped.slice(0, 1);
-        rawMinute = clipped.slice(1, 3);
-    } else {
-        rawHour = clipped.slice(0, 2);
-        rawMinute = clipped.slice(2, 4);
-    }
-
-    const hh = Math.min(Number(rawHour || 0), 23).toString().padStart(2, "0");
-    const mm = Math.min(Number(rawMinute || 0), 59).toString().padStart(2, "0");
+    if (digits.length < 3 || digits.length > 4) return "";
+    const padded = digits.padStart(4, "0");
+    const hour = Number(padded.slice(0, 2));
+    const minute = Number(padded.slice(2, 4));
+    if (hour > 23 || minute > 59) return "";
+    const hh = String(hour).padStart(2, "0");
+    const mm = String(minute).padStart(2, "0");
     return `${hh}:${mm}`;
 }
 
@@ -220,35 +222,14 @@ function isValidSignupPhone(phone) {
 
 function createFacilityMemberPayload(base) {
     const phone = normalizeDigits(base.phone);
-    const birthDate = String(base.birthDate || "").trim();
+    const birthDate = parseBirthDateInput(base.birthDate);
     return {
         name: String(base.name || "").trim(),
         gender: String(base.gender || "").trim(),
         birthDate,
-        age: birthDateToAge(birthDate),
         phone,
-        phoneLastDigits: phone.slice(-4),
-        isSeongnamResident: base.optionalConsent ? (base.isSeongnamResident ? "관내" : "관외") : "비공개",
-        privacyConsent: Boolean(base.privacyConsent),
-        optionalConsent: Boolean(base.optionalConsent),
-        consentAt: new Date().toISOString(),
-        role: "user",
-        status: "approved"
-    };
-}
-
-function createLoungeGuestPayload(base) {
-    const birthDate = String(base.birthDate || "").trim();
-    return {
-        name: "라운지 이용자",
-        gender: String(base.gender || "").trim(),
-        birthDate,
-        age: birthDateToAge(birthDate),
-        isSeongnamResident: base.optionalConsent ? (base.isSeongnamResident ? "관내" : "관외") : "비공개",
-        privacyConsent: Boolean(base.privacyConsent),
-        optionalConsent: Boolean(base.optionalConsent),
-        consentAt: new Date().toISOString(),
-        role: "lounge_guest"
+        isSeongnamResident: base.isSeongnamResident ? "관내" : "관외",
+        privacyConsent: Boolean(base.privacyConsent)
     };
 }
 
@@ -318,12 +299,13 @@ function updateFacilityHeader(member) {
     const welcome = document.getElementById("facilityWelcome");
     const info = document.getElementById("facilityMemberInfo");
     const today = document.getElementById("todayLabel");
+    const displayAge = Number(member.age || 0);
 
     if (welcome) {
         welcome.textContent = `${member.name}님 시설 이용 안내`;
     }
     if (info) {
-        info.textContent = `${member.gender} · ${member.age}세 · 연락처 끝자리 ${member.phoneLastDigits || "-"}`;
+        info.textContent = `${member.gender} · ${displayAge}세 · 연락처 끝자리 ${member.phoneLastDigits || "-"}`;
     }
     if (today) {
         today.textContent = formatDisplayDate();
@@ -338,34 +320,6 @@ function setCurrentMember(member, mode) {
     }
 }
 
-function showLoungeComplete(guest, alreadySubmitted = false) {
-    const title = document.getElementById("loungeCompleteTitle");
-    const text = document.getElementById("loungeCompleteText");
-    if (title) {
-        title.textContent = alreadySubmitted
-            ? "오늘 라운지 방문이 이미 확인되었습니다."
-            : "라운지 방문이 기록되었습니다.";
-    }
-    if (text) {
-        text.textContent = alreadySubmitted
-            ? `${guest.gender} · ${guest.age}세 기준으로 오늘 방문 기록이 이미 있습니다.`
-            : `${guest.gender} · ${guest.age}세 기준으로 오늘 방문 기록을 저장했습니다.`;
-    }
-    showSection("loungeComplete");
-}
-
-function updateProxyFieldVisibility() {
-    const type = document.querySelector('input[name="proxyType"]:checked')?.value || "visit";
-    document.getElementById("proxyPrinterFields")?.classList.toggle("hidden", type !== "printer");
-    document.getElementById("proxyRoomFields")?.classList.toggle("hidden", !(type === "careerZone" || type === "connectRoom"));
-}
-
-function updateManualFieldVisibility() {
-    const type = document.querySelector('input[name="manualType"]:checked')?.value || "visit";
-    document.getElementById("manualPrinterFields")?.classList.toggle("hidden", type !== "printer");
-    document.getElementById("manualRoomFields")?.classList.toggle("hidden", !(type === "careerZone" || type === "connectRoom"));
-}
-
 function setupTabs() {
     document.querySelectorAll(".tab").forEach((tab) => {
         tab.addEventListener("click", () => {
@@ -378,23 +332,6 @@ function setupTabs() {
         });
     });
 
-    document.querySelectorAll(".admin-tab").forEach((tab) => {
-        tab.addEventListener("click", () => {
-            const targetId = tab.dataset.target;
-            document.querySelectorAll(".admin-tab").forEach((item) => item.classList.remove("active"));
-            document.querySelectorAll(".admin-tab-content").forEach((panel) => panel.classList.add("hidden"));
-            tab.classList.add("active");
-            document.getElementById(targetId)?.classList.remove("hidden");
-        });
-    });
-
-    document.querySelectorAll(".period-btn").forEach((button) => {
-        button.addEventListener("click", async () => {
-            document.querySelectorAll(".period-btn").forEach((item) => item.classList.remove("active"));
-            button.classList.add("active");
-            await loadStats(button.dataset.period);
-        });
-    });
 }
 
 function setupTimeInputs() {
@@ -414,6 +351,90 @@ function setupTimeInputs() {
     });
 }
 
+function setupBirthDateInputs() {
+    ["signupBirthDate", "birthUpdateInput", "withdrawBirthDate"].forEach((inputId) => {
+        const input = document.getElementById(inputId);
+        if (!input) {
+            return;
+        }
+
+        input.addEventListener("input", (event) => {
+            event.target.value = normalizeDigits(event.target.value).slice(0, 8);
+        });
+    });
+}
+
+function getEntryPin() {
+    return Array.from(document.querySelectorAll(".pin-input"))
+        .map((input) => input.value)
+        .join("");
+}
+
+function resetEntryStep() {
+    document.getElementById("entryForm")?.classList.remove("hidden");
+    document.getElementById("fullPhoneForm")?.classList.add("hidden");
+    document.querySelectorAll(".pin-input").forEach((input) => {
+        input.value = "";
+    });
+    const entryCode = document.getElementById("entryCode");
+    const fullPhone = document.getElementById("fullPhoneInput");
+    if (entryCode) entryCode.value = "";
+    if (fullPhone) fullPhone.value = "";
+    document.querySelector(".pin-input")?.focus();
+}
+
+function showFullPhoneStep(message) {
+    document.getElementById("entryForm")?.classList.add("hidden");
+    document.getElementById("fullPhoneForm")?.classList.remove("hidden");
+    showToast(message, "info");
+    document.getElementById("fullPhoneInput")?.focus();
+}
+
+function setupPinInputs() {
+    const inputs = Array.from(document.querySelectorAll(".pin-input"));
+    inputs.forEach((input, index) => {
+        input.addEventListener("input", (event) => {
+            const digits = normalizeDigits(event.target.value);
+            if (digits.length > 1) {
+                digits.slice(0, 4).split("").forEach((digit, offset) => {
+                    if (inputs[index + offset]) inputs[index + offset].value = digit;
+                });
+            } else {
+                event.target.value = digits.slice(-1);
+            }
+            document.getElementById("entryCode").value = getEntryPin();
+            const nextIndex = Math.min(index + Math.max(digits.length, 1), inputs.length - 1);
+            if (digits && index < inputs.length - 1) inputs[nextIndex].focus();
+        });
+
+        input.addEventListener("keydown", (event) => {
+            if (event.key === "Backspace" && !input.value && index > 0) {
+                inputs[index - 1].focus();
+            }
+            if (event.key === "ArrowLeft" && index > 0) inputs[index - 1].focus();
+            if (event.key === "ArrowRight" && index < inputs.length - 1) inputs[index + 1].focus();
+        });
+
+        input.addEventListener("paste", (event) => {
+            const digits = normalizeDigits(event.clipboardData?.getData("text")).slice(0, 4);
+            if (digits.length <= 1) return;
+
+            event.preventDefault();
+            digits.split("").forEach((digit, offset) => {
+                if (inputs[index + offset]) inputs[index + offset].value = digit;
+            });
+            document.getElementById("entryCode").value = getEntryPin();
+            inputs[Math.min(index + digits.length - 1, inputs.length - 1)].focus();
+        });
+
+        input.addEventListener("focus", () => input.select());
+    });
+
+    if (!sections.facilityEntry?.classList.contains("hidden")) {
+        inputs[0]?.focus();
+    }
+}
+
 function setupNetworkWarning() {
     const warning = document.getElementById("onlineWarning");
     const update = () => warning?.classList.toggle("hidden", navigator.onLine);
@@ -422,78 +443,112 @@ function setupNetworkWarning() {
     window.addEventListener("offline", update);
 }
 
-function setChoiceLoading(buttonId, isLoading) {
-    const button = document.getElementById(buttonId);
-    if (!button) {
+function showVerifiedSignupDetails(phone) {
+    state.verifiedSignupPhone = phone;
+    document.getElementById("signupPhoneCheckForm")?.classList.add("hidden");
+    document.getElementById("signupForm")?.classList.remove("hidden");
+    const verifiedText = document.getElementById("verifiedSignupPhoneText");
+    if (verifiedText) verifiedText.textContent = `${phone.slice(0, 3)}-${phone.slice(3, 7)}-${phone.slice(7)} 확인됨`;
+    document.getElementById("signupName")?.focus();
+}
+
+function openSignupPhoneStep(value = "", isVerified = false) {
+    const phoneInput = document.getElementById("signupPhone");
+    const phone = normalizeDigits(value);
+    if (phoneInput) {
+        phoneInput.value = phone.length === 11 ? phone : "";
+    }
+    state.verifiedSignupPhone = "";
+    document.getElementById("signupPhoneCheckForm")?.classList.remove("hidden");
+    document.getElementById("signupForm")?.classList.add("hidden");
+    document.getElementById("signupForm")?.reset();
+    showSection("facilitySignup");
+    if (isVerified && phone.length === 11) {
+        showVerifiedSignupDetails(phone);
+    } else {
+        phoneInput?.focus();
+    }
+}
+
+function showMemberConfirmation(member, source = "facility-qr") {
+    state.candidateMember = member;
+    state.candidateSource = source;
+    const name = document.getElementById("memberConfirmName");
+    const info = document.getElementById("memberConfirmInfo");
+    if (name) name.textContent = maskMemberName(member.name);
+    if (info) info.textContent = `연락처 끝자리 ${member.phoneLastDigits || "-"}`;
+    showSection("memberConfirm");
+}
+
+async function confirmCandidateMember() {
+    if (!state.candidateMember) {
+        throw new Error("회원 정보를 다시 확인해 주세요.");
+    }
+    const member = state.candidateMember;
+    const source = state.candidateSource;
+    await routeFacilityMember(member, source);
+    state.candidateMember = null;
+}
+
+async function verifySignupPhone() {
+    const phone = normalizeDigits(document.getElementById("signupPhone")?.value);
+    if (!isValidSignupPhone(phone)) {
+        setAlert("signupAlert", "휴대폰 번호 11자리를 정확히 입력해 주세요.");
         return;
     }
-    button.disabled = isLoading;
-    button.classList.toggle("loading", isLoading);
+
+    const response = await callScript("resolveFacilityEntry", { inputValue: phone });
+    if (response.mode === "member" && response.member) {
+        showMemberConfirmation(response.member, "facility-phone-recheck");
+        return;
+    }
+
+    if (response.mode !== "signup") {
+        throw new Error("전화번호를 확인하지 못했습니다. 다시 입력해 주세요.");
+    }
+
+    showVerifiedSignupDetails(phone);
 }
 
-function setPageLoading(isLoading, message = "불러오는 중...") {
-    let overlay = document.getElementById("pageLoadingOverlay");
-    if (!overlay) {
-        overlay = document.createElement("div");
-        overlay.id = "pageLoadingOverlay";
-        overlay.className = "page-loading-overlay hidden";
-        overlay.innerHTML = `
-            <div class="page-loading-card">
-                <div class="page-loading-spinner"></div>
-                <strong class="page-loading-title">불러오는 중...</strong>
-                <span class="page-loading-text">잠시만 기다려주세요</span>
-            </div>
-        `;
-        document.body.appendChild(overlay);
-    }
-
-    const title = overlay.querySelector(".page-loading-title");
-    if (title) {
-        title.textContent = message;
-    }
-
-    overlay.classList.toggle("hidden", !isLoading);
-}
-
-async function withPageLoading(buttonId, message, task) {
-    setChoiceLoading(buttonId, true);
-    setPageLoading(true, message);
-    await new Promise((resolve) => setTimeout(resolve, 30));
-    try {
-        const result = await task();
-        await new Promise((resolve) => setTimeout(resolve, 180));
-        return result;
-    } finally {
-        setChoiceLoading(buttonId, false);
-        setPageLoading(false);
-    }
-}
-
-function fillSignupPhone(value) {
-    const phoneInput = document.getElementById("signupPhone");
-    if (phoneInput) {
-        phoneInput.value = "";
-    }
-}
-
-function resetToChoice(clearRememberedFacility = false) {
-    clearSession();
-    if (clearRememberedFacility) {
-        clearRememberedFacilityMember();
-    }
+function resetToChoice() {
     state.currentMember = null;
     state.currentMode = null;
-    state.proxyMember = null;
+    state.pendingMember = null;
+    state.candidateMember = null;
+    state.candidateSource = "facility-qr";
+    state.verifiedSignupPhone = "";
+    state.todayReservations = [];
+    state.selectedReservationId = "";
     document.getElementById("entryForm")?.reset();
     document.getElementById("signupForm")?.reset();
-    document.getElementById("loungeForm")?.reset();
-    document.getElementById("proxyEntryArea")?.classList.add("hidden");
+    document.getElementById("signupPhoneCheckForm")?.reset();
+    document.getElementById("birthUpdateForm")?.reset();
+    document.getElementById("printerForm")?.reset();
+    document.getElementById("careerForm")?.reset();
+    document.getElementById("connectForm")?.reset();
+    document.getElementById("withdrawForm")?.reset();
+    renderTodayReservations([]);
+    document.getElementById("withdrawDialog")?.close();
+    ["careerCompanionCount", "connectCompanionCount"].forEach((id) => {
+        const input = document.getElementById(id);
+        if (input) input.value = 0;
+    });
+    ["careerCompanions", "connectCompanions"].forEach((id) => {
+        const container = document.getElementById(id);
+        if (container) container.innerHTML = "";
+    });
+    document.querySelectorAll(".tab").forEach((tab) => {
+        tab.classList.toggle("active", tab.dataset.target === "printerPanel");
+    });
+    document.querySelectorAll(".tab-content").forEach((panel) => {
+        panel.classList.toggle("hidden", panel.id !== "printerPanel");
+    });
     setAlert("entryAlert");
     setAlert("signupAlert");
-    setAlert("loungeAlert");
+    setAlert("birthUpdateAlert");
     setAlert("facilityAlert");
-    setAlert("adminAlert");
-    showSection("choice");
+    resetEntryStep();
+    showSection("facilityEntry");
 }
 
 function getCurrentMemberOrThrow() {
@@ -501,40 +556,6 @@ function getCurrentMemberOrThrow() {
         throw new Error("시설 이용 회원 정보를 찾을 수 없습니다. 처음 화면에서 다시 시작해 주세요.");
     }
     return state.currentMember;
-}
-
-function openProxyEntry(member) {
-    state.proxyMember = member;
-    const title = document.getElementById("proxyTargetName");
-    if (title) {
-        title.textContent = `${member.name} 회원 대리 제출`;
-    }
-    const dateInput = document.getElementById("proxyDateInput");
-    if (dateInput) {
-        dateInput.value = todayString();
-    }
-    document.getElementById("proxyEntryArea")?.classList.remove("hidden");
-    const countInput = document.getElementById("proxyCompanionCount");
-    if (countInput) {
-        countInput.value = 0;
-    }
-    const companions = document.getElementById("proxyCompanions");
-    if (companions) {
-        companions.innerHTML = "";
-    }
-    updateProxyFieldVisibility();
-}
-
-function toApiMember(member) {
-    return {
-        id: member.id || "",
-        name: member.name || "",
-        gender: member.gender || "",
-        age: Number(member.age || 0),
-        phone: member.phone || "",
-        phoneLastDigits: member.phoneLastDigits || "",
-        role: member.role || "user"
-    };
 }
 
 function callScript(action, payload = {}) {
@@ -548,7 +569,7 @@ function callScript(action, payload = {}) {
         const timeoutId = window.setTimeout(() => {
             cleanup();
             reject(new Error("요청 시간이 초과되었습니다."));
-        }, 10000);
+        }, SCRIPT_REQUEST_TIMEOUT_MS);
 
         function cleanup() {
             window.clearTimeout(timeoutId);
@@ -572,49 +593,192 @@ function callScript(action, payload = {}) {
 
         const url = new URL(GOOGLE_SCRIPT_URL);
         url.searchParams.set("action", action);
-        url.searchParams.set("payload", JSON.stringify(payload));
+        url.searchParams.set("payload", JSON.stringify({
+            ...payload,
+            entryToken: getEntryToken()
+        }));
         url.searchParams.set("callback", callbackName);
         script.src = url.toString();
         document.body.appendChild(script);
     });
 }
 
-async function loadAppSettings() {
-    const response = await callScript("bootstrap");
-    state.adminSheetUrl = response.adminSheetUrl || "";
-    const sheetLink = document.getElementById("adminSheetLink");
-    if (sheetLink && state.adminSheetUrl) {
-        sheetLink.href = state.adminSheetUrl;
-        sheetLink.classList.remove("hidden");
-    }
-}
-
-async function ensureVisitLog(member, dateStr, source = "system", options = {}) {
-    const lastVisit = getLastVisitLogRecord();
-    if (lastVisit?.memberId === member.id && lastVisit?.date === dateStr) {
-        return false;
-    }
-
+async function ensureVisitLog(member, dateStr, source = "facility-qr") {
     const response = await callScript("submitVisitLog", {
-        member: toApiMember(member),
-        date: dateStr,
-        source,
-        createdBy: options.createdBy || "self",
-        allowDuplicate: Boolean(options.allowDuplicate)
+        memberId: member.id,
+        source
     });
     setLastVisitLogRecord({
         memberId: member.id,
-        date: dateStr
+        date: response.date || dateStr
     });
-    return Boolean(response.created);
+    return response;
 }
 
 async function routeFacilityMember(member, source = "facility-qr") {
+    const hasBirthDate = member.hasBirthDate ?? Boolean(member.birthDate);
+    if (!hasBirthDate) {
+        state.pendingMember = member;
+        setAlert("birthUpdateAlert");
+        document.getElementById("birthUpdateForm")?.reset();
+        const memberName = document.getElementById("birthUpdateMemberName");
+        if (memberName) memberName.textContent = maskMemberName(member.name);
+        showSection("birthUpdate");
+        document.getElementById("birthUpdateInput")?.focus();
+        return;
+    }
+
+    const visitResponse = await ensureVisitLog(member, todayString(), source);
+    state.pendingMember = null;
     setCurrentMember(member, "facility");
-    await ensureVisitLog(member, todayString(), source);
-    setSession({ mode: "facility", memberId: member.id });
-    rememberFacilityMember(member.id, todayString());
+    renderTodayReservations(visitResponse.reservations || []);
     showSection("facility");
+}
+
+function renderTodayReservations(reservations) {
+    const section = document.getElementById("todayReservations");
+    const list = document.getElementById("reservationList");
+    const count = document.getElementById("reservationCount");
+    const submitButton = document.getElementById("reservationSubmitBtn");
+    if (!section || !list || !submitButton) return;
+
+    state.todayReservations = Array.isArray(reservations) ? reservations : [];
+    if (!state.todayReservations.some((reservation) => reservation.id === state.selectedReservationId && !reservation.submitted)) {
+        state.selectedReservationId = "";
+    }
+
+    section.classList.toggle("hidden", state.todayReservations.length === 0);
+    list.replaceChildren();
+    if (count) count.textContent = `${state.todayReservations.length}건`;
+
+    state.todayReservations.forEach((reservation) => {
+        const item = document.createElement("button");
+        item.type = "button";
+        item.className = "reservation-item";
+        item.dataset.reservationId = reservation.id;
+        item.classList.toggle("selected", reservation.id === state.selectedReservationId);
+        item.classList.toggle("submitted", Boolean(reservation.submitted));
+        item.setAttribute("aria-pressed", String(reservation.id === state.selectedReservationId));
+        if (reservation.submitted) item.setAttribute("aria-disabled", "true");
+
+        const top = document.createElement("span");
+        top.className = "reservation-item-top";
+        const place = document.createElement("span");
+        place.className = "reservation-place";
+        place.textContent = reservation.placeName || "예약 공간";
+        const time = document.createElement("span");
+        time.className = "reservation-time";
+        time.textContent = `${reservation.startTime || "-"} ~ ${reservation.endTime || "-"}`;
+        top.append(place, time);
+
+        const purpose = document.createElement("span");
+        purpose.className = "reservation-purpose";
+        purpose.textContent = reservation.purpose || "네이버 예약 이용";
+
+        const meta = document.createElement("span");
+        meta.className = "reservation-item-meta";
+        const headcount = document.createElement("span");
+        headcount.textContent = `예약 인원 ${reservation.headcount || 1}명`;
+        meta.append(headcount);
+        if (reservation.submitted) {
+            const submitted = document.createElement("span");
+            submitted.className = "reservation-state";
+            submitted.textContent = "제출 완료";
+            meta.append(submitted);
+        }
+
+        item.append(top, purpose, meta);
+        item.addEventListener("click", () => {
+            if (reservation.submitted) return;
+            state.selectedReservationId = reservation.id;
+            renderTodayReservations(state.todayReservations);
+        });
+        list.append(item);
+    });
+
+    renderReservationCompanions();
+    updateReservationSubmitState();
+}
+
+function reservationCompanionsComplete() {
+    const reservation = state.todayReservations.find((item) => item.id === state.selectedReservationId && !item.submitted);
+    if (!reservation) return false;
+    const expectedCount = Math.max(0, Number(reservation.headcount || 1) - 1);
+    if (expectedCount === 0) return true;
+
+    const rows = document.querySelectorAll("#reservationCompanions .companion-item");
+    if (rows.length !== expectedCount) return false;
+    return Array.from(rows).every((row) => {
+        const gender = row.querySelector(".comp-gender")?.value || "";
+        const age = Number(row.querySelector(".comp-age")?.value || 0);
+        return Boolean(gender) && Number.isInteger(age) && age >= 1 && age <= 100;
+    });
+}
+
+function updateReservationSubmitState() {
+    const button = document.getElementById("reservationSubmitBtn");
+    if (button) button.disabled = !reservationCompanionsComplete();
+}
+
+function renderReservationCompanions() {
+    const section = document.getElementById("reservationCompanionSection");
+    const container = document.getElementById("reservationCompanions");
+    const countLabel = document.getElementById("reservationCompanionCount");
+    if (!section || !container) return;
+
+    const reservation = state.todayReservations.find((item) => item.id === state.selectedReservationId && !item.submitted);
+    const companionCount = reservation ? Math.max(0, Number(reservation.headcount || 1) - 1) : 0;
+    section.classList.toggle("hidden", companionCount === 0);
+    if (countLabel) countLabel.textContent = companionCount > 0 ? `${companionCount}명` : "";
+
+    const renderedReservationId = container.dataset.reservationId || "";
+    const renderedCount = Number(container.dataset.companionCount || 0);
+    if (!reservation || companionCount === 0) {
+        container.replaceChildren();
+        delete container.dataset.reservationId;
+        delete container.dataset.companionCount;
+        return;
+    }
+    if (renderedReservationId === reservation.id && renderedCount === companionCount) return;
+
+    buildCompanionFields("reservationCompanions", companionCount);
+    container.dataset.reservationId = reservation.id;
+    container.dataset.companionCount = String(companionCount);
+    container.querySelectorAll("select, input").forEach((input) => {
+        input.addEventListener("input", updateReservationSubmitState);
+        input.addEventListener("change", updateReservationSubmitState);
+    });
+}
+
+async function submitSelectedReservation() {
+    const member = getCurrentMemberOrThrow();
+    const reservationId = state.selectedReservationId;
+    if (!reservationId) throw new Error("제출할 예약 일정을 선택해 주세요.");
+    const reservation = state.todayReservations.find((item) => item.id === reservationId && !item.submitted);
+    if (!reservation) throw new Error("예약 정보를 다시 선택해 주세요.");
+
+    const companionCount = Math.max(0, Number(reservation.headcount || 1) - 1);
+    const companions = collectCompanions("reservationCompanions");
+    if (companions.length !== companionCount) {
+        throw new Error("동반 이용자의 성별과 나이를 모두 입력해 주세요.");
+    }
+
+    const response = await callScript("submitReservationUsage", {
+        memberId: member.id,
+        reservationId,
+        companions
+    });
+    state.todayReservations = state.todayReservations.map((reservation) => (
+        reservation.id === reservationId
+            ? { ...reservation, submitted: true }
+            : reservation
+    ));
+    state.selectedReservationId = "";
+    renderTodayReservations(state.todayReservations);
+    showToast(
+        response.created ? "예약 내용으로 이용일지를 제출했습니다." : "이미 제출된 예약입니다.",
+        "success"
+    );
 }
 
 async function handleFacilityEntry(inputValue) {
@@ -630,36 +794,53 @@ async function handleFacilityEntry(inputValue) {
         inputValue: rawValue
     });
 
-    if (response.mode === "admin") {
-        if (response.adminSheetUrl) {
-            state.adminSheetUrl = response.adminSheetUrl;
-            const sheetLink = document.getElementById("adminSheetLink");
-            if (sheetLink) {
-                sheetLink.href = state.adminSheetUrl;
-                sheetLink.classList.remove("hidden");
-            }
-        }
-        await enterAdminMode();
-        return;
-    }
-
     if (response.mode === "ambiguous") {
-        setAlert("entryAlert", response.message || "전체 전화번호를 다시 입력해 주세요.");
+        showFullPhoneStep(response.message || "전체 전화번호를 다시 입력해 주세요.");
         return;
     }
 
     if (response.mode === "signup") {
-        fillSignupPhone(response.suggestedPhone || rawValue);
-        showSection("facilitySignup");
+        const phone = normalizeDigits(rawValue);
+        openSignupPhoneStep(response.suggestedPhone || rawValue, phone.length === 11);
         return;
     }
 
     if (response.mode === "member" && response.member) {
-        await routeFacilityMember(response.member, "facility-qr");
+        showMemberConfirmation(response.member, "facility-qr");
         return;
     }
 
     throw new Error("입력값을 처리하지 못했습니다.");
+}
+
+async function updateMissingBirthDate() {
+    setAlert("birthUpdateAlert");
+    if (!state.pendingMember?.id) {
+        throw new Error("회원 정보를 다시 확인해 주세요.");
+    }
+
+    if (state.pendingMember.hasBirthDate) {
+        await routeFacilityMember(state.pendingMember, "facility-birthdate-update");
+        return;
+    }
+
+    const birthDate = parseBirthDateInput(document.getElementById("birthUpdateInput")?.value);
+    if (!birthDate || birthDateToAge(birthDate) < 0) {
+        setAlert("birthUpdateAlert", "생년월일을 YYYYMMDD 형식으로 정확히 입력해 주세요.");
+        return;
+    }
+
+    const response = await callScript("updateMemberBirthDate", {
+        memberId: state.pendingMember.id,
+        birthDate
+    });
+    if (!response.member) {
+        throw new Error("생년월일을 저장하지 못했습니다.");
+    }
+
+    state.pendingMember = response.member;
+    await routeFacilityMember(response.member, "facility-birthdate-update");
+    showToast("생년월일이 저장되었습니다.", "success");
 }
 
 async function registerFacilityMember() {
@@ -668,13 +849,12 @@ async function registerFacilityMember() {
         name: document.getElementById("signupName")?.value,
         gender: document.getElementById("signupGender")?.value,
         birthDate: document.getElementById("signupBirthDate")?.value,
-        phone: document.getElementById("signupPhone")?.value,
+        phone: state.verifiedSignupPhone,
         isSeongnamResident: document.getElementById("signupSeongnamResident")?.checked,
-        privacyConsent: document.getElementById("signupPrivacyConsent")?.checked,
-        optionalConsent: document.getElementById("signupOptionalConsent")?.checked
+        privacyConsent: document.getElementById("signupPrivacyConsent")?.checked
     });
 
-    if (!payload.name || !payload.gender || !payload.birthDate || !payload.age || !payload.phone) {
+    if (!payload.name || !payload.gender || !payload.birthDate || birthDateToAge(payload.birthDate) < 0 || !payload.phone) {
         setAlert("signupAlert", "입력 항목을 모두 확인해 주세요.");
         return;
     }
@@ -693,321 +873,171 @@ async function registerFacilityMember() {
         member: payload
     });
 
-    showToast(response.existing ? "기존 회원 정보를 불러왔습니다." : "회원 등록과 방문 확인이 완료되었습니다.", "success");
-    await routeFacilityMember(response.member, response.existing ? "facility-signup-existing" : "facility-signup");
+    if (response.existing) {
+        showMemberConfirmation(response.member, "facility-signup-existing");
+        return;
+    }
+
+    await routeFacilityMember(response.member, "facility-signup");
+    showToast("회원 등록과 방문 확인이 완료되었습니다.", "success");
 }
 
-async function handleLoungeEntry() {
-    const remembered = getRememberedLoungeGuest();
-    if (!isRememberedLoungeVisitForToday(remembered)) {
-        clearRememberedLoungeGuest();
-        document.getElementById("loungeForm")?.reset();
-        showSection("loungeEntry");
-        return;
-    }
-    showLoungeComplete(remembered, true);
-}
-
-async function registerLoungeGuest() {
-    setAlert("loungeAlert");
-    const payload = createLoungeGuestPayload({
-        gender: document.getElementById("loungeGender")?.value,
-        birthDate: document.getElementById("loungeBirthDate")?.value,
-        isSeongnamResident: document.getElementById("loungeSeongnamResident")?.checked,
-        privacyConsent: document.getElementById("loungePrivacyConsent")?.checked,
-        optionalConsent: document.getElementById("loungeOptionalConsent")?.checked
-    });
-
-    if (!payload.gender || !payload.birthDate || payload.age < 0) {
-        setAlert("loungeAlert", "성별과 생년월일을 확인해 주세요.");
-        return;
-    }
-
-    if (!payload.privacyConsent) {
-        setAlert("loungeAlert", "개인정보 수집·이용(필수) 동의가 필요합니다.");
-        return;
-    }
-
-    const existingRemembered = getRememberedLoungeGuest();
-    if (isRememberedLoungeVisitForToday(existingRemembered)) {
-        showLoungeComplete(existingRemembered, true);
-        return;
-    }
-
-    const guest = {
-        id: "",
-        name: payload.name,
-        gender: payload.gender,
-        birthDate: payload.birthDate,
-        age: payload.age,
-        isSeongnamResident: payload.isSeongnamResident,
-        role: "lounge_guest"
-    };
-    await ensureVisitLog(guest, todayString(), "lounge");
-    rememberLoungeGuest({
-        validDate: todayString(),
-        name: guest.name,
-        gender: guest.gender,
-        birthDate: guest.birthDate,
-        age: guest.age,
-        isSeongnamResident: guest.isSeongnamResident
-    });
-    showToast("라운지 방문이 기록되었습니다.", "success");
-    showLoungeComplete(guest, false);
-}
-
-async function submitUsageRecord(type, data, member, options = {}) {
-    await callScript("submitUsageRecord", {
+async function submitUsageRecord(type, data, member) {
+    return callScript("submitUsageRecord", {
         type,
         data: {
             ...data,
-            date: data.date || todayString(),
             startTime: data.startTime ? sanitizeTime(data.startTime) : "",
             endTime: data.endTime ? sanitizeTime(data.endTime) : ""
         },
-        member: toApiMember(member),
-        createdBy: options.createdBy || "self"
+        memberId: member.id
     });
 }
 
-async function enterAdminMode() {
-    showSection("admin");
-    setSession({ mode: "admin" });
-    state.proxyMember = null;
-    await loadStats(state.statsPeriod);
+function openWithdrawDialog() {
+    const dialog = document.getElementById("withdrawDialog");
+    if (!dialog || !state.currentMember) {
+        showToast("회원 정보를 다시 확인해 주세요.", "error");
+        return;
+    }
+    document.getElementById("withdrawForm")?.reset();
+    dialog.showModal();
+    document.getElementById("withdrawPhone")?.focus();
 }
 
-async function searchMembers() {
-    const term = String(document.getElementById("adminMemberSearchInput")?.value || "").trim();
-    const resultsEl = document.getElementById("adminMemberSearchResults");
-    if (!resultsEl) {
-        return;
+function closeWithdrawDialog() {
+    document.getElementById("withdrawDialog")?.close();
+    document.getElementById("withdrawForm")?.reset();
+}
+
+async function withdrawCurrentMember() {
+    const member = getCurrentMemberOrThrow();
+    const phone = normalizeDigits(document.getElementById("withdrawPhone")?.value);
+    const birthDate = parseBirthDateInput(document.getElementById("withdrawBirthDate")?.value);
+    if (!isValidSignupPhone(phone)) {
+        throw new Error("가입한 휴대폰 번호 11자리를 정확히 입력해 주세요.");
+    }
+    if (!birthDate || birthDateToAge(birthDate) < 0) {
+        throw new Error("생년월일을 YYYYMMDD 형식으로 정확히 입력해 주세요.");
     }
 
-    if (!term) {
-        resultsEl.innerHTML = "";
-        return;
-    }
-
-    const response = await callScript("searchMembers", { term });
-    const matches = response.members || [];
-
-    if (matches.length === 0) {
-        resultsEl.innerHTML = '<div class="empty-mini">검색 결과가 없습니다.</div>';
-        return;
-    }
-
-    resultsEl.innerHTML = matches.map((member) => `
-        <button type="button" class="result-card" data-id="${member.id}">
-            <strong>${member.name}</strong>
-            <span>${member.gender} · ${member.age}세</span>
-            <span>${member.phone || "-"}</span>
-            <span class="result-status approved">등록 회원</span>
-        </button>
-    `).join("");
-
-    resultsEl.querySelectorAll(".result-card").forEach((button) => {
-        button.addEventListener("click", () => {
-            const member = matches.find((item) => item.id === button.dataset.id);
-            if (member) {
-                openProxyEntry(member);
-            }
-        });
+    await callScript("withdrawMember", {
+        memberId: member.id,
+        phone,
+        birthDate
     });
-}
-
-async function handleProxySubmit(event) {
-    event.preventDefault();
-    if (!state.proxyMember) {
-        return;
-    }
-
-    setAlert("adminAlert");
-
-    const type = document.querySelector('input[name="proxyType"]:checked')?.value || "visit";
-    const date = document.getElementById("proxyDateInput")?.value || todayString();
-
-    if (type === "visit") {
-        await ensureVisitLog(state.proxyMember, date, "admin-proxy", { createdBy: "admin-proxy" });
-    } else if (type === "printer") {
-        const count = Number(document.getElementById("proxyPrinterCount")?.value || 0);
-        if (!count) {
-            throw new Error("프린터 사용 매수를 입력해 주세요.");
-        }
-        await submitUsageRecord("printer", {
-            date,
-            count
-        }, state.proxyMember, { createdBy: "admin-proxy" });
-    } else {
-        const startTime = document.getElementById("proxyStartTime")?.value;
-        const endTime = document.getElementById("proxyEndTime")?.value;
-        const purpose = document.getElementById("proxyPurpose")?.value;
-        if (!startTime || !endTime || !String(purpose || "").trim()) {
-            throw new Error("시작 시간, 종료 시간, 사용목적을 모두 입력해 주세요.");
-        }
-        const companions = getFormCompanions("proxyCompanionCount", "proxyCompanions");
-        await submitUsageRecord(type, {
-            date,
-            startTime,
-            endTime,
-            purpose,
-            companions
-        }, state.proxyMember, { createdBy: "admin-proxy" });
-    }
-
-    showToast("대리 제출이 완료되었습니다.", "success");
-    document.getElementById("proxyFacilityForm")?.reset();
-    document.getElementById("proxyEntryArea")?.classList.add("hidden");
-    state.proxyMember = null;
-}
-
-async function handleManualSubmit(event) {
-    event.preventDefault();
-    setAlert("adminAlert");
-    const type = document.querySelector('input[name="manualType"]:checked')?.value || "visit";
-    const manualMember = createFacilityMemberPayload({
-        name: document.getElementById("manualName")?.value,
-        gender: document.getElementById("manualGender")?.value,
-        age: document.getElementById("manualAge")?.value,
-        phone: document.getElementById("manualPhone")?.value
-    });
-
-    if (!manualMember.name || !manualMember.gender || !manualMember.age) {
-        throw new Error("수동 제출 대상 정보를 확인해 주세요.");
-    }
-
-    const pseudoMember = {
-        ...manualMember,
-        id: "",
-        role: "manual"
-    };
-    const date = document.getElementById("manualDate")?.value || todayString();
-
-    if (type === "visit") {
-        await ensureVisitLog(pseudoMember, date, "admin-manual", {
-            createdBy: "admin-manual",
-            allowDuplicate: true
-        });
-    } else if (type === "printer") {
-        const count = Number(document.getElementById("manualPrinterCount")?.value || 0);
-        if (!count) {
-            throw new Error("프린터 사용 매수를 입력해 주세요.");
-        }
-        await submitUsageRecord("printer", {
-            date,
-            count
-        }, pseudoMember, { createdBy: "admin-manual" });
-    } else {
-        const startTime = document.getElementById("manualStartTime")?.value;
-        const endTime = document.getElementById("manualEndTime")?.value;
-        const purpose = document.getElementById("manualPurpose")?.value;
-        if (!startTime || !endTime || !String(purpose || "").trim()) {
-            throw new Error("시작 시간, 종료 시간, 사용목적을 모두 입력해 주세요.");
-        }
-        const companions = getFormCompanions("manualCompanionCount", "manualCompanions");
-        await submitUsageRecord(type, {
-            date,
-            startTime,
-            endTime,
-            purpose,
-            companions
-        }, pseudoMember, { createdBy: "admin-manual" });
-    }
-
-    showToast("수동 일지 제출이 완료되었습니다.", "success");
-    document.getElementById("manualEntryForm")?.reset();
-    document.getElementById("manualCompanionCount").value = 0;
-    document.getElementById("manualCompanions").innerHTML = "";
-    updateManualFieldVisibility();
-}
-
-async function loadStats(period) {
-    state.statsPeriod = period;
-    const response = await callScript("getStats", { period });
-    document.getElementById("statTotalVisit").textContent = `${response.totals.visit}`;
-    document.getElementById("statTotalPrint").textContent = `${response.totals.printer}`;
-    document.getElementById("statTotalCareer").textContent = `${response.totals.careerZone}`;
-    document.getElementById("statTotalConnect").textContent = `${response.totals.connectRoom}`;
-    document.getElementById("statsRangeLabel").textContent = `${response.range.start} ~ ${response.range.end}`;
-}
-
-async function restoreSession() {
-    const session = getSession();
-
-    if (session?.mode === "admin") {
-        await enterAdminMode();
-        return;
-    }
-
-    const rememberedMember = session?.mode === "facility" && session.memberId
-        ? { memberId: session.memberId, verifiedDate: todayString() }
-        : getRememberedFacilityMember();
-
-    if (!rememberedMember?.memberId) {
-        return;
-    }
-
-    if (rememberedMember.verifiedDate !== todayString()) {
-        clearSession();
-        clearRememberedFacilityMember();
-        return;
-    }
-
-    try {
-        const response = await callScript("getFacilityMemberById", {
-            memberId: rememberedMember.memberId
-        });
-
-        if (!response.member) {
-            clearSession();
-            clearRememberedFacilityMember();
-            return;
-        }
-
-        await routeFacilityMember(response.member, "facility-remembered");
-    } catch (error) {
-        console.warn("Failed to restore facility session:", error);
-        clearSession();
-        clearRememberedFacilityMember();
-    }
+    closeWithdrawDialog();
+    resetToChoice();
+    showToast("회원 탈퇴가 완료되었습니다.", "success");
 }
 
 function setupListeners() {
-    document.getElementById("loungeEntryBtn")?.addEventListener("click", async () => {
+    document.getElementById("signupBackBtn")?.addEventListener("click", () => resetToChoice());
+    document.getElementById("facilityExitBtn")?.addEventListener("click", () => resetToChoice());
+    document.getElementById("withdrawOpenBtn")?.addEventListener("click", openWithdrawDialog);
+    document.getElementById("withdrawCancelBtn")?.addEventListener("click", closeWithdrawDialog);
+    document.getElementById("withdrawPhone")?.addEventListener("input", (event) => {
+        event.target.value = normalizeDigits(event.target.value).slice(0, 11);
+    });
+    document.getElementById("withdrawForm")?.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        toggleLoading("withdrawSubmitBtn", true);
         try {
-            await withPageLoading("loungeEntryBtn", "라운지 확인 중...", async () => {
-                await handleLoungeEntry();
-            });
+            await withdrawCurrentMember();
         } catch (error) {
             console.error(error);
-            showToast(error.message || "라운지 화면을 여는 중 문제가 발생했습니다.", "error");
+            showToast(error.message || "회원 탈퇴 중 문제가 발생했습니다.", "error");
+        } finally {
+            toggleLoading("withdrawSubmitBtn", false);
         }
     });
 
-    document.getElementById("facilityEntryBtn")?.addEventListener("click", async () => {
-        await withPageLoading("facilityEntryBtn", "시설 화면 여는 중...", async () => {
-            showSection("facilityEntry");
-        });
+    document.getElementById("reservationSubmitBtn")?.addEventListener("click", async () => {
+        toggleLoading("reservationSubmitBtn", true);
+        try {
+            await submitSelectedReservation();
+        } catch (error) {
+            console.error(error);
+            showToast(error.message || "예약 일지 제출 중 문제가 발생했습니다.", "error");
+        } finally {
+            toggleLoading("reservationSubmitBtn", false);
+            const button = document.getElementById("reservationSubmitBtn");
+            if (button) button.disabled = !state.selectedReservationId;
+        }
     });
-    document.getElementById("entryBackBtn")?.addEventListener("click", () => resetToChoice());
-    document.getElementById("signupBackBtn")?.addEventListener("click", () => resetToChoice());
-    document.getElementById("loungeBackBtn")?.addEventListener("click", () => resetToChoice());
-    document.getElementById("loungeCompleteHomeBtn")?.addEventListener("click", () => resetToChoice());
-    document.getElementById("loungeToFacilityBtn")?.addEventListener("click", () => showSection("facilityEntry"));
-    document.getElementById("facilityExitBtn")?.addEventListener("click", () => resetToChoice());
-    document.getElementById("facilityLogoutBtn")?.addEventListener("click", () => resetToChoice(true));
-    document.getElementById("adminExitBtn")?.addEventListener("click", () => resetToChoice());
+
+    document.getElementById("memberConfirmBtn")?.addEventListener("click", async () => {
+        toggleLoading("memberConfirmBtn", true);
+        try {
+            await confirmCandidateMember();
+        } catch (error) {
+            console.error(error);
+            showToast(error.message || "회원 확인 중 문제가 발생했습니다.", "error");
+        } finally {
+            toggleLoading("memberConfirmBtn", false);
+        }
+    });
+
+    document.getElementById("memberRejectBtn")?.addEventListener("click", () => {
+        state.candidateMember = null;
+        resetToChoice();
+    });
 
     document.getElementById("entryForm")?.addEventListener("submit", async (event) => {
         event.preventDefault();
+        const pin = getEntryPin();
+        if (pin.length !== 4) {
+            setAlert("entryAlert", "전화번호 뒷 4자리를 모두 입력해 주세요.");
+            return;
+        }
         toggleLoading("entrySubmitBtn", true);
         try {
-            await handleFacilityEntry(document.getElementById("entryCode")?.value);
+            await handleFacilityEntry(pin);
         } catch (error) {
             console.error(error);
             setAlert("entryAlert", error.message || "조회 중 문제가 발생했습니다.");
         } finally {
             toggleLoading("entrySubmitBtn", false);
+        }
+    });
+
+    document.getElementById("fullPhoneForm")?.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const phone = normalizeDigits(document.getElementById("fullPhoneInput")?.value);
+        if (!isValidSignupPhone(phone)) {
+            setAlert("entryAlert", "휴대폰 번호 11자리를 정확히 입력해 주세요.");
+            return;
+        }
+        toggleLoading("fullPhoneSubmitBtn", true);
+        try {
+            await handleFacilityEntry(phone);
+        } catch (error) {
+            console.error(error);
+            setAlert("entryAlert", error.message || "회원 확인 중 문제가 발생했습니다.");
+        } finally {
+            toggleLoading("fullPhoneSubmitBtn", false);
+        }
+    });
+
+    document.getElementById("fullPhoneCancelBtn")?.addEventListener("click", () => {
+        setAlert("entryAlert");
+        resetEntryStep();
+    });
+
+    document.getElementById("fullPhoneInput")?.addEventListener("input", (event) => {
+        event.target.value = normalizeDigits(event.target.value).slice(0, 11);
+    });
+
+    document.getElementById("birthUpdateForm")?.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        toggleLoading("birthUpdateSubmitBtn", true);
+        try {
+            await updateMissingBirthDate();
+        } catch (error) {
+            console.error(error);
+            setAlert("birthUpdateAlert", error.message || "생년월일 저장 중 문제가 발생했습니다.");
+        } finally {
+            toggleLoading("birthUpdateSubmitBtn", false);
         }
     });
 
@@ -1024,77 +1054,24 @@ function setupListeners() {
         }
     });
 
-    document.getElementById("loungeForm")?.addEventListener("submit", async (event) => {
+    document.getElementById("signupPhoneCheckForm")?.addEventListener("submit", async (event) => {
         event.preventDefault();
-        toggleLoading("loungeSubmitBtn", true);
+        toggleLoading("signupPhoneCheckBtn", true);
         try {
-            await registerLoungeGuest();
+            await verifySignupPhone();
         } catch (error) {
             console.error(error);
-            setAlert("loungeAlert", error.message || "라운지 방문 처리 중 문제가 발생했습니다.");
+            showToast(error.message || "전화번호 확인 중 문제가 발생했습니다.", "error");
         } finally {
-            toggleLoading("loungeSubmitBtn", false);
+            toggleLoading("signupPhoneCheckBtn", false);
         }
     });
+
+    document.getElementById("signupPhoneChangeBtn")?.addEventListener("click", () => openSignupPhoneStep());
 
     document.getElementById("signupPhone")?.addEventListener("input", (event) => {
         const input = event.target;
         input.value = normalizeDigits(input.value).slice(0, 11);
-    });
-
-    const syncOptionalConsent = (consentId, residentId) => {
-        const consentEl = document.getElementById(consentId);
-        const residentEl = document.getElementById(residentId);
-        if (!consentEl || !residentEl) return;
-
-        consentEl.addEventListener("change", () => {
-            residentEl.dataset.optionalConsent = consentEl.checked ? "true" : "false";
-        });
-        residentEl.dataset.optionalConsent = consentEl.checked ? "true" : "false";
-    };
-
-    syncOptionalConsent("signupOptionalConsent", "signupSeongnamResident");
-    syncOptionalConsent("loungeOptionalConsent", "loungeSeongnamResident");
-
-    document.getElementById("refreshStatsBtn")?.addEventListener("click", () => loadStats(state.statsPeriod));
-    document.getElementById("adminMemberSearchBtn")?.addEventListener("click", () => searchMembers());
-    document.getElementById("closeProxyBtn")?.addEventListener("click", () => {
-        document.getElementById("proxyEntryArea")?.classList.add("hidden");
-        state.proxyMember = null;
-    });
-
-    document.querySelectorAll('input[name="proxyType"]').forEach((input) => {
-        input.addEventListener("change", updateProxyFieldVisibility);
-    });
-
-    document.querySelectorAll('input[name="manualType"]').forEach((input) => {
-        input.addEventListener("change", updateManualFieldVisibility);
-    });
-
-    document.getElementById("proxyFacilityForm")?.addEventListener("submit", async (event) => {
-        event.preventDefault();
-        toggleLoading("proxySubmitBtn", true);
-        try {
-            await handleProxySubmit(event);
-        } catch (error) {
-            console.error(error);
-            setAlert("adminAlert", error.message || "대리 제출 중 문제가 발생했습니다.");
-        } finally {
-            toggleLoading("proxySubmitBtn", false);
-        }
-    });
-
-    document.getElementById("manualEntryForm")?.addEventListener("submit", async (event) => {
-        event.preventDefault();
-        toggleLoading("manualSubmitBtn", true);
-        try {
-            await handleManualSubmit(event);
-        } catch (error) {
-            console.error(error);
-            setAlert("adminAlert", error.message || "수동 제출 중 문제가 발생했습니다.");
-        } finally {
-            toggleLoading("manualSubmitBtn", false);
-        }
     });
 
     document.getElementById("printerForm")?.addEventListener("submit", async (event) => {
@@ -1122,13 +1099,23 @@ function setupListeners() {
         try {
             const member = getCurrentMemberOrThrow();
             const companions = getFormCompanions("careerCompanionCount", "careerCompanions");
-            await submitUsageRecord("careerZone", {
+            const purpose = String(document.getElementById("careerPurpose")?.value || "").trim();
+            if (!purpose) {
+                throw new Error("이용 목적을 입력해 주세요.");
+            }
+            const response = await submitUsageRecord("careerZone", {
+                spaceType: document.getElementById("careerSpaceType")?.value,
                 startTime: document.getElementById("careerStartTime")?.value,
                 endTime: document.getElementById("careerEndTime")?.value,
-                purpose: document.getElementById("careerPurpose")?.value,
+                purpose,
                 companions
             }, member);
-            showToast("커리어존 이용 기록을 제출했습니다.", "success");
+            showToast(
+                response?.linkedReservation
+                    ? "네이버 예약 일정과 연결하여 이용 기록을 제출했습니다."
+                    : "커리어존 이용 기록을 제출했습니다.",
+                "success"
+            );
             event.target.reset();
             document.getElementById("careerCompanionCount").value = 0;
             document.getElementById("careerCompanions").innerHTML = "";
@@ -1146,13 +1133,18 @@ function setupListeners() {
         try {
             const member = getCurrentMemberOrThrow();
             const companions = getFormCompanions("connectCompanionCount", "connectCompanions");
-            await submitUsageRecord("connectRoom", {
+            const response = await submitUsageRecord("connectRoom", {
                 startTime: document.getElementById("connectStartTime")?.value,
                 endTime: document.getElementById("connectEndTime")?.value,
                 purpose: document.getElementById("connectPurpose")?.value,
                 companions
             }, member);
-            showToast("커넥트존 이용 기록을 제출했습니다.", "success");
+            showToast(
+                response?.linkedReservation
+                    ? "네이버 예약 일정과 연결하여 이용 기록을 제출했습니다."
+                    : "커넥트존 이용 기록을 제출했습니다.",
+                "success"
+            );
             event.target.reset();
             document.getElementById("connectCompanionCount").value = 0;
             document.getElementById("connectCompanions").innerHTML = "";
@@ -1165,47 +1157,28 @@ function setupListeners() {
     });
 }
 
-async function init() {
+function init() {
     if (!hasValidQrEntryToken()) {
         showEntryGate();
         return;
     }
 
+    showSection("facilityEntry");
     setupTabs();
     setupTimeInputs();
+    setupBirthDateInputs();
+    setupPinInputs();
     setupNetworkWarning();
     setupStepper("careerCompanionCount", "careerCompanions");
     setupStepper("connectCompanionCount", "connectCompanions");
-    setupStepper("proxyCompanionCount", "proxyCompanions");
-    setupStepper("manualCompanionCount", "manualCompanions");
     setupListeners();
-    updateProxyFieldVisibility();
-    updateManualFieldVisibility();
-    document.getElementById("proxyDateInput").value = todayString();
-    document.getElementById("manualDate").value = todayString();
 
-    const syncTimePromise = syncSystemTime()
-        .catch((error) => console.warn("Time sync failed:", error))
-        .finally(() => {
-            clearExpiredVisitLogRecord();
-            const proxyDateInput = document.getElementById("proxyDateInput");
-            const manualDateInput = document.getElementById("manualDate");
-            if (proxyDateInput) proxyDateInput.value = todayString();
-            if (manualDateInput) manualDateInput.value = todayString();
-        });
-
-    loadAppSettings().catch((error) => {
-        console.warn("App settings load failed:", error);
-    });
-
-    restoreSession().catch((error) => {
-        console.warn("Session restore failed:", error);
-    });
-
-    await syncTimePromise;
+    clearExpiredVisitLogRecord();
 }
 
-init().catch((error) => {
+try {
+    init();
+} catch (error) {
     console.error("Initialization failed:", error);
     showToast("초기화 중 문제가 발생했습니다. 설정을 확인해 주세요.", "error");
-});
+}
