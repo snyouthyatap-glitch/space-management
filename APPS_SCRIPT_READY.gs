@@ -1,6 +1,8 @@
 const TZ = 'Asia/Seoul';
 const QR_ENTRY_TOKEN = 'ybom-qr-2026';
 const MEMBER_RETENTION_YEARS = 3;
+const ADMIN_ACCESS_HASH_PROPERTY = 'ADMIN_ACCESS_HASH';
+const ADMIN_SESSION_SECONDS = 1800;
 
 const SHEET_NAMES = {
   VISIT: '방문일지',
@@ -102,6 +104,8 @@ function onOpen() {
     .addItem('3년 초과 회원 미리보기', 'previewExpiredMembers')
     .addItem('3년 초과 개인정보 파기', 'purgeExpiredMemberData')
     .addItem('월간 개인정보 파기 트리거 설정', 'setupRetentionCleanupTrigger')
+    .addSeparator()
+    .addItem('웹 관리자 비밀번호 설정', 'setupAdminAccessKey')
     .addToUi();
 }
 
@@ -123,8 +127,21 @@ function doGet(e) {
 }
 
 function dispatchWebAction_(action, payload) {
-  requireEntryToken_(payload);
+  if (action === 'adminChallenge') return handleAdminChallenge_();
+  if (action === 'adminLogin') return handleAdminLogin_(payload);
+  if (action.indexOf('admin') === 0) {
+    requireAdminSession_(payload);
+  } else {
+    requireEntryToken_(payload);
+  }
+
   switch (action) {
+    case 'adminSessionStatus':
+      return { ok: true };
+    case 'adminLookupMember':
+      return handleAdminLookupMember_(payload);
+    case 'adminSubmitManualLog':
+      return handleAdminSubmitManualLog_(payload);
     case 'resolveFacilityEntry':
       return handleResolveFacilityEntry_(payload);
     case 'updateMemberBirthDate':
@@ -140,6 +157,266 @@ function dispatchWebAction_(action, payload) {
     default:
       throw new Error('지원하지 않는 요청입니다: ' + action);
   }
+}
+
+function setupAdminAccessKey() {
+  const ui = SpreadsheetApp.getUi();
+  const first = ui.prompt(
+    '웹 관리자 비밀번호 설정',
+    '8자 이상의 관리자 비밀번호를 입력해 주세요.',
+    ui.ButtonSet.OK_CANCEL
+  );
+  if (first.getSelectedButton() !== ui.Button.OK) return;
+
+  const accessKey = str_(first.getResponseText());
+  if (accessKey.length < 8) {
+    ui.alert('관리자 비밀번호는 8자 이상이어야 합니다.');
+    return;
+  }
+
+  const second = ui.prompt(
+    '웹 관리자 비밀번호 확인',
+    '같은 비밀번호를 한 번 더 입력해 주세요.',
+    ui.ButtonSet.OK_CANCEL
+  );
+  if (second.getSelectedButton() !== ui.Button.OK) return;
+  if (str_(second.getResponseText()) !== accessKey) {
+    ui.alert('입력한 비밀번호가 서로 다릅니다.');
+    return;
+  }
+
+  PropertiesService.getScriptProperties()
+    .setProperty(ADMIN_ACCESS_HASH_PROPERTY, sha256Hex_(accessKey));
+  ui.alert('웹 관리자 비밀번호를 설정했습니다.');
+}
+
+function handleAdminChallenge_() {
+  const challenge = Utilities.getUuid();
+  CacheService.getScriptCache().put('admin-challenge:' + challenge, '1', 120);
+  return { ok: true, challenge: challenge };
+}
+
+function handleAdminLogin_(payload) {
+  const challenge = str_(payload.challenge);
+  const proof = str_(payload.proof).toLowerCase();
+  const cache = CacheService.getScriptCache();
+  const challengeKey = 'admin-challenge:' + challenge;
+  const challengeExists = challenge && cache.get(challengeKey);
+  cache.remove(challengeKey);
+
+  const storedHash = str_(
+    PropertiesService.getScriptProperties().getProperty(ADMIN_ACCESS_HASH_PROPERTY)
+  ).toLowerCase();
+  if (!storedHash) {
+    throw new Error('구글 시트 관리 메뉴에서 웹 관리자 비밀번호를 먼저 설정해 주세요.');
+  }
+  if (!challengeExists || !proof || proof !== sha256Hex_(challenge + ':' + storedHash)) {
+    throw new Error('관리자 비밀번호가 올바르지 않습니다.');
+  }
+
+  const sessionToken = Utilities.getUuid();
+  cache.put('admin-session:' + sessionToken, '1', ADMIN_SESSION_SECONDS);
+  return {
+    ok: true,
+    sessionToken: sessionToken,
+    expiresInSeconds: ADMIN_SESSION_SECONDS
+  };
+}
+
+function requireAdminSession_(payload) {
+  const sessionToken = str_(payload && payload.adminSession);
+  const cache = CacheService.getScriptCache();
+  const key = 'admin-session:' + sessionToken;
+  if (!sessionToken || !cache.get(key)) {
+    throw new Error('관리자 인증이 만료되었습니다. 다시 로그인해 주세요.');
+  }
+  cache.put(key, '1', ADMIN_SESSION_SECONDS);
+}
+
+function handleAdminLookupMember_(payload) {
+  const phone = digits_(payload.phone);
+  if (!isValidPhone_(phone)) {
+    throw new Error('휴대폰 번호 11자리를 정확히 입력해 주세요.');
+  }
+
+  const members = findMembersByField_('phone', phone);
+  if (members.length === 0) throw new Error('등록된 회원을 찾을 수 없습니다.');
+  const activeMembers = members.filter(isActiveMember_);
+  if (activeMembers.length === 0) throw new Error('현재 이용할 수 없는 회원입니다.');
+  const member = activeMembers[0];
+  return {
+    ok: true,
+    member: {
+      id: member.id,
+      name: member.name,
+      gender: member.gender,
+      age: member.age,
+      birthDate: member.birthDate,
+      phone: member.phone,
+      phoneLastDigits: member.phoneLastDigits
+    }
+  };
+}
+
+function handleAdminSubmitManualLog_(payload) {
+  const member = requireActiveMember_(payload.memberId);
+  const logType = str_(payload.logType);
+  const date = normalizeSheetDate_(payload.date);
+  const data = payload.data || {};
+  if (!member.birthDate) throw new Error('회원 생년월일을 먼저 등록해 주세요.');
+  if (!isValidLogDate_(date)) {
+    throw new Error('이용 날짜를 확인해 주세요. 미래 날짜는 입력할 수 없습니다.');
+  }
+  if (['visit', 'printer', 'careerRoom1', 'careerRoom2', 'connectRoom'].indexOf(logType) < 0) {
+    throw new Error('수동 일지 종류를 확인해 주세요.');
+  }
+
+  return withScriptLock_(function() {
+    if (logType === 'visit') {
+      const visit = ensureVisitLogLocked_(member, date, 'admin-manual', [], 'admin');
+      return {
+        ok: true,
+        visitCreated: visit.created,
+        logCreated: visit.created,
+        date: date
+      };
+    }
+
+    if (logType === 'printer') {
+      const count = Number(data.count || 0);
+      const requestId = str_(payload.requestId);
+      if (!/^[A-Za-z0-9_-]{8,100}$/.test(requestId)) {
+        throw new Error('프린터 요청 정보를 확인해 주세요.');
+      }
+      if (!Number.isInteger(count) || count < 1 || count > 10) {
+        throw new Error('프린터 사용 매수는 1장부터 10장까지 입력해 주세요.');
+      }
+
+      const printerSheet = getOrCreateSheet_(SHEET_NAMES.PRINTER_LOGS, HEADERS.printerLogs);
+      ensureSheetHeaders_(printerSheet, HEADERS.printerLogs);
+      const requestRows = findRowsByColumnValue_(
+        printerSheet,
+        HEADERS.printerLogs.indexOf('requestId') + 1,
+        requestId
+      );
+      if (requestRows.length > 0) {
+        const existing = objectAtRow_(printerSheet, requestRows[0], HEADERS.printerLogs);
+        if (str_(existing.userId) !== str_(member.id)) {
+          throw new Error('이미 사용된 프린터 요청번호입니다. 다시 제출해 주세요.');
+        }
+        const duplicateVisit = ensureVisitLogLocked_(member, date, 'admin-manual', [], 'admin');
+        return {
+          ok: true,
+          visitCreated: duplicateVisit.created,
+          logCreated: false,
+          duplicate: true,
+          date: date
+        };
+      }
+      if (getPrinterCountForDate_(member.id, date) + count > 10) {
+        throw new Error('프린터는 하루 최대 10장까지 기록할 수 있습니다.');
+      }
+      const printerVisit = ensureVisitLogLocked_(member, date, 'admin-manual', [], 'admin');
+      appendObjectRow_(SHEET_NAMES.PRINTER_LOGS, HEADERS.printerLogs, {
+        logId: Utilities.getUuid(),
+        userId: member.id,
+        name: member.name,
+        gender: member.gender,
+        age: member.age,
+        phone: member.phone,
+        phoneLastDigits: member.phoneLastDigits,
+        date: date,
+        count: count,
+        createdBy: 'admin',
+        createdAt: nowText_(),
+        requestId: requestId
+      });
+      return {
+        ok: true,
+        visitCreated: printerVisit.created,
+        logCreated: true,
+        date: date
+      };
+    }
+
+    const roomData = {
+      date: date,
+      startTime: normalizeTime_(data.startTime),
+      endTime: normalizeTime_(data.endTime),
+      purpose: str_(data.purpose),
+      companions: normalizeCompanions_(data.companions)
+    };
+    if (!roomData.startTime || !roomData.endTime || !roomData.purpose) {
+      throw new Error('시작 시간, 종료 시간, 이용 목적을 모두 입력해 주세요.');
+    }
+    if (roomData.endTime <= roomData.startTime) {
+      throw new Error('종료 시간은 시작 시간보다 늦어야 합니다.');
+    }
+    if (roomData.purpose.length > 200) {
+      throw new Error('이용 목적은 200자 이내로 입력해 주세요.');
+    }
+
+    const roomLogSheet = getRoomLogSheetName_(logType);
+    const reservationSheet = ensureNaverReservationSchema_();
+    const overlappingReservations = findOverlappingNaverReservationEntries_(
+      reservationSheet,
+      logType,
+      date,
+      roomData.startTime,
+      roomData.endTime
+    );
+    const otherReservations = overlappingReservations.filter(function(entry) {
+      return !reservationBelongsToMember_(entry.values, member);
+    });
+    if (otherReservations.length > 0) {
+      throw new Error('해당 시간대에는 다른 이용자의 네이버 예약이 있습니다.');
+    }
+
+    const ownReservations = overlappingReservations.filter(function(entry) {
+      return reservationBelongsToMember_(entry.values, member);
+    });
+    if (ownReservations.length > 1) {
+      throw new Error('겹치는 본인 예약이 여러 건입니다. 시트에서 예약 내역을 확인해 주세요.');
+    }
+    if (ownReservations.length === 1) {
+      const result = submitReservationUsageLocked_(
+        member,
+        reservationSheet,
+        ownReservations[0],
+        roomData.companions,
+        {
+          duplicateAsError: true,
+          repairedAsSuccess: true,
+          source: 'admin-linked-reservation',
+          date: date
+        }
+      );
+      const linkedVisit = ensureVisitLogLocked_(member, date, 'admin-manual', [], 'admin');
+      return {
+        ok: true,
+        visitCreated: linkedVisit.created,
+        logCreated: result.created !== false,
+        linkedReservation: true,
+        date: date
+      };
+    }
+
+    assertNoRoomLogConflict_(roomLogSheet, member, logType, roomData);
+    const roomVisit = ensureVisitLogLocked_(member, date, 'admin-manual', [], 'admin');
+    const roomRow = buildRoomLogRow_(member, logType, roomData, {
+      createdBy: 'admin',
+      linkedReservationId: '',
+      dedupeStatus: 'admin-manual'
+    });
+    appendObjectRow_(roomLogSheet, HEADERS.roomLogs, roomRow);
+    return {
+      ok: true,
+      visitCreated: roomVisit.created,
+      logCreated: true,
+      linkedReservation: false,
+      date: date
+    };
+  });
 }
 
 function handleResolveFacilityEntry_(payload) {
@@ -269,7 +546,7 @@ function prepareVisitWrite_(member, date) {
   return getTodayReservationsForMember_(member, date);
 }
 
-function ensureVisitLogLocked_(member, date, source, preparedReservations) {
+function ensureVisitLogLocked_(member, date, source, preparedReservations, createdBy) {
   const reservations = Array.isArray(preparedReservations)
     ? preparedReservations
     : prepareVisitWrite_(member, date);
@@ -294,7 +571,7 @@ function ensureVisitLogLocked_(member, date, source, preparedReservations) {
     phoneLastDigits: member.phoneLastDigits,
     date: date,
     source: source,
-    createdBy: 'self',
+    createdBy: str_(createdBy, 'self'),
     createdAt: nowText_()
   });
   updateMemberLastUsedAt_(member.id, date);
@@ -460,10 +737,10 @@ function handleSubmitReservationUsage_(payload) {
 function submitReservationUsageLocked_(member, sheet, entry, companionsValue, options) {
   const reservation = entry.values;
   const reservationId = str_(reservation.reservationId);
-  const date = today_();
   const settings = options || {};
+  const date = str_(settings.date, today_());
   if (normalizeSheetDate_(reservation.usageDate) !== date) {
-    throw new Error('오늘 이용하는 예약만 제출할 수 있습니다.');
+    throw new Error('선택한 날짜의 예약과 일치하지 않습니다.');
   }
   if (isCancelledNaverStatus_(reservation.status)) {
     throw new Error('취소 또는 노쇼 처리된 예약입니다.');
@@ -988,11 +1265,13 @@ function ensurePublicFormulaSheetSchemas_() {
     const headersMatch = item.headers.every(function(header, index) {
       return str_(currentHeaders[index]) === header;
     });
-    const formula = str_(sheet.getRange('A2').getFormula());
+    const formulaCell = sheet.getRange('A2');
+    const formula = str_(formulaCell.getFormula());
+    const formulaError = /^#(?:REF|VALUE|ERROR|N\/A)!?$/i.test(str_(formulaCell.getDisplayValue()));
     const roomFormulaCurrent = item.name !== SHEET_NAMES.CAREER && item.name !== SHEET_NAMES.CONNECT
       ? true
       : formula.indexOf('!AC2:INDEX(') !== -1;
-    if (!headersMatch || !formula || !roomFormulaCurrent) {
+    if (!headersMatch || !formula || formulaError || !roomFormulaCurrent) {
       if (item.name === SHEET_NAMES.CAREER) backfillRoomSummaryColumns_(SHEET_NAMES.CAREER_LOGS);
       if (item.name === SHEET_NAMES.CONNECT) backfillRoomSummaryColumns_(SHEET_NAMES.CONNECT_LOGS);
       installPublicSheetFormula_(sheet, item.name, item.headers, monthKey, true);
@@ -1100,75 +1379,69 @@ function updateMemberLastUsedAt_(memberId, date) {
   ensureSheetHeaders_(sheet, HEADERS.members);
   const rowNumber = findFirstRowByColumnValue_(sheet, memberColumn_(sheet, 'memberId'), memberId);
   if (!rowNumber) throw new Error('회원 정보를 찾을 수 없습니다.');
-  sheet.getRange(rowNumber, memberColumn_(sheet, 'lastUsedAt')).setValue(dateOnly_(date));
+  const lastUsedRange = sheet.getRange(rowNumber, memberColumn_(sheet, 'lastUsedAt'));
+  const currentDate = dateOnly_(lastUsedRange.getValue());
+  const nextDate = dateOnly_(date);
+  if (currentDate && (!nextDate || currentDate >= nextDate)) return;
+  lastUsedRange.setValue(nextDate);
   sheet.getRange(rowNumber, memberColumn_(sheet, 'updatedAt')).setValue(nowText_());
 }
 
 function findMembersByField_(field, value) {
   const sheet = getOrCreateSheet_(SHEET_NAMES.MEMBERS, HEADERS.members);
   const target = digits_(value);
-  const column = memberColumn_(sheet, field);
-  const phoneColumn = memberColumn_(sheet, 'phone');
-  const phoneTailColumn = memberColumn_(sheet, 'phoneLastDigits');
+  const headerContext = memberHeaderContext_(sheet);
+  const column = memberColumn_(sheet, field, headerContext);
   const isPhoneSearch = field === 'phone';
   const isPhoneTailSearch = field === 'phoneLastDigits';
   if (!isPhoneSearch && !isPhoneTailSearch) {
     return findRowsByColumnValue_(sheet, column, value).map(function(rowNumber) {
-      return memberAtRow_(sheet, rowNumber);
+      return memberAtRow_(sheet, rowNumber, headerContext);
     });
   }
 
-  const rowNumbers = {};
-  findRowsByColumnValue_(sheet, column, value).forEach(function(rowNumber) {
-    rowNumbers[rowNumber] = true;
-  });
+  const phoneColumn = memberColumn_(sheet, 'phone', headerContext);
+  const phoneTailColumn = memberColumn_(sheet, 'phoneLastDigits', headerContext);
+  const pattern = isPhoneSearch
+    ? buildPhoneRegex_(target)
+    : buildMemberPhoneTailLookupRegex_(target);
 
-  if (isPhoneSearch) {
-    findRowsByColumnRegex_(sheet, phoneColumn, buildPhoneRegex_(target)).forEach(function(rowNumber) {
-      rowNumbers[rowNumber] = true;
-    });
-  } else {
-    findRowsByColumnRegex_(sheet, phoneTailColumn, buildPhoneTailRegex_(target)).forEach(function(rowNumber) {
-      rowNumbers[rowNumber] = true;
-    });
-    findRowsByColumnRegex_(sheet, phoneColumn, buildPhoneSuffixRegex_(target)).forEach(function(rowNumber) {
-      rowNumbers[rowNumber] = true;
-    });
-  }
-
-  return Object.keys(rowNumbers)
-    .map(Number)
-    .map(function(rowNumber) { return memberAtRow_(sheet, rowNumber); })
+  return findRowsByColumnsRegex_(sheet, [phoneColumn, phoneTailColumn], pattern)
+    .map(function(rowNumber) { return memberAtRow_(sheet, rowNumber, headerContext); })
     .filter(function(member) {
       if (isPhoneSearch) return member.phone === target;
       return member.phoneLastDigits === target || member.phone.slice(-4) === target;
     });
 }
 
-function memberColumn_(sheet, header) {
+function memberHeaderContext_(sheet) {
   const lastColumn = Math.max(sheet.getLastColumn(), HEADERS.members.length);
   const currentHeaders = sheet.getRange(1, 1, 1, lastColumn).getValues()[0];
-  const target = str_(header).trim().toLowerCase();
-  const index = currentHeaders.findIndex(function(value) {
-    return str_(value).trim().toLowerCase() === target;
+  const columnByHeader = {};
+  currentHeaders.forEach(function(value, index) {
+    const key = str_(value).trim().toLowerCase();
+    if (key && columnByHeader[key] === undefined) columnByHeader[key] = index + 1;
   });
-  if (index < 0) throw new Error('APP_MEMBERS 시트에서 ' + header + ' 열을 찾을 수 없습니다.');
-  return index + 1;
+  return {
+    width: lastColumn,
+    columnByHeader: columnByHeader
+  };
 }
 
-function memberAtRow_(sheet, rowNumber) {
-  const width = Math.max(sheet.getLastColumn(), HEADERS.members.length);
-  const currentHeaders = sheet.getRange(1, 1, 1, width).getValues()[0];
-  const values = sheet.getRange(rowNumber, 1, 1, width).getValues()[0];
-  const columnByHeader = {};
-  currentHeaders.forEach(function(header, index) {
-    const key = str_(header).trim().toLowerCase();
-    if (key && columnByHeader[key] === undefined) columnByHeader[key] = index;
-  });
+function memberColumn_(sheet, header, headerContext) {
+  const context = headerContext || memberHeaderContext_(sheet);
+  const column = context.columnByHeader[str_(header).trim().toLowerCase()];
+  if (!column) throw new Error('APP_MEMBERS 시트에서 ' + header + ' 열을 찾을 수 없습니다.');
+  return column;
+}
+
+function memberAtRow_(sheet, rowNumber, headerContext) {
+  const context = headerContext || memberHeaderContext_(sheet);
+  const values = sheet.getRange(rowNumber, 1, 1, context.width).getValues()[0];
   const row = {};
   HEADERS.members.forEach(function(header) {
-    const index = columnByHeader[header.toLowerCase()];
-    row[header] = index === undefined ? '' : values[index];
+    const column = context.columnByHeader[header.toLowerCase()];
+    row[header] = column ? values[column - 1] : '';
   });
   return memberRowToObject_(row);
 }
@@ -1239,6 +1512,22 @@ function findRowsByColumnRegex_(sheet, column, pattern) {
     .map(function(range) { return range.getRow(); });
 }
 
+function findRowsByColumnsRegex_(sheet, columns, pattern) {
+  if (!pattern || sheet.getLastRow() < 2) return [];
+  const firstColumn = Math.min.apply(null, columns);
+  const lastColumn = Math.max.apply(null, columns);
+  const matchingRows = {};
+  sheet.getRange(2, firstColumn, sheet.getLastRow() - 1, lastColumn - firstColumn + 1)
+    .createTextFinder(pattern)
+    .useRegularExpression(true)
+    .matchEntireCell(true)
+    .findAll()
+    .forEach(function(range) {
+      if (columns.indexOf(range.getColumn()) !== -1) matchingRows[range.getRow()] = true;
+    });
+  return Object.keys(matchingRows).map(Number).sort(function(a, b) { return a - b; });
+}
+
 function buildPhoneRegex_(phone) {
   if (!isValidPhone_(phone)) return '';
   return '^0?' + phone.substring(1).split('').join('[^0-9]*') + '[^0-9]*$';
@@ -1254,6 +1543,13 @@ function buildPhoneTailRegex_(phoneTail) {
   const withoutLeadingZero = phoneTail.replace(/^0+/, '');
   if (!withoutLeadingZero) return '^0+$';
   return '^0*' + withoutLeadingZero.split('').join('[^0-9]*') + '[^0-9]*$';
+}
+
+function buildMemberPhoneTailLookupRegex_(phoneTail) {
+  const storedTailPattern = buildPhoneTailRegex_(phoneTail);
+  const phoneSuffixPattern = buildPhoneSuffixRegex_(phoneTail);
+  if (!storedTailPattern || !phoneSuffixPattern) return '';
+  return '(' + storedTailPattern + ')|(' + phoneSuffixPattern + ')';
 }
 
 function findFirstRowByColumnValue_(sheet, column, value) {
@@ -1302,10 +1598,11 @@ function getOrCreateSheet_(name, headers) {
 function findExistingSheet_(spreadsheet, name) {
   const expectedName = str_(name).trim().toLowerCase();
   const exact = spreadsheet.getSheetByName(name);
+  if (exact && exact.getLastRow() > 1) return exact;
+
   const matching = spreadsheet.getSheets().filter(function(sheet) {
     return str_(sheet.getName()).trim().toLowerCase() === expectedName;
   });
-  if (exact && exact.getLastRow() > 1) return exact;
 
   const populated = matching.find(function(sheet) {
     return sheet.getLastRow() > 1;
@@ -1937,8 +2234,26 @@ function normalizeCompanions_(value, maxCount) {
 
 function normalizeVisitSource_(value) {
   const source = str_(value);
-  const allowed = ['facility-qr', 'facility-phone-recheck', 'facility-signup', 'facility-signup-existing', 'facility-birthdate-update'];
+  const allowed = [
+    'facility-qr',
+    'facility-phone-recheck',
+    'facility-signup',
+    'facility-signup-existing',
+    'facility-birthdate-update',
+    'admin-manual'
+  ];
   return allowed.indexOf(source) >= 0 ? source : 'facility-qr';
+}
+
+function sha256Hex_(value) {
+  return Utilities.computeDigest(
+    Utilities.DigestAlgorithm.SHA_256,
+    str_(value),
+    Utilities.Charset.UTF_8
+  ).map(function(byte) {
+    const unsigned = byte < 0 ? byte + 256 : byte;
+    return ('0' + unsigned.toString(16)).slice(-2);
+  }).join('');
 }
 
 function isValidGender_(value) {
@@ -1947,6 +2262,20 @@ function isValidGender_(value) {
 
 function isValidPhone_(value) {
   return /^010\d{8}$/.test(digits_(value));
+}
+
+function isValidLogDate_(value) {
+  const date = str_(value);
+  const match = date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match || date > today_()) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  return year >= 2000 &&
+    parsed.getUTCFullYear() === year &&
+    parsed.getUTCMonth() === month - 1 &&
+    parsed.getUTCDate() === day;
 }
 
 function calcAge_(birthDate) {

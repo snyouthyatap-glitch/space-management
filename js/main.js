@@ -1116,7 +1116,7 @@ function setupListeners() {
             showToast(
                 response?.linkedReservation
                     ? "네이버 예약 일정과 연결하여 이용 기록을 제출했습니다."
-                    : "커넥트존 이용 기록을 제출했습니다.",
+                    : "커넥트룸 이용 기록을 제출했습니다.",
                 "success"
             );
             event.target.reset();
@@ -1124,7 +1124,7 @@ function setupListeners() {
             document.getElementById("connectCompanions").innerHTML = "";
         } catch (error) {
             console.error(error);
-            setAlert("facilityAlert", error.message || "커넥트존 기록 제출 중 문제가 발생했습니다.");
+            setAlert("facilityAlert", error.message || "커넥트룸 기록 제출 중 문제가 발생했습니다.");
         } finally {
             toggleLoading("connectSubmitBtn", false);
         }

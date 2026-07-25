@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <title>청년이봄 야탑 | 관리자 수동 일지</title>
+    <link rel="stylesheet" href="css/admin.css?v=20260725-1">
+</head>
+
+<body>
+    <div id="toastContainer" class="toast-container" aria-live="polite"></div>
+
+    <main class="admin-shell">
+        <header class="admin-header">
+            <div class="brand">
+                <img src="assets/youth-spring-logo.png" alt="청년이봄">
+                <span>YATAP ADMIN</span>
+            </div>
+            <button type="button" id="logoutBtn" class="button button-secondary hidden">로그아웃</button>
+        </header>
+
+        <section id="loginSection" class="login-section" aria-labelledby="loginTitle">
+            <div class="login-panel">
+                <span class="eyebrow">STAFF ONLY</span>
+                <h1 id="loginTitle">관리자 인증</h1>
+                <form id="loginForm">
+                    <label for="adminPassword">관리자 비밀번호</label>
+                    <input id="adminPassword" type="password" minlength="8" autocomplete="current-password" required>
+                    <button type="submit" id="loginBtn" class="button button-primary">
+                        <span class="button-text">로그인</span>
+                        <span class="spinner" aria-hidden="true"></span>
+                    </button>
+                </form>
+                <p id="loginMessage" class="form-message" role="alert"></p>
+            </div>
+        </section>
+
+        <div id="workspaceSection" class="workspace hidden">
+            <div class="page-heading">
+                <div>
+                    <span class="eyebrow">MANUAL LOG</span>
+                    <h1>수동 일지 제출</h1>
+                </div>
+                <time id="todayText"></time>
+            </div>
+
+            <section class="work-section" aria-labelledby="memberSearchTitle">
+                <div class="section-heading">
+                    <div>
+                        <span class="step-number">01</span>
+                        <h2 id="memberSearchTitle">회원 조회</h2>
+                    </div>
+                    <button type="button" id="changeMemberBtn" class="text-button hidden">다른 회원 조회</button>
+                </div>
+
+                <form id="memberSearchForm" class="search-row">
+                    <div class="field">
+                        <label for="memberPhone">휴대폰 번호 전체</label>
+                        <input id="memberPhone" type="tel" inputmode="numeric" autocomplete="off"
+                            placeholder="01012341234" maxlength="11" required>
+                    </div>
+                    <button type="submit" id="memberSearchBtn" class="button button-dark">
+                        <span class="button-text">회원 찾기</span>
+                        <span class="spinner" aria-hidden="true"></span>
+                    </button>
+                </form>
+
+                <div id="memberResult" class="member-result hidden">
+                    <div>
+                        <strong id="memberName"></strong>
+                        <span id="memberMeta"></span>
+                    </div>
+                    <span id="memberPhoneText"></span>
+                </div>
+                <p id="memberMessage" class="form-message" role="alert"></p>
+            </section>
+
+            <section id="manualLogSection" class="work-section disabled-section" aria-labelledby="manualLogTitle">
+                <div class="section-heading">
+                    <div>
+                        <span class="step-number">02</span>
+                        <h2 id="manualLogTitle">이용 기록</h2>
+                    </div>
+                </div>
+
+                <form id="manualLogForm">
+                    <fieldset id="manualLogFields" disabled>
+                        <div class="form-grid two-columns">
+                            <div class="field">
+                                <label for="usageDate">이용 날짜</label>
+                                <input id="usageDate" type="date" required>
+                            </div>
+                            <div class="field">
+                                <label for="logType">일지 종류</label>
+                                <select id="logType" required>
+                                    <option value="visit">방문일지</option>
+                                    <option value="printer">프린터</option>
+                                    <option value="careerRoom1">커리어존 Room1</option>
+                                    <option value="careerRoom2">커리어존 Room2</option>
+                                    <option value="connectRoom">커넥트룸</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div id="printerFields" class="conditional-fields hidden">
+                            <div class="field compact-field">
+                                <label for="printerCount">사용 매수</label>
+                                <input id="printerCount" type="number" min="1" max="10" value="1">
+                            </div>
+                        </div>
+
+                        <div id="roomFields" class="conditional-fields hidden">
+                            <div class="form-grid two-columns">
+                                <div class="field">
+                                    <label for="startTime">시작 시간</label>
+                                    <input id="startTime" type="time">
+                                </div>
+                                <div class="field">
+                                    <label for="endTime">종료 시간</label>
+                                    <input id="endTime" type="time">
+                                </div>
+                            </div>
+                            <div class="field">
+                                <label for="purpose">이용 목적</label>
+                                <input id="purpose" type="text" maxlength="200" autocomplete="off">
+                            </div>
+                            <div class="field compact-field">
+                                <label for="companionCount">추가 인원</label>
+                                <input id="companionCount" type="number" min="0" max="10" value="0">
+                            </div>
+                            <div id="companionFields" class="companion-list"></div>
+                        </div>
+
+                        <button type="submit" id="manualSubmitBtn" class="button button-primary submit-button">
+                            <span class="button-text">일지 제출</span>
+                            <span class="spinner" aria-hidden="true"></span>
+                        </button>
+                    </fieldset>
+                </form>
+                <p id="manualLogMessage" class="form-message" role="alert"></p>
+            </section>
+
+            <section class="work-section recent-section" aria-labelledby="recentTitle">
+                <div class="section-heading">
+                    <div>
+                        <span class="step-number">03</span>
+                        <h2 id="recentTitle">이번 접속 제출 내역</h2>
+                    </div>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>시간</th>
+                                <th>회원</th>
+                                <th>날짜</th>
+                                <th>종류</th>
+                                <th>처리</th>
+                            </tr>
+                        </thead>
+                        <tbody id="recentBody">
+                            <tr id="emptyRecentRow">
+                                <td colspan="5" class="empty-cell">제출 내역 없음</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <script type="module" src="js/admin.js?v=20260725-1"></script>
+</body>
+
+</html>
