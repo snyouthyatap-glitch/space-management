@@ -136,6 +136,8 @@ function dispatchWebAction_(action, payload) {
   }
 
   switch (action) {
+    case 'warmup':
+      return { ok: true };
     case 'adminSessionStatus':
       return { ok: true };
     case 'adminLookupMember':
@@ -150,6 +152,8 @@ function dispatchWebAction_(action, payload) {
       return handleRegisterFacilityMember_(payload);
     case 'submitVisitLog':
       return handleSubmitVisitLog_(payload);
+    case 'getTodayReservations':
+      return handleGetTodayReservations_(payload);
     case 'submitUsageRecord':
       return handleSubmitUsageRecord_(payload);
     case 'submitReservationUsage':
@@ -511,13 +515,12 @@ function handleUpdateMemberBirthDate_(payload) {
     }
 
     const date = today_();
-    const reservations = prepareVisitWrite_(member, date);
     if (!member.birthDate) {
       sheet.getRange(rowNumber, memberColumn_(sheet, 'birthDate')).setValue(birthDate);
       sheet.getRange(rowNumber, memberColumn_(sheet, 'updatedAt')).setValue(nowText_());
     }
     const updatedMember = memberAtRow_(sheet, rowNumber);
-    const visit = ensureVisitLogLocked_(updatedMember, date, source, reservations);
+    const visit = ensureVisitLogLocked_(updatedMember, date, source, []);
     return {
       ok: true,
       member: publicMember_(updatedMember),
@@ -527,31 +530,32 @@ function handleUpdateMemberBirthDate_(payload) {
 }
 
 function handleSubmitVisitLog_(payload) {
-  const member = requireActiveMember_(payload.memberId);
+  const memberEntry = requireActiveMemberEntry_(payload.memberId);
+  const member = memberEntry.member;
   const date = today_();
   const source = normalizeVisitSource_(payload.source);
 
   if (!member.birthDate) throw new Error('생년월일을 먼저 입력해 주세요.');
 
   return withScriptLock_(function() {
-    return ensureVisitLogLocked_(member, date, source);
+    return ensureVisitLogLocked_(member, date, source, [], 'self', memberEntry);
   });
 }
 
-function prepareVisitWrite_(member, date) {
-  const memberSheet = getOrCreateSheet_(SHEET_NAMES.MEMBERS, HEADERS.members);
-  const visitSheet = getOrCreateSheet_(SHEET_NAMES.VISIT_LOGS, HEADERS.visitLogs);
-  ensureSheetHeaders_(memberSheet, HEADERS.members);
-  ensureSheetHeaders_(visitSheet, HEADERS.visitLogs);
-  return getTodayReservationsForMember_(member, date);
+function handleGetTodayReservations_(payload) {
+  const member = requireActiveMember_(payload.memberId);
+  return {
+    ok: true,
+    reservations: getTodayReservationsForMember_(member, today_())
+  };
 }
 
-function ensureVisitLogLocked_(member, date, source, preparedReservations, createdBy) {
+function ensureVisitLogLocked_(member, date, source, preparedReservations, createdBy, memberEntry) {
   const reservations = Array.isArray(preparedReservations)
     ? preparedReservations
-    : prepareVisitWrite_(member, date);
+    : [];
   if (hasVisitLog_(member.id, date)) {
-    updateMemberLastUsedAt_(member.id, date);
+    updateMemberLastUsedAt_(member.id, date, memberEntry);
     return {
       ok: true,
       created: false,
@@ -574,7 +578,7 @@ function ensureVisitLogLocked_(member, date, source, preparedReservations, creat
     createdBy: str_(createdBy, 'self'),
     createdAt: nowText_()
   });
-  updateMemberLastUsedAt_(member.id, date);
+  updateMemberLastUsedAt_(member.id, date, memberEntry);
   return {
     ok: true,
     created: true,
@@ -1368,23 +1372,46 @@ function backfillRoomSummaryColumns_(sheetName) {
 
 
 function getMemberById_(memberId) {
-  if (!memberId) return null;
-  const sheet = getOrCreateSheet_(SHEET_NAMES.MEMBERS, HEADERS.members);
-  const rowNumber = findFirstRowByColumnValue_(sheet, memberColumn_(sheet, 'memberId'), memberId);
-  return rowNumber ? memberAtRow_(sheet, rowNumber) : null;
+  const entry = getMemberEntryById_(memberId);
+  return entry ? entry.member : null;
 }
 
-function updateMemberLastUsedAt_(memberId, date) {
+function getMemberEntryById_(memberId) {
+  if (!memberId) return null;
   const sheet = getOrCreateSheet_(SHEET_NAMES.MEMBERS, HEADERS.members);
-  ensureSheetHeaders_(sheet, HEADERS.members);
-  const rowNumber = findFirstRowByColumnValue_(sheet, memberColumn_(sheet, 'memberId'), memberId);
-  if (!rowNumber) throw new Error('회원 정보를 찾을 수 없습니다.');
-  const lastUsedRange = sheet.getRange(rowNumber, memberColumn_(sheet, 'lastUsedAt'));
+  const headerContext = memberHeaderContext_(sheet);
+  const rowNumber = findFirstRowByColumnValue_(
+    sheet,
+    memberColumn_(sheet, 'memberId', headerContext),
+    memberId
+  );
+  return rowNumber ? {
+    sheet: sheet,
+    rowNumber: rowNumber,
+    headerContext: headerContext,
+    member: memberAtRow_(sheet, rowNumber, headerContext)
+  } : null;
+}
+
+function updateMemberLastUsedAt_(memberId, date, memberEntry) {
+  const entry = memberEntry || getMemberEntryById_(memberId);
+  if (!entry) throw new Error('회원 정보를 찾을 수 없습니다.');
+  const lastUsedRange = entry.sheet.getRange(
+    entry.rowNumber,
+    memberColumn_(entry.sheet, 'lastUsedAt', entry.headerContext)
+  );
   const currentDate = dateOnly_(lastUsedRange.getValue());
   const nextDate = dateOnly_(date);
   if (currentDate && (!nextDate || currentDate >= nextDate)) return;
-  lastUsedRange.setValue(nextDate);
-  sheet.getRange(rowNumber, memberColumn_(sheet, 'updatedAt')).setValue(nowText_());
+  const updatedAtColumn = memberColumn_(entry.sheet, 'updatedAt', entry.headerContext);
+  const lastUsedAtColumn = memberColumn_(entry.sheet, 'lastUsedAt', entry.headerContext);
+  if (lastUsedAtColumn === updatedAtColumn + 1) {
+    entry.sheet.getRange(entry.rowNumber, updatedAtColumn, 1, 2)
+      .setValues([[nowText_(), nextDate]]);
+  } else {
+    entry.sheet.getRange(entry.rowNumber, lastUsedAtColumn).setValue(nextDate);
+    entry.sheet.getRange(entry.rowNumber, updatedAtColumn).setValue(nowText_());
+  }
 }
 
 function findMembersByField_(field, value) {
@@ -1447,10 +1474,14 @@ function memberAtRow_(sheet, rowNumber, headerContext) {
 }
 
 function requireActiveMember_(memberId) {
-  const member = getMemberById_(str_(memberId));
-  if (!member) throw new Error('회원 정보를 찾을 수 없습니다. 처음부터 다시 진행해 주세요.');
-  if (!isActiveMember_(member)) throw new Error('현재 이용할 수 없는 회원입니다.');
-  return member;
+  return requireActiveMemberEntry_(memberId).member;
+}
+
+function requireActiveMemberEntry_(memberId) {
+  const entry = getMemberEntryById_(str_(memberId));
+  if (!entry) throw new Error('회원 정보를 찾을 수 없습니다. 처음부터 다시 진행해 주세요.');
+  if (!isActiveMember_(entry.member)) throw new Error('현재 이용할 수 없는 회원입니다.');
+  return entry;
 }
 
 function publicMember_(member) {

@@ -619,11 +619,33 @@ function callScript(action, payload = {}) {
 }
 
 async function ensureVisitLog(member, source = "facility-qr") {
-    const response = await callScript("submitVisitLog", {
+    return callScript("submitVisitLog", {
         memberId: member.id,
         source
     });
-    return response;
+}
+
+async function loadTodayReservations(member) {
+    try {
+        const response = await callScript("getTodayReservations", {
+            memberId: member.id
+        });
+        if (state.currentMember?.id !== member.id || state.currentMode !== "facility") return;
+        renderTodayReservations(response.reservations || []);
+    } catch (error) {
+        console.warn("Reservation loading failed:", error);
+        if (state.currentMember?.id === member.id && state.currentMode === "facility") {
+            showToast("예약 일정은 잠시 후 다시 확인해 주세요.", "info");
+        }
+    }
+}
+
+function enterFacility(member) {
+    state.pendingMember = null;
+    setCurrentMember(member, "facility");
+    renderTodayReservations([]);
+    showSection("facility");
+    void loadTodayReservations(member);
 }
 
 async function routeFacilityMember(member, source = "facility-qr") {
@@ -639,11 +661,8 @@ async function routeFacilityMember(member, source = "facility-qr") {
         return;
     }
 
-    const visitResponse = await ensureVisitLog(member, source);
-    state.pendingMember = null;
-    setCurrentMember(member, "facility");
-    renderTodayReservations(visitResponse.reservations || []);
-    showSection("facility");
+    await ensureVisitLog(member, source);
+    enterFacility(member);
 }
 
 function renderTodayReservations(reservations) {
@@ -853,10 +872,7 @@ async function updateMissingBirthDate() {
 
     state.pendingMember = response.member;
     if (response.visit) {
-        state.pendingMember = null;
-        setCurrentMember(response.member, "facility");
-        renderTodayReservations(response.visit.reservations || []);
-        showSection("facility");
+        enterFacility(response.member);
     } else {
         await routeFacilityMember(response.member, "facility-birthdate-update");
     }
@@ -1138,6 +1154,9 @@ function init() {
     }
 
     showSection("facilityEntry");
+    void callScript("warmup").catch(() => {
+        // Warmup is best-effort and must never block the entry form.
+    });
     setupTabs();
     setupTimeInputs();
     setupBirthDateInputs();
