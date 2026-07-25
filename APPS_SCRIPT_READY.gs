@@ -774,8 +774,8 @@ function submitReservationUsageLocked_(member, sheet, entry, companionsValue, op
   const expectedCompanionCount = Math.max(0, Number(reservation.headcount || 1) - 1);
   const roomData = {
     date: date,
-    startTime: normalizeTime_(reservation.startTime),
-    endTime: normalizeTime_(reservation.endTime),
+    startTime: normalizeSheetTime_(reservation.startTime),
+    endTime: normalizeSheetTime_(reservation.endTime),
     purpose: str_(reservation.purpose, '네이버 예약 이용'),
     companions: normalizeCompanions_(companionsValue, expectedCompanionCount)
   };
