@@ -6,7 +6,9 @@ const REQUEST_TIMEOUT_MS = 25000;
 
 const state = {
     sessionToken: "",
+    subjectType: "member",
     member: null,
+    guestToken: "",
     pendingPrinterRequest: null
 };
 
@@ -169,13 +171,18 @@ function showWorkspace() {
     document.getElementById("loginSection").classList.add("hidden");
     document.getElementById("workspaceSection").classList.remove("hidden");
     document.getElementById("logoutBtn").classList.remove("hidden");
-    document.getElementById("memberPhone").focus();
+    document.getElementById(state.subjectType === "guest" ? "guestGender" : "memberPhone").focus();
 }
 
 function logout(message = "") {
     state.sessionToken = "";
+    state.subjectType = "member";
     state.member = null;
+    state.guestToken = "";
     removeSessionValue(SESSION_KEY);
+    document.querySelector('input[name="subjectMode"][value="member"]').checked = true;
+    document.getElementById("memberInputPanel").classList.remove("hidden");
+    document.getElementById("guestInputPanel").classList.add("hidden");
     resetMember();
     document.getElementById("workspaceSection").classList.add("hidden");
     document.getElementById("logoutBtn").classList.add("hidden");
@@ -199,19 +206,39 @@ async function login(password) {
     showWorkspace();
 }
 
+function setManualLogEnabled(enabled) {
+    document.getElementById("manualLogFields").disabled = !enabled;
+    document.getElementById("manualLogSection").classList.toggle("disabled-section", !enabled);
+}
+
 function resetMember() {
     state.member = null;
     document.getElementById("memberSearchForm").classList.remove("hidden");
     document.getElementById("memberResult").classList.add("hidden");
     document.getElementById("changeMemberBtn").classList.add("hidden");
-    document.getElementById("manualLogFields").disabled = true;
-    document.getElementById("manualLogSection").classList.add("disabled-section");
+    setManualLogEnabled(state.subjectType === "guest");
     document.getElementById("memberPhone").value = "";
     setMessage("memberMessage");
     setMessage("manualLogMessage");
 }
 
+function setSubjectMode(subjectType) {
+    state.subjectType = subjectType === "guest" ? "guest" : "member";
+    state.guestToken = state.subjectType === "guest" ? createRequestId() : "";
+    state.pendingPrinterRequest = null;
+    removeSessionValue(PRINTER_REQUEST_KEY);
+    resetMember();
+
+    const isGuest = state.subjectType === "guest";
+    document.getElementById("memberInputPanel").classList.toggle("hidden", isGuest);
+    document.getElementById("guestInputPanel").classList.toggle("hidden", !isGuest);
+    document.getElementById("guestGender").value = "";
+    document.getElementById("guestAge").value = "";
+    document.getElementById(isGuest ? "guestGender" : "memberPhone").focus();
+}
+
 function renderMember(member) {
+    state.subjectType = "member";
     state.member = member;
     document.getElementById("memberName").textContent = member.name;
     document.getElementById("memberMeta").textContent =
@@ -220,10 +247,25 @@ function renderMember(member) {
     document.getElementById("memberSearchForm").classList.add("hidden");
     document.getElementById("memberResult").classList.remove("hidden");
     document.getElementById("changeMemberBtn").classList.remove("hidden");
-    document.getElementById("manualLogFields").disabled = false;
-    document.getElementById("manualLogSection").classList.remove("disabled-section");
+    setManualLogEnabled(true);
     setMessage("memberMessage");
     document.getElementById("logType").focus();
+}
+
+function getGuestSubject() {
+    const gender = document.getElementById("guestGender").value;
+    const age = Number(document.getElementById("guestAge").value);
+    if (!["남성", "여성"].includes(gender)) {
+        throw new Error("비회원 성별을 선택해 주세요.");
+    }
+    if (!Number.isInteger(age) || age < 1 || age > 100) {
+        throw new Error("비회원 만 나이를 1세부터 100세 사이로 입력해 주세요.");
+    }
+    return {
+        name: "비회원",
+        gender,
+        age
+    };
 }
 
 function isRoomType(logType) {
@@ -350,7 +392,9 @@ function resetLogDetails() {
 }
 
 async function submitManualLog() {
-    if (!state.member) throw new Error("회원을 먼저 조회해 주세요.");
+    const isGuest = state.subjectType === "guest";
+    if (!isGuest && !state.member) throw new Error("회원을 먼저 조회해 주세요.");
+    const subject = isGuest ? getGuestSubject() : state.member;
     const logType = document.getElementById("logType").value;
     const date = document.getElementById("usageDate").value;
     const data = {};
@@ -358,7 +402,11 @@ async function submitManualLog() {
 
     if (logType === "printer") {
         data.count = Number(document.getElementById("printerCount").value || 0);
-        requestId = getPrinterRequest(state.member.id, date, data.count);
+        requestId = getPrinterRequest(
+            isGuest ? state.guestToken : state.member.id,
+            date,
+            data.count
+        );
     } else if (isRoomType(logType)) {
         data.startTime = document.getElementById("startTime").value;
         data.endTime = document.getElementById("endTime").value;
@@ -367,14 +415,20 @@ async function submitManualLog() {
     }
 
     const response = await callScript("adminSubmitManualLog", {
-        memberId: state.member.id,
+        subjectType: state.subjectType,
+        memberId: isGuest ? "" : state.member.id,
+        guest: isGuest ? {
+            token: state.guestToken,
+            gender: subject.gender,
+            age: subject.age
+        } : null,
         logType,
         date,
         data,
         requestId
     });
     if (logType === "printer") clearPrinterRequest(requestId);
-    addRecentEntry(state.member, date, logType, response);
+    addRecentEntry(subject, date, logType, response);
     resetLogDetails();
 
     if (response.linkedReservation) {
@@ -410,6 +464,12 @@ function setupListeners() {
     });
 
     document.getElementById("logoutBtn").addEventListener("click", () => logout());
+
+    document.querySelectorAll('input[name="subjectMode"]').forEach((input) => {
+        input.addEventListener("change", (event) => {
+            if (event.target.checked) setSubjectMode(event.target.value);
+        });
+    });
 
     document.getElementById("memberSearchForm").addEventListener("submit", async (event) => {
         event.preventDefault();
@@ -469,6 +529,7 @@ async function init() {
     setupListeners();
     updateConditionalFields();
     renderCompanions();
+    setSubjectMode("member");
 
     state.sessionToken = getSessionValue(SESSION_KEY);
     if (!state.sessionToken) {

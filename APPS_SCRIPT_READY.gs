@@ -99,6 +99,8 @@ function onOpen() {
     .addItem('월별 시트 전환 실행', 'archiveAndResetMonthlySheets')
     .addItem('간소화 시트 수식 재설정', 'setupPublicFormulaSheets')
     .addItem('네이버 예약 CSV 동기화', 'syncNaverReservationCsv')
+    .addItem('이번 달 예약 달력 갱신', 'generateMonthlyOperationCalendar')
+    .addItem('선택 월 예약 달력 갱신', 'refreshSelectedOperationCalendar')
     .addSeparator()
     .addItem('마지막 이용일 다시 계산', 'backfillMemberLastUsedAt')
     .addItem('3년 초과 회원 미리보기', 'previewExpiredMembers')
@@ -262,12 +264,53 @@ function handleAdminLookupMember_(payload) {
   };
 }
 
+function getAdminManualSubject_(payload) {
+  const subjectType = str_(payload.subjectType, 'member');
+  if (subjectType !== 'guest') {
+    return {
+      isGuest: false,
+      member: requireActiveMember_(payload.memberId)
+    };
+  }
+
+  const guest = payload.guest || {};
+  const token = str_(guest.token);
+  const gender = str_(guest.gender);
+  const age = Number(guest.age);
+  if (!/^[A-Za-z0-9_-]{8,100}$/.test(token)) {
+    throw new Error('비회원 제출 정보를 다시 선택해 주세요.');
+  }
+  if (!isValidGender_(gender)) {
+    throw new Error('비회원 성별을 확인해 주세요.');
+  }
+  if (!Number.isInteger(age) || age < 1 || age > 100) {
+    throw new Error('비회원 만 나이는 1세부터 100세까지 입력해 주세요.');
+  }
+
+  return {
+    isGuest: true,
+    member: {
+      id: 'admin-guest-' + token,
+      name: '비회원',
+      gender: gender,
+      age: age,
+      birthDate: '',
+      phone: '',
+      phoneLastDigits: '',
+      role: 'guest'
+    }
+  };
+}
+
 function handleAdminSubmitManualLog_(payload) {
-  const member = requireActiveMember_(payload.memberId);
+  const subject = getAdminManualSubject_(payload);
+  const member = subject.member;
+  const isGuest = subject.isGuest;
+  const visitSource = isGuest ? 'admin-guest' : 'admin-manual';
   const logType = str_(payload.logType);
   const date = normalizeSheetDate_(payload.date);
   const data = payload.data || {};
-  if (!member.birthDate) throw new Error('회원 생년월일을 먼저 등록해 주세요.');
+  if (!isGuest && !member.birthDate) throw new Error('회원 생년월일을 먼저 등록해 주세요.');
   if (!isValidLogDate_(date)) {
     throw new Error('이용 날짜를 확인해 주세요. 미래 날짜는 입력할 수 없습니다.');
   }
@@ -277,7 +320,7 @@ function handleAdminSubmitManualLog_(payload) {
 
   return withScriptLock_(function() {
     if (logType === 'visit') {
-      const visit = ensureVisitLogLocked_(member, date, 'admin-manual', [], 'admin');
+      const visit = ensureVisitLogLocked_(member, date, visitSource, [], 'admin');
       return {
         ok: true,
         visitCreated: visit.created,
@@ -308,7 +351,7 @@ function handleAdminSubmitManualLog_(payload) {
         if (str_(existing.userId) !== str_(member.id)) {
           throw new Error('이미 사용된 프린터 요청번호입니다. 다시 제출해 주세요.');
         }
-        const duplicateVisit = ensureVisitLogLocked_(member, date, 'admin-manual', [], 'admin');
+        const duplicateVisit = ensureVisitLogLocked_(member, date, visitSource, [], 'admin');
         return {
           ok: true,
           visitCreated: duplicateVisit.created,
@@ -320,7 +363,7 @@ function handleAdminSubmitManualLog_(payload) {
       if (getPrinterCountForDate_(member.id, date) + count > 10) {
         throw new Error('프린터는 하루 최대 10장까지 기록할 수 있습니다.');
       }
-      const printerVisit = ensureVisitLogLocked_(member, date, 'admin-manual', [], 'admin');
+      const printerVisit = ensureVisitLogLocked_(member, date, visitSource, [], 'admin');
       appendObjectRow_(SHEET_NAMES.PRINTER_LOGS, HEADERS.printerLogs, {
         logId: Utilities.getUuid(),
         userId: member.id,
@@ -369,16 +412,20 @@ function handleAdminSubmitManualLog_(payload) {
       roomData.startTime,
       roomData.endTime
     );
-    const otherReservations = overlappingReservations.filter(function(entry) {
-      return !reservationBelongsToMember_(entry.values, member);
-    });
+    const otherReservations = isGuest
+      ? overlappingReservations
+      : overlappingReservations.filter(function(entry) {
+        return !reservationBelongsToMember_(entry.values, member);
+      });
     if (otherReservations.length > 0) {
       throw new Error('해당 시간대에는 다른 이용자의 네이버 예약이 있습니다.');
     }
 
-    const ownReservations = overlappingReservations.filter(function(entry) {
-      return reservationBelongsToMember_(entry.values, member);
-    });
+    const ownReservations = isGuest
+      ? []
+      : overlappingReservations.filter(function(entry) {
+        return reservationBelongsToMember_(entry.values, member);
+      });
     if (ownReservations.length > 1) {
       throw new Error('겹치는 본인 예약이 여러 건입니다. 시트에서 예약 내역을 확인해 주세요.');
     }
@@ -395,7 +442,7 @@ function handleAdminSubmitManualLog_(payload) {
           date: date
         }
       );
-      const linkedVisit = ensureVisitLogLocked_(member, date, 'admin-manual', [], 'admin');
+      const linkedVisit = ensureVisitLogLocked_(member, date, visitSource, [], 'admin');
       return {
         ok: true,
         visitCreated: linkedVisit.created,
@@ -405,12 +452,37 @@ function handleAdminSubmitManualLog_(payload) {
       };
     }
 
+    if (isGuest) {
+      const duplicateGuestLog = findObjectsByColumnValue_(
+        getOrCreateSheet_(roomLogSheet, HEADERS.roomLogs),
+        HEADERS.roomLogs,
+        'userId',
+        member.id
+      ).some(function(row) {
+        return normalizeSheetDate_(row.date) === roomData.date &&
+          roomResourcesConflict_(row.spaceType, logType) &&
+          normalizeSheetTime_(row.startTime) === roomData.startTime &&
+          normalizeSheetTime_(row.endTime) === roomData.endTime;
+      });
+      if (duplicateGuestLog) {
+        const duplicateRoomVisit = ensureVisitLogLocked_(member, date, visitSource, [], 'admin');
+        return {
+          ok: true,
+          visitCreated: duplicateRoomVisit.created,
+          logCreated: false,
+          duplicate: true,
+          linkedReservation: false,
+          date: date
+        };
+      }
+    }
+
     assertNoRoomLogConflict_(roomLogSheet, member, logType, roomData);
-    const roomVisit = ensureVisitLogLocked_(member, date, 'admin-manual', [], 'admin');
+    const roomVisit = ensureVisitLogLocked_(member, date, visitSource, [], 'admin');
     const roomRow = buildRoomLogRow_(member, logType, roomData, {
       createdBy: 'admin',
       linkedReservationId: '',
-      dedupeStatus: 'admin-manual'
+      dedupeStatus: isGuest ? 'admin-guest' : 'admin-manual'
     });
     appendObjectRow_(roomLogSheet, HEADERS.roomLogs, roomRow);
     return {
@@ -555,7 +627,7 @@ function ensureVisitLogLocked_(member, date, source, preparedReservations, creat
     ? preparedReservations
     : [];
   if (hasVisitLog_(member.id, date)) {
-    updateMemberLastUsedAt_(member.id, date, memberEntry);
+    if (member.role !== 'guest') updateMemberLastUsedAt_(member.id, date, memberEntry);
     return {
       ok: true,
       created: false,
@@ -578,7 +650,7 @@ function ensureVisitLogLocked_(member, date, source, preparedReservations, creat
     createdBy: str_(createdBy, 'self'),
     createdAt: nowText_()
   });
-  updateMemberLastUsedAt_(member.id, date, memberEntry);
+  if (member.role !== 'guest') updateMemberLastUsedAt_(member.id, date, memberEntry);
   return {
     ok: true,
     created: true,
@@ -1888,13 +1960,32 @@ function syncNaverReservationCsv() {
     cancelled: 0,
     noShow: 0
   };
+  const touchedMonthKeys = {};
 
   Object.keys(latestRecords).sort().forEach(function(reservationId) {
     const record = latestRecords[reservationId];
-    const result = upsertNaverReservation_(sheet, existingMap[reservationId], record);
+    const existing = existingMap[reservationId];
+    markReservationMonth_(touchedMonthKeys, existing && existing.values && existing.values.usageDate);
+    markReservationMonth_(touchedMonthKeys, record.usageDate);
+    const result = upsertNaverReservation_(sheet, existing, record);
     summary[result.changeType] += 1;
     if (isNoShowNaverStatus_(record.status)) summary.noShow += 1;
     else if (isCancelledNaverStatus_(record.status)) summary.cancelled += 1;
+  });
+  sortNaverReservationsByUsageDate_(sheet);
+  let calendarUpdatedCount = 0;
+  let calendarErrorCount = 0;
+  const calendarErrors = [];
+  Object.keys(touchedMonthKeys).sort().forEach(function(monthKey) {
+    try {
+      renderMonthlyOperationCalendarByMonthKey_(monthKey);
+      calendarUpdatedCount += 1;
+    } catch (error) {
+      calendarErrorCount += 1;
+      const message = monthKey + ': ' + (error.message || error);
+      calendarErrors.push(message);
+      Logger.log('월별 예약 달력 갱신 오류 (' + message + ')');
+    }
   });
 
   let trashedFileCount = 0;
@@ -1913,9 +2004,184 @@ function syncNaverReservationCsv() {
     '취소: ' + summary.cancelled + '건 / 노쇼: ' + summary.noShow + '건\n' +
     '대상 외 장소: ' + ignoredRowCount + '건\n' +
     'CSV 오류: ' + parseErrorCount + '개\n' +
+    '월별 달력 갱신: ' + calendarUpdatedCount + '개' +
+    (calendarErrorCount ? ' / 오류: ' + calendarErrorCount + '개' : '') + '\n' +
+    (calendarErrors.length ? '달력 오류 내용: ' + calendarErrors.join(' | ') + '\n' : '') +
     'Drive 휴지통 이동: ' + trashedFileCount + '개'
   );
   return summary;
+}
+
+function sortNaverReservationsByUsageDate_(sheet) {
+  const rowCount = sheet.getLastRow() - 1;
+  if (rowCount < 2) return;
+
+  sheet.getRange(2, 1, rowCount, HEADERS.naverSync.length).sort([
+    { column: HEADERS.naverSync.indexOf('usageDate') + 1, ascending: true },
+    { column: HEADERS.naverSync.indexOf('startTime') + 1, ascending: true },
+    { column: HEADERS.naverSync.indexOf('reservationId') + 1, ascending: true }
+  ]);
+}
+
+function markReservationMonth_(monthKeys, value) {
+  const date = normalizeSheetDate_(value);
+  if (date) monthKeys[date.slice(0, 7)] = true;
+}
+
+function generateMonthlyOperationCalendar() {
+  const monthKey = Utilities.formatDate(new Date(), TZ, 'yyyy-MM');
+  renderMonthlyOperationCalendarByMonthKey_(monthKey);
+  SpreadsheetApp.getUi().alert(monthKey + ' 예약 달력을 갱신했습니다.');
+}
+
+function refreshSelectedOperationCalendar() {
+  const ui = SpreadsheetApp.getUi();
+  const response = ui.prompt('달력을 표시할 월을 입력하세요.\n형식: YYYY-MM\n예: 2026-07');
+  if (!response || response.getSelectedButton() === ui.Button.CANCEL) return;
+
+  const monthKey = str_(response.getResponseText());
+  if (!isValidMonthKey_(monthKey)) {
+    ui.alert('형식이 잘못되었습니다. YYYY-MM 형식으로 입력해 주세요.');
+    return;
+  }
+
+  renderMonthlyOperationCalendarByMonthKey_(monthKey);
+  ui.alert(monthKey + ' 예약 달력을 갱신했습니다.');
+}
+
+function renderMonthlyOperationCalendarByMonthKey_(monthKey) {
+  if (!isValidMonthKey_(monthKey)) return;
+
+  const parts = monthKey.split('-').map(Number);
+  ensureNaverReservationSchema_();
+  const reservations = getRowsAsObjects_(SHEET_NAMES.NAVER_SYNC, HEADERS.naverSync).filter(function(reservation) {
+    return normalizeSheetDate_(reservation.usageDate).slice(0, 7) === monthKey;
+  });
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = spreadsheet.getSheetByName(monthKey) || spreadsheet.insertSheet(monthKey);
+  createOperationCalendarView_(sheet, reservations, parts[0], parts[1] - 1);
+}
+
+function createOperationCalendarView_(sheet, reservations, year, month) {
+  sheet.getDataRange().breakApart();
+  sheet.clear();
+  sheet.setHiddenGridlines(true);
+  sheet.setFrozenRows(3);
+
+  sheet.getRange(1, 1, 1, 7).merge()
+    .setValue(year + '년 ' + (month + 1) + '월 예약 현황')
+    .setFontSize(16)
+    .setFontWeight('bold')
+    .setHorizontalAlignment('center')
+    .setBackground('#4285F4')
+    .setFontColor('#FFFFFF');
+
+  const days = ['일', '월', '화', '수', '목', '금', '토'];
+  sheet.getRange(3, 1, 1, 7).setValues([days])
+    .setFontWeight('bold')
+    .setBackground('#E8F0FE')
+    .setHorizontalAlignment('center');
+  sheet.getRange(3, 1).setFontColor('#D93025');
+  sheet.getRange(3, 7).setFontColor('#1A73E8');
+
+  const eventMap = {};
+  (reservations || []).forEach(function(reservation) {
+    const date = normalizeSheetDate_(reservation.usageDate);
+    const startTime = normalizeSheetTime_(reservation.startTime);
+    const endTime = normalizeSheetTime_(reservation.endTime);
+    if (!date || !startTime || !endTime) return;
+
+    const statusLabel = isNoShowNaverStatus_(reservation.status)
+      ? '[노쇼]'
+      : (isCancelledNaverStatus_(reservation.status) ? '[취소]' : '[예약]');
+    if (!eventMap[date]) eventMap[date] = [];
+    eventMap[date].push({
+      time: startTime + '~' + endTime,
+      text: statusLabel + ' ' + getReservationSpaceLabel_(reservation.spaceType) +
+        ' / ' + str_(reservation.bookerName),
+      note: [
+        '예약번호: ' + str_(reservation.reservationId),
+        '상태: ' + str_(reservation.status),
+        '인원: ' + Math.max(1, Number(reservation.headcount || 1)) + '명',
+        '이용 목적: ' + str_(reservation.purpose, '네이버 예약 이용')
+      ].join('\n'),
+      isCancelled: isCancelledNaverStatus_(reservation.status)
+    });
+  });
+  Object.keys(eventMap).forEach(function(date) {
+    eventMap[date].sort(function(a, b) { return a.time.localeCompare(b.time); });
+  });
+
+  const firstDay = new Date(year, month, 1).getDay();
+  const lastDay = new Date(year, month + 1, 0).getDate();
+  let currentDay = 1 - firstDay;
+  let currentRow = 4;
+
+  while (currentDay <= lastDay) {
+    const counts = [];
+    for (let dayIndex = 0; dayIndex < 7; dayIndex += 1) {
+      const day = currentDay + dayIndex;
+      const date = monthKeyFromParts_(year, month + 1) + '-' + pad2_(day);
+      counts.push(day > 0 && day <= lastDay ? (eventMap[date] || []).length : 0);
+    }
+    const eventRows = Math.max(3, Math.max.apply(null, counts));
+
+    for (let dayIndex = 0; dayIndex < 7; dayIndex += 1) {
+      const column = dayIndex + 1;
+      const day = currentDay + dayIndex;
+      const block = sheet.getRange(currentRow, column, eventRows + 1, 1);
+      block.setBorder(true, true, true, true, null, null);
+
+      if (day <= 0 || day > lastDay) {
+        block.setBackground('#F5F5F5');
+        continue;
+      }
+
+      const date = monthKeyFromParts_(year, month + 1) + '-' + pad2_(day);
+      const events = eventMap[date] || [];
+      sheet.getRange(currentRow, column)
+        .setValue(day)
+        .setFontWeight('bold')
+        .setHorizontalAlignment('left')
+        .setBackground('#FFFFFF')
+        .setFontColor(dayIndex === 0 ? '#D93025' : (dayIndex === 6 ? '#1A73E8' : '#202124'));
+
+      events.forEach(function(event, index) {
+        const cell = sheet.getRange(currentRow + index + 1, column);
+        cell.setValue(event.time + ' ' + event.text)
+          .setNote(event.note)
+          .setWrap(true)
+          .setVerticalAlignment('middle')
+          .setFontSize(9)
+          .setBackground(event.isCancelled ? '#F1F3F4' : '#FFF8E1')
+          .setFontColor(event.isCancelled ? '#80868B' : '#202124')
+          .setFontLine(event.isCancelled ? 'line-through' : 'none');
+      });
+      if (events.length < eventRows) {
+        sheet.getRange(currentRow + events.length + 1, column, eventRows - events.length, 1)
+          .setBackground('#FFFFFF');
+      }
+    }
+
+    sheet.setRowHeight(currentRow, 25);
+    for (let offset = 1; offset <= eventRows; offset += 1) {
+      sheet.setRowHeight(currentRow + offset, 45);
+    }
+    currentRow += eventRows + 1;
+    currentDay += 7;
+  }
+
+  for (let column = 1; column <= 7; column += 1) {
+    sheet.setColumnWidth(column, 150);
+  }
+}
+
+function isValidMonthKey_(monthKey) {
+  return /^\d{4}-(0[1-9]|1[0-2])$/.test(str_(monthKey));
+}
+
+function monthKeyFromParts_(year, month) {
+  return year + '-' + pad2_(month);
 }
 
 function getNaverCsvFolder_() {

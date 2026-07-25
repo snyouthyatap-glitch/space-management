@@ -261,6 +261,56 @@ select:focus {
     gap: 10px;
 }
 
+.subject-mode {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: min(360px, 100%);
+    margin-bottom: 20px;
+    padding: 3px;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    background: var(--surface-soft);
+}
+
+.subject-mode label {
+    min-width: 0;
+    cursor: pointer;
+}
+
+.subject-mode input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.subject-mode span {
+    display: grid;
+    min-height: 40px;
+    place-items: center;
+    padding: 8px 12px;
+    border-radius: 5px;
+    color: var(--muted);
+    font-size: 14px;
+    font-weight: 800;
+}
+
+.subject-mode input:checked + span {
+    background: var(--surface);
+    color: var(--green-dark);
+    box-shadow: 0 1px 5px rgba(48, 43, 42, 0.12);
+}
+
+.subject-mode input:focus-visible + span {
+    outline: 3px solid rgba(74, 153, 67, 0.2);
+}
+
+.guest-fields {
+    max-width: 560px;
+    margin-bottom: 0;
+}
+
 .field {
     min-width: 0;
 }
