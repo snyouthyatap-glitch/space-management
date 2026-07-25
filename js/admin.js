@@ -430,6 +430,7 @@ async function submitManualLog() {
     if (logType === "printer") clearPrinterRequest(requestId);
     addRecentEntry(subject, date, logType, response);
     resetLogDetails();
+    if (isGuest) setSubjectMode("guest");
 
     if (response.linkedReservation) {
         showToast("네이버 예약과 연결하여 일지를 저장했습니다.");

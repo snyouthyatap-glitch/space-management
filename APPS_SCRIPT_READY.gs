@@ -3,6 +3,7 @@ const QR_ENTRY_TOKEN = 'ybom-qr-2026';
 const MEMBER_RETENTION_YEARS = 3;
 const ADMIN_ACCESS_HASH_PROPERTY = 'ADMIN_ACCESS_HASH';
 const ADMIN_SESSION_SECONDS = 1800;
+const PENDING_CALENDAR_MONTHS_PROPERTY = 'PENDING_OPERATION_CALENDAR_MONTHS';
 
 const SHEET_NAMES = {
   VISIT: '방문일지',
@@ -99,8 +100,8 @@ function onOpen() {
     .addItem('월별 시트 전환 실행', 'archiveAndResetMonthlySheets')
     .addItem('간소화 시트 수식 재설정', 'setupPublicFormulaSheets')
     .addItem('네이버 예약 CSV 동기화', 'syncNaverReservationCsv')
-    .addItem('이번 달 예약 달력 갱신', 'generateMonthlyOperationCalendar')
-    .addItem('선택 월 예약 달력 갱신', 'refreshSelectedOperationCalendar')
+    .addItem('이번 달 운영 달력 갱신', 'generateMonthlyOperationCalendar')
+    .addItem('선택 월 운영 달력 갱신', 'refreshSelectedOperationCalendar')
     .addSeparator()
     .addItem('마지막 이용일 다시 계산', 'backfillMemberLastUsedAt')
     .addItem('3년 초과 회원 미리보기', 'previewExpiredMembers')
@@ -109,6 +110,7 @@ function onOpen() {
     .addSeparator()
     .addItem('웹 관리자 비밀번호 설정', 'setupAdminAccessKey')
     .addToUi();
+  refreshPendingOperationCalendars_();
 }
 
 function doGet(e) {
@@ -452,31 +454,6 @@ function handleAdminSubmitManualLog_(payload) {
       };
     }
 
-    if (isGuest) {
-      const duplicateGuestLog = findObjectsByColumnValue_(
-        getOrCreateSheet_(roomLogSheet, HEADERS.roomLogs),
-        HEADERS.roomLogs,
-        'userId',
-        member.id
-      ).some(function(row) {
-        return normalizeSheetDate_(row.date) === roomData.date &&
-          roomResourcesConflict_(row.spaceType, logType) &&
-          normalizeSheetTime_(row.startTime) === roomData.startTime &&
-          normalizeSheetTime_(row.endTime) === roomData.endTime;
-      });
-      if (duplicateGuestLog) {
-        const duplicateRoomVisit = ensureVisitLogLocked_(member, date, visitSource, [], 'admin');
-        return {
-          ok: true,
-          visitCreated: duplicateRoomVisit.created,
-          logCreated: false,
-          duplicate: true,
-          linkedReservation: false,
-          date: date
-        };
-      }
-    }
-
     assertNoRoomLogConflict_(roomLogSheet, member, logType, roomData);
     const roomVisit = ensureVisitLogLocked_(member, date, visitSource, [], 'admin');
     const roomRow = buildRoomLogRow_(member, logType, roomData, {
@@ -485,6 +462,7 @@ function handleAdminSubmitManualLog_(payload) {
       dedupeStatus: isGuest ? 'admin-guest' : 'admin-manual'
     });
     appendObjectRow_(roomLogSheet, HEADERS.roomLogs, roomRow);
+    markOperationCalendarMonthPending_(date);
     return {
       ok: true,
       visitCreated: roomVisit.created,
@@ -786,6 +764,7 @@ function handleSubmitUsageRecord_(payload) {
       dedupeStatus: 'manual'
     });
     appendObjectRow_(roomLogSheet, HEADERS.roomLogs, roomRow);
+    markOperationCalendarMonthPending_(roomData.date);
     return { ok: true, linkedReservation: false };
   });
 }
@@ -835,6 +814,7 @@ function submitReservationUsageLocked_(member, sheet, entry, companionsValue, op
       throw new Error('이미 다른 회원의 이용일지와 연결된 예약입니다. 관리자에게 확인해 주세요.');
     }
     updateNaverReservationSubmission_(sheet, entry.rowNumber, member, reservation, linkedLog.row.logId);
+    markOperationCalendarMonthPending_(date);
     if (settings.duplicateAsError && !settings.repairedAsSuccess) {
       throw new Error('이미 동일한 시간대로 제출하였습니다.');
     }
@@ -866,6 +846,7 @@ function submitReservationUsageLocked_(member, sheet, entry, companionsValue, op
   });
   appendObjectRow_(roomLogSheet, HEADERS.roomLogs, roomRow);
   updateNaverReservationSubmission_(sheet, entry.rowNumber, member, reservation, roomRow.logId);
+  markOperationCalendarMonthPending_(date);
   return { ok: true, created: true, reservationId: reservationId, linkedReservation: true };
 }
 
@@ -2028,10 +2009,67 @@ function markReservationMonth_(monthKeys, value) {
   if (date) monthKeys[date.slice(0, 7)] = true;
 }
 
+function readPendingOperationCalendarMonths_() {
+  const raw = str_(
+    PropertiesService.getScriptProperties().getProperty(PENDING_CALENDAR_MONTHS_PROPERTY)
+  );
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (error) {
+    Logger.log('운영 달력 대기 목록 읽기 오류: ' + (error.message || error));
+    return {};
+  }
+}
+
+function markOperationCalendarMonthPending_(value) {
+  const date = normalizeSheetDate_(value);
+  const monthKey = date.slice(0, 7);
+  if (!isValidMonthKey_(monthKey)) return;
+
+  const pending = readPendingOperationCalendarMonths_();
+  pending[monthKey] = Date.now();
+  PropertiesService.getScriptProperties().setProperty(
+    PENDING_CALENDAR_MONTHS_PROPERTY,
+    JSON.stringify(pending)
+  );
+}
+
+function clearPendingOperationCalendarMonth_(monthKey, expectedVersion) {
+  const pending = readPendingOperationCalendarMonths_();
+  if (expectedVersion !== undefined && pending[monthKey] !== expectedVersion) return;
+  if (pending[monthKey] === undefined) return;
+
+  delete pending[monthKey];
+  const properties = PropertiesService.getScriptProperties();
+  if (Object.keys(pending).length > 0) {
+    properties.setProperty(PENDING_CALENDAR_MONTHS_PROPERTY, JSON.stringify(pending));
+  } else {
+    properties.deleteProperty(PENDING_CALENDAR_MONTHS_PROPERTY);
+  }
+}
+
+function refreshPendingOperationCalendars_() {
+  const pending = readPendingOperationCalendarMonths_();
+  Object.keys(pending).sort().forEach(function(monthKey) {
+    try {
+      renderMonthlyOperationCalendarByMonthKey_(monthKey);
+      clearPendingOperationCalendarMonth_(monthKey, pending[monthKey]);
+    } catch (error) {
+      Logger.log('대기 중인 운영 달력 갱신 오류 (' + monthKey + '): ' + (error.message || error));
+    }
+  });
+}
+
 function generateMonthlyOperationCalendar() {
   const monthKey = Utilities.formatDate(new Date(), TZ, 'yyyy-MM');
+  const pendingVersion = readPendingOperationCalendarMonths_()[monthKey];
   renderMonthlyOperationCalendarByMonthKey_(monthKey);
-  SpreadsheetApp.getUi().alert(monthKey + ' 예약 달력을 갱신했습니다.');
+  if (pendingVersion !== undefined) {
+    clearPendingOperationCalendarMonth_(monthKey, pendingVersion);
+  }
+  SpreadsheetApp.getUi().alert(monthKey + ' 운영 달력을 갱신했습니다.');
 }
 
 function refreshSelectedOperationCalendar() {
@@ -2045,8 +2083,12 @@ function refreshSelectedOperationCalendar() {
     return;
   }
 
+  const pendingVersion = readPendingOperationCalendarMonths_()[monthKey];
   renderMonthlyOperationCalendarByMonthKey_(monthKey);
-  ui.alert(monthKey + ' 예약 달력을 갱신했습니다.');
+  if (pendingVersion !== undefined) {
+    clearPendingOperationCalendarMonth_(monthKey, pendingVersion);
+  }
+  ui.alert(monthKey + ' 운영 달력을 갱신했습니다.');
 }
 
 function renderMonthlyOperationCalendarByMonthKey_(monthKey) {
@@ -2057,19 +2099,27 @@ function renderMonthlyOperationCalendarByMonthKey_(monthKey) {
   const reservations = getRowsAsObjects_(SHEET_NAMES.NAVER_SYNC, HEADERS.naverSync).filter(function(reservation) {
     return normalizeSheetDate_(reservation.usageDate).slice(0, 7) === monthKey;
   });
+  const roomLogs = [
+    { sheetName: SHEET_NAMES.CAREER_LOGS, headers: HEADERS.roomLogs },
+    { sheetName: SHEET_NAMES.CONNECT_LOGS, headers: HEADERS.roomLogs }
+  ].reduce(function(rows, source) {
+    return rows.concat(getRowsAsObjects_(source.sheetName, source.headers));
+  }, []).filter(function(row) {
+    return normalizeSheetDate_(row.date).slice(0, 7) === monthKey;
+  });
   const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = spreadsheet.getSheetByName(monthKey) || spreadsheet.insertSheet(monthKey);
-  createOperationCalendarView_(sheet, reservations, parts[0], parts[1] - 1);
+  createOperationCalendarView_(sheet, reservations, roomLogs, parts[0], parts[1] - 1);
 }
 
-function createOperationCalendarView_(sheet, reservations, year, month) {
+function createOperationCalendarView_(sheet, reservations, roomLogs, year, month) {
   sheet.getDataRange().breakApart();
   sheet.clear();
   sheet.setHiddenGridlines(true);
   sheet.setFrozenRows(3);
 
   sheet.getRange(1, 1, 1, 7).merge()
-    .setValue(year + '년 ' + (month + 1) + '월 예약 현황')
+    .setValue(year + '년 ' + (month + 1) + '월 운영 현황')
     .setFontSize(16)
     .setFontWeight('bold')
     .setHorizontalAlignment('center')
@@ -2085,7 +2135,20 @@ function createOperationCalendarView_(sheet, reservations, year, month) {
   sheet.getRange(3, 7).setFontColor('#1A73E8');
 
   const eventMap = {};
+  const linkedReservationIds = {};
+  const actualLogIds = {};
+  (roomLogs || []).forEach(function(row) {
+    const linkedReservationId = str_(row.linkedReservationId);
+    const logId = str_(row.logId);
+    if (linkedReservationId) linkedReservationIds[linkedReservationId] = true;
+    if (logId) actualLogIds[logId] = true;
+  });
+
   (reservations || []).forEach(function(reservation) {
+    if (linkedReservationIds[str_(reservation.reservationId)] ||
+        actualLogIds[str_(reservation.usageLogId)]) {
+      return;
+    }
     const date = normalizeSheetDate_(reservation.usageDate);
     const startTime = normalizeSheetTime_(reservation.startTime);
     const endTime = normalizeSheetTime_(reservation.endTime);
@@ -2105,7 +2168,36 @@ function createOperationCalendarView_(sheet, reservations, year, month) {
         '인원: ' + Math.max(1, Number(reservation.headcount || 1)) + '명',
         '이용 목적: ' + str_(reservation.purpose, '네이버 예약 이용')
       ].join('\n'),
-      isCancelled: isCancelledNaverStatus_(reservation.status)
+      isCancelled: isCancelledNaverStatus_(reservation.status),
+      kind: 'reservation'
+    });
+  });
+
+  (roomLogs || []).forEach(function(row) {
+    const date = normalizeSheetDate_(row.date);
+    const startTime = normalizeSheetTime_(row.startTime);
+    const endTime = normalizeSheetTime_(row.endTime);
+    if (!date || !startTime || !endTime) return;
+
+    const linkedReservationId = str_(row.linkedReservationId);
+    const headcount = Math.max(
+      1,
+      Number(row.headcount || 0),
+      Number(row.companionCount || 0) + 1
+    );
+    if (!eventMap[date]) eventMap[date] = [];
+    eventMap[date].push({
+      time: startTime + '~' + endTime,
+      text: (linkedReservationId ? '[이용완료] ' : '[현장이용] ') +
+        getReservationSpaceLabel_(row.spaceType) + ' / ' + str_(row.name, '비회원'),
+      note: [
+        '기록 구분: ' + (linkedReservationId ? '네이버 예약 연계 이용' : '현장 이용'),
+        linkedReservationId ? '예약번호: ' + linkedReservationId : '',
+        '인원: ' + headcount + '명',
+        '이용 목적: ' + str_(row.purpose, '시설 이용')
+      ].filter(function(value) { return value; }).join('\n'),
+      isCancelled: false,
+      kind: 'usage'
     });
   });
   Object.keys(eventMap).forEach(function(date) {
@@ -2153,8 +2245,8 @@ function createOperationCalendarView_(sheet, reservations, year, month) {
           .setWrap(true)
           .setVerticalAlignment('middle')
           .setFontSize(9)
-          .setBackground(event.isCancelled ? '#F1F3F4' : '#FFF8E1')
-          .setFontColor(event.isCancelled ? '#80868B' : '#202124')
+          .setBackground(event.isCancelled ? '#F1F3F4' : (event.kind === 'usage' ? '#E6F4EA' : '#FFF8E1'))
+          .setFontColor(event.isCancelled ? '#80868B' : (event.kind === 'usage' ? '#137333' : '#202124'))
           .setFontLine(event.isCancelled ? 'line-through' : 'none');
       });
       if (events.length < eventRows) {
