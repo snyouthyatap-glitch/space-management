@@ -12,6 +12,20 @@ internal static class Program
         }
 
         ApplicationConfiguration.Initialize();
+        var manualPreviewPath = args
+            .FirstOrDefault(argument =>
+                argument.StartsWith("--manual-preview=", StringComparison.OrdinalIgnoreCase))
+            ?.Substring("--manual-preview=".Length) ?? "";
+        if (!string.IsNullOrWhiteSpace(manualPreviewPath))
+        {
+            Application.Run(new ManualLogForm(
+                new AppsScriptClient(),
+                new DashboardSettings(),
+                "preview-password",
+                manualPreviewPath));
+            return 0;
+        }
+
         using var singleInstance = new Mutex(
             true,
             @"Local\YouthSpringStaffDashboard",

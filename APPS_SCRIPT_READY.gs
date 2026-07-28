@@ -150,6 +150,8 @@ function dispatchWebAction_(action, payload) {
       return handleAdminSubmitManualLog_(payload);
     case 'adminDashboardSnapshot':
       return handleAdminDashboardSnapshot_(payload);
+    case 'adminUpdateReservationStatus':
+      return handleAdminUpdateReservationStatus_(payload);
     case 'resolveFacilityEntry':
       return handleResolveFacilityEntry_(payload);
     case 'updateMemberBirthDate':
@@ -254,6 +256,61 @@ function handleAdminDashboardSnapshot_(payload) {
     calendarEntries: calendarEntries,
     summary: getStaffDashboardSummary_()
   };
+}
+
+function handleAdminUpdateReservationStatus_(payload) {
+  const reservationId = str_(payload && payload.reservationId);
+  const status = str_(payload && payload.status);
+  const allowedStatuses = ['확정', '이용완료', '취소', '노쇼'];
+  if (!reservationId) throw new Error('변경할 예약번호가 없습니다.');
+  if (allowedStatuses.indexOf(status) === -1) {
+    throw new Error('지원하지 않는 예약 상태입니다.');
+  }
+
+  return withScriptLock_(function() {
+    const sheet = ensureNaverReservationSchema_();
+    const entry = findNaverReservationEntry_(sheet, reservationId);
+    if (!entry) throw new Error('예약번호 ' + reservationId + '을(를) 찾을 수 없습니다.');
+
+    const now = nowText_();
+    const changes = { status: status };
+    if (status === '취소' || status === '노쇼') {
+      changes.completedAt = '';
+      changes.cancelledAt = now;
+      changes.cancelReason = status === '노쇼'
+        ? '직원 프로그램에서 노쇼 처리'
+        : '직원 프로그램에서 취소 처리';
+    } else {
+      changes.cancelledAt = '';
+      changes.cancelReason = '';
+      if (status === '이용완료') {
+        changes.completedAt = str_(entry.values.completedAt, now);
+      } else {
+        changes.completedAt = '';
+        changes.confirmedAt = str_(entry.values.confirmedAt, now);
+      }
+    }
+
+    updateNaverReservationRow_(sheet, entry.rowNumber, changes);
+    applyNaverReservationRowStyle_(
+      sheet,
+      entry.rowNumber,
+      Object.assign({}, entry.values, changes)
+    );
+
+    const usageDate = normalizeSheetDate_(entry.values.usageDate);
+    markOperationCalendarMonthPending_(usageDate);
+    const monthKey = usageDate.slice(0, 7);
+    if (isValidMonthKey_(monthKey)) {
+      CacheService.getScriptCache().remove('staff-dashboard-calendar-v1:' + monthKey);
+    }
+    return {
+      ok: true,
+      reservationId: reservationId,
+      status: status,
+      cancelled: isCancelledNaverStatus_(status)
+    };
+  });
 }
 
 function getStaffDashboardEvents_(limit) {

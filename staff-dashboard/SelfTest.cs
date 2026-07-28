@@ -12,6 +12,8 @@ internal static class SelfTest
         TestWindowsPasswordProtection();
         TestDashboardResponseParsing();
         TestSessionExpiryRecoveryAsync().GetAwaiter().GetResult();
+        TestReservationStatusUpdateAsync().GetAwaiter().GetResult();
+        TestManualLogFlowAsync().GetAwaiter().GetResult();
     }
 
     private static void TestWindowsPasswordProtection()
@@ -85,12 +87,87 @@ internal static class SelfTest
         }
     }
 
+    private static async Task TestReservationStatusUpdateAsync()
+    {
+        var handler = new FakeAppsScriptHandler();
+        using var httpClient = new HttpClient(handler);
+        var client = new AppsScriptClient(httpClient);
+        var result = await client.UpdateReservationStatusAsync(
+            new DashboardSettings { AppsScriptUrl = "https://example.test/exec" },
+            FakeAppsScriptHandler.Password,
+            "reservation-123",
+            "노쇼",
+            CancellationToken.None);
+
+        if (!result.Ok ||
+            result.ReservationId != "reservation-123" ||
+            result.Status != "노쇼" ||
+            !result.Cancelled ||
+            handler.StatusUpdateCount != 1)
+        {
+            throw new InvalidOperationException("예약 상태 변경 요청 테스트에 실패했습니다.");
+        }
+    }
+
+    private static async Task TestManualLogFlowAsync()
+    {
+        var handler = new FakeAppsScriptHandler();
+        using var httpClient = new HttpClient(handler);
+        var client = new AppsScriptClient(httpClient);
+        var settings = new DashboardSettings { AppsScriptUrl = "https://example.test/exec" };
+        var member = await client.LookupMemberAsync(
+            settings,
+            FakeAppsScriptHandler.Password,
+            "01012345678",
+            CancellationToken.None);
+        var result = await client.SubmitManualLogAsync(
+            settings,
+            FakeAppsScriptHandler.Password,
+            new ManualLogRequest
+            {
+                SubjectType = "guest",
+                Guest = new ManualGuest
+                {
+                    Token = "guest-test-token",
+                    Gender = "여성",
+                    Age = 24
+                },
+                LogType = "connectRoom",
+                Date = "2026-07-28",
+                Data = new ManualLogData
+                {
+                    StartTime = "16:00",
+                    EndTime = "17:00",
+                    Purpose = "테스트",
+                    Companions = [new ManualCompanion { Gender = "남성", Age = 25 }]
+                },
+                RequestId = "manual-test-request"
+            },
+            CancellationToken.None);
+
+        if (member.Id != "member-1" ||
+            !result.Ok ||
+            !result.LogCreated ||
+            handler.MemberLookupCount != 1 ||
+            handler.ManualLogCount != 1 ||
+            handler.LastManualLogType != "connectRoom" ||
+            handler.LastManualCompanionCount != 1)
+        {
+            throw new InvalidOperationException("관리자 수동 일지 흐름 테스트에 실패했습니다.");
+        }
+    }
+
     private sealed class FakeAppsScriptHandler : HttpMessageHandler
     {
         public const string Password = "admin-test-password";
         public int ChallengeCount { get; private set; }
         public int LoginCount { get; private set; }
         public int SnapshotCount { get; private set; }
+        public int StatusUpdateCount { get; private set; }
+        public int MemberLookupCount { get; private set; }
+        public int ManualLogCount { get; private set; }
+        public string LastManualLogType { get; private set; } = "";
+        public int LastManualCompanionCount { get; private set; }
 
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
@@ -142,6 +219,46 @@ internal static class SelfTest
                         }
                       }
                       """;
+            }
+            else if (action == "adminUpdateReservationStatus")
+            {
+                StatusUpdateCount++;
+                var reservationId = payload.GetProperty("reservationId").GetString() ?? "";
+                var status = payload.GetProperty("status").GetString() ?? "";
+                json = JsonSerializer.Serialize(new
+                {
+                    ok = true,
+                    reservationId,
+                    status,
+                    cancelled = status is "취소" or "노쇼"
+                });
+            }
+            else if (action == "adminLookupMember")
+            {
+                MemberLookupCount++;
+                json = """
+                  {
+                    "ok": true,
+                    "member": {
+                      "id": "member-1",
+                      "name": "테스트 회원",
+                      "gender": "여성",
+                      "age": 24,
+                      "birthDate": "2002-01-01",
+                      "phone": "01012345678"
+                    }
+                  }
+                  """;
+            }
+            else if (action == "adminSubmitManualLog")
+            {
+                ManualLogCount++;
+                LastManualLogType = payload.GetProperty("logType").GetString() ?? "";
+                LastManualCompanionCount = payload
+                    .GetProperty("data")
+                    .GetProperty("companions")
+                    .GetArrayLength();
+                json = """{"ok":true,"date":"2026-07-28","logCreated":true,"linkedReservation":false}""";
             }
             else
             {

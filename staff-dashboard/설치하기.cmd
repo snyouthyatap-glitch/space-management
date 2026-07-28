@@ -4,4 +4,5 @@ if errorlevel 1 (
   echo.
   echo Installation failed.
   pause
+  exit /b 1
 )

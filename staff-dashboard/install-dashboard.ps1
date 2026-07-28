@@ -20,14 +20,23 @@ Get-Process -ErrorAction SilentlyContinue |
         if (-not $_.CloseMainWindow()) {
             Stop-Process -Id $_.Id -Force
         } else {
-            $_.WaitForExit(5000)
+            [void]$_.WaitForExit(5000)
             if (-not $_.HasExited) {
                 Stop-Process -Id $_.Id -Force
             }
         }
+        try { [void]$_.WaitForExit(5000) } catch {}
     }
 
-Copy-Item -LiteralPath $sourceExe -Destination $installedExe -Force
+for ($attempt = 1; $attempt -le 5; $attempt++) {
+    try {
+        Copy-Item -LiteralPath $sourceExe -Destination $installedExe -Force
+        break
+    } catch [System.IO.IOException] {
+        if ($attempt -eq 5) { throw }
+        Start-Sleep -Milliseconds 500
+    }
+}
 
 $shell = New-Object -ComObject WScript.Shell
 $desktopShortcut = $shell.CreateShortcut(

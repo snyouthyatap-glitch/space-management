@@ -6,6 +6,8 @@ internal sealed class MainForm : Form
 {
     private const string SheetUrl =
         "https://docs.google.com/spreadsheets/d/1sPVvNPMl0KqQHDpCqNnM4RuOUw73DpgzK7IqcMDlVYs/edit?usp=sharing";
+    private const string AdminPageUrl =
+        "https://snyouthyatap-glitch.github.io/space-management/admin.html";
     private const string SmartPlaceUrl =
         "https://new.smartplace.naver.com/bizes/place/6800416?bookingBusinessId=1002115";
     private const string ChromePath = @"C:\Program Files\Google\Chrome\Application\chrome.exe";
@@ -33,6 +35,7 @@ internal sealed class MainForm : Form
     private string _loadedCalendarMonth = "";
     private List<CalendarEntry> _calendarEntries = [];
     private bool _refreshing;
+    private bool _updatingReservationStatus;
     private bool _runtimeSyncCompleted;
     private bool _allowClose;
     private readonly bool _demoMode;
@@ -146,6 +149,21 @@ internal sealed class MainForm : Form
             WrapContents = false,
             Padding = new Padding(0, 12, 0, 0)
         };
+        actions.Controls.Add(CreateActionButton("수동 일지", async (_, _) =>
+        {
+            _pollTimer.Stop();
+            try
+            {
+                using var dialog = new ManualLogForm(_client, _settings, _password);
+                dialog.ShowDialog(this);
+            }
+            finally
+            {
+                _pollTimer.Start();
+            }
+            await RefreshDashboardAsync();
+        }, Color.FromArgb(55, 108, 142)));
+        actions.Controls.Add(CreateActionButton("관리자 페이지", (_, _) => OpenChrome(AdminPageUrl), Color.FromArgb(233, 63, 111)));
         actions.Controls.Add(CreateActionButton("시트 열기", (_, _) => OpenChrome(SheetUrl), Color.FromArgb(74, 156, 68)));
         actions.Controls.Add(CreateActionButton("네이버 스마트플레이스", (_, _) => OpenChrome(SmartPlaceUrl), Color.FromArgb(3, 199, 90)));
         actions.Controls.Add(CreateActionButton("새로고침", async (_, _) => await RefreshDashboardAsync(), Color.FromArgb(70, 66, 64)));
@@ -293,10 +311,46 @@ internal sealed class MainForm : Form
         _reservationsGrid.Columns.Add("status", "상태");
         _reservationsGrid.Columns["time"]!.Width = 96;
         _reservationsGrid.Columns["reservation"]!.AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
-        _reservationsGrid.Columns["status"]!.Width = 82;
+        _reservationsGrid.Columns["status"]!.Width = 92;
+        ConfigureReservationContextMenu();
         panel.Controls.Add(_reservationsGrid);
         _reservationsGrid.BringToFront();
         return panel;
+    }
+
+    private void ConfigureReservationContextMenu()
+    {
+        var menu = new ContextMenuStrip();
+        foreach (var status in new[] { "확정", "이용완료", "취소", "노쇼" })
+        {
+            var item = new ToolStripMenuItem(status + "로 변경") { Tag = status };
+            item.Click += async (_, _) => await UpdateSelectedReservationStatusAsync(status);
+            menu.Items.Add(item);
+        }
+
+        menu.Opening += (_, eventArgs) =>
+        {
+            var mouse = _reservationsGrid.PointToClient(Cursor.Position);
+            var hit = _reservationsGrid.HitTest(mouse.X, mouse.Y);
+            if (hit.RowIndex < 0 ||
+                _reservationsGrid.Rows[hit.RowIndex].Tag is not CalendarEntry entry ||
+                entry.Source != "naver")
+            {
+                eventArgs.Cancel = true;
+                return;
+            }
+
+            _reservationsGrid.ClearSelection();
+            _reservationsGrid.Rows[hit.RowIndex].Selected = true;
+            _reservationsGrid.CurrentCell = _reservationsGrid.Rows[hit.RowIndex].Cells[
+                Math.Max(0, hit.ColumnIndex)];
+            foreach (ToolStripMenuItem menuItem in menu.Items)
+                menuItem.Checked = string.Equals(
+                    menuItem.Tag?.ToString(),
+                    entry.Status,
+                    StringComparison.Ordinal);
+        };
+        _reservationsGrid.ContextMenuStrip = menu;
     }
 
     private Control BuildStatusBar()
@@ -312,7 +366,7 @@ internal sealed class MainForm : Form
 
     private async Task RefreshDashboardAsync()
     {
-        if (_refreshing || _demoMode) return;
+        if (_refreshing || _updatingReservationStatus || _demoMode) return;
         _refreshing = true;
         _statusLabel.Text = "운영 정보를 확인하는 중...";
         try
@@ -471,6 +525,7 @@ internal sealed class MainForm : Form
                 $"{item.StartTime}~{item.EndTime}",
                 $"{item.PlaceName} · {item.Name}",
                 state);
+            _reservationsGrid.Rows[rowIndex].Tag = item;
             if (item.Cancelled)
                 _reservationsGrid.Rows[rowIndex].DefaultCellStyle.ForeColor = Color.Gray;
             else if (item.Submitted)
@@ -493,6 +548,71 @@ internal sealed class MainForm : Form
             Cancelled = item.Cancelled,
             Submitted = item.Submitted
         }).ToList();
+
+    private async Task UpdateSelectedReservationStatusAsync(string status)
+    {
+        if (_updatingReservationStatus ||
+            _reservationsGrid.SelectedRows.Count == 0 ||
+            _reservationsGrid.SelectedRows[0].Tag is not CalendarEntry entry ||
+            entry.Source != "naver")
+        {
+            return;
+        }
+
+        if (string.Equals(entry.Status, status, StringComparison.Ordinal))
+        {
+            _statusLabel.Text = $"예약 {entry.Id}은(는) 이미 {status} 상태입니다.";
+            return;
+        }
+
+        if (status is "취소" or "노쇼")
+        {
+            var confirmed = MessageBox.Show(
+                this,
+                $"{entry.PlaceName} · {entry.Name}\n{entry.Date} {entry.StartTime}~{entry.EndTime}\n\n" +
+                $"예약 상태를 '{status}'로 변경할까요?",
+                "예약 상태 변경",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning,
+                MessageBoxDefaultButton.Button2);
+            if (confirmed != DialogResult.Yes) return;
+        }
+
+        _updatingReservationStatus = true;
+        var updated = false;
+        _statusLabel.Text = $"예약 {entry.Id} 상태를 {status}(으)로 변경하는 중...";
+        try
+        {
+            using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            var result = await _client.UpdateReservationStatusAsync(
+                _settings,
+                _password,
+                entry.Id.Replace("naver:", "", StringComparison.Ordinal),
+                status,
+                cancellation.Token);
+            entry.Status = result.Status;
+            entry.Cancelled = result.Cancelled;
+            RenderCalendarEntries();
+            updated = true;
+            _statusLabel.Text = $"예약 {result.ReservationId} 상태를 {result.Status}(으)로 변경했습니다.";
+        }
+        catch (Exception exception)
+        {
+            _statusLabel.Text = "상태 변경 오류 · " + exception.Message;
+            MessageBox.Show(
+                this,
+                exception.Message,
+                "예약 상태 변경 실패",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+        finally
+        {
+            _updatingReservationStatus = false;
+        }
+
+        if (updated) await RefreshDashboardAsync();
+    }
 
     private void RenderSummary(DashboardSummary summary)
     {

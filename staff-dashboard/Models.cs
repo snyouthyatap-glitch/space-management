@@ -177,6 +177,138 @@ internal sealed class DashboardSnapshot
     public DashboardSummary Summary { get; set; } = new();
 }
 
+internal sealed class ReservationStatusUpdate
+{
+    [JsonPropertyName("ok")]
+    public bool Ok { get; set; }
+
+    [JsonPropertyName("error")]
+    public string Error { get; set; } = "";
+
+    [JsonPropertyName("reservationId")]
+    public string ReservationId { get; set; } = "";
+
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "";
+
+    [JsonPropertyName("cancelled")]
+    public bool Cancelled { get; set; }
+}
+
+internal sealed class AdminMemberLookup
+{
+    [JsonPropertyName("ok")]
+    public bool Ok { get; set; }
+
+    [JsonPropertyName("error")]
+    public string Error { get; set; } = "";
+
+    [JsonPropertyName("member")]
+    public AdminMember Member { get; set; } = new();
+}
+
+internal sealed class AdminMember
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = "";
+
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = "";
+
+    [JsonPropertyName("gender")]
+    public string Gender { get; set; } = "";
+
+    [JsonPropertyName("age")]
+    public int Age { get; set; }
+
+    [JsonPropertyName("birthDate")]
+    public string BirthDate { get; set; } = "";
+
+    [JsonPropertyName("phone")]
+    public string Phone { get; set; } = "";
+}
+
+internal sealed class ManualLogRequest
+{
+    [JsonPropertyName("subjectType")]
+    public string SubjectType { get; set; } = "member";
+
+    [JsonPropertyName("memberId")]
+    public string MemberId { get; set; } = "";
+
+    [JsonPropertyName("guest")]
+    public ManualGuest? Guest { get; set; }
+
+    [JsonPropertyName("logType")]
+    public string LogType { get; set; } = "visit";
+
+    [JsonPropertyName("date")]
+    public string Date { get; set; } = "";
+
+    [JsonPropertyName("data")]
+    public ManualLogData Data { get; set; } = new();
+
+    [JsonPropertyName("requestId")]
+    public string RequestId { get; set; } = "";
+}
+
+internal sealed class ManualGuest
+{
+    [JsonPropertyName("token")]
+    public string Token { get; set; } = "";
+
+    [JsonPropertyName("gender")]
+    public string Gender { get; set; } = "";
+
+    [JsonPropertyName("age")]
+    public int Age { get; set; }
+}
+
+internal sealed class ManualLogData
+{
+    [JsonPropertyName("count")]
+    public int Count { get; set; }
+
+    [JsonPropertyName("startTime")]
+    public string StartTime { get; set; } = "";
+
+    [JsonPropertyName("endTime")]
+    public string EndTime { get; set; } = "";
+
+    [JsonPropertyName("purpose")]
+    public string Purpose { get; set; } = "";
+
+    [JsonPropertyName("companions")]
+    public List<ManualCompanion> Companions { get; set; } = [];
+}
+
+internal sealed class ManualCompanion
+{
+    [JsonPropertyName("gender")]
+    public string Gender { get; set; } = "";
+
+    [JsonPropertyName("age")]
+    public int Age { get; set; }
+}
+
+internal sealed class ManualLogResult
+{
+    [JsonPropertyName("ok")]
+    public bool Ok { get; set; }
+
+    [JsonPropertyName("error")]
+    public string Error { get; set; } = "";
+
+    [JsonPropertyName("date")]
+    public string Date { get; set; } = "";
+
+    [JsonPropertyName("logCreated")]
+    public bool LogCreated { get; set; }
+
+    [JsonPropertyName("linkedReservation")]
+    public bool LinkedReservation { get; set; }
+}
+
 internal sealed class AdminChallenge
 {
     [JsonPropertyName("ok")]

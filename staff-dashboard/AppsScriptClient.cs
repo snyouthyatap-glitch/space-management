@@ -58,7 +58,123 @@ internal sealed class AppsScriptClient
         return snapshot;
     }
 
+    public async Task<ReservationStatusUpdate> UpdateReservationStatusAsync(
+        DashboardSettings settings,
+        string password,
+        string reservationId,
+        string status,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(settings.AppsScriptUrl))
+            throw new InvalidOperationException("Apps Script 주소를 설정해 주세요.");
+        if (string.IsNullOrWhiteSpace(password))
+            throw new InvalidOperationException("관리자 비밀번호를 설정해 주세요.");
+
+        if (string.IsNullOrWhiteSpace(_sessionToken))
+            await LoginAsync(settings.AppsScriptUrl, password, cancellationToken);
+
+        var result = await GetAsync<ReservationStatusUpdate>(
+            settings.AppsScriptUrl,
+            "adminUpdateReservationStatus",
+            new { adminSession = _sessionToken, reservationId, status },
+            cancellationToken);
+
+        if (!result.Ok && result.Error.Contains("인증", StringComparison.Ordinal))
+        {
+            _sessionToken = "";
+            await LoginAsync(settings.AppsScriptUrl, password, cancellationToken);
+            result = await GetAsync<ReservationStatusUpdate>(
+                settings.AppsScriptUrl,
+                "adminUpdateReservationStatus",
+                new { adminSession = _sessionToken, reservationId, status },
+                cancellationToken);
+        }
+
+        if (!result.Ok)
+            throw new InvalidOperationException(result.Error);
+        return result;
+    }
+
+    public async Task<AdminMember> LookupMemberAsync(
+        DashboardSettings settings,
+        string password,
+        string phone,
+        CancellationToken cancellationToken)
+    {
+        var result = await ExecuteAdminActionAsync<AdminMemberLookup>(
+            settings,
+            password,
+            "adminLookupMember",
+            session => new { adminSession = session, phone },
+            cancellationToken,
+            response => response.Ok,
+            response => response.Error);
+        return result.Member;
+    }
+
+    public Task<ManualLogResult> SubmitManualLogAsync(
+        DashboardSettings settings,
+        string password,
+        ManualLogRequest request,
+        CancellationToken cancellationToken) =>
+        ExecuteAdminActionAsync<ManualLogResult>(
+            settings,
+            password,
+            "adminSubmitManualLog",
+            session => new
+            {
+                adminSession = session,
+                subjectType = request.SubjectType,
+                memberId = request.MemberId,
+                guest = request.Guest,
+                logType = request.LogType,
+                date = request.Date,
+                data = request.Data,
+                requestId = request.RequestId
+            },
+            cancellationToken,
+            response => response.Ok,
+            response => response.Error);
+
     public void ResetSession() => _sessionToken = "";
+
+    private async Task<T> ExecuteAdminActionAsync<T>(
+        DashboardSettings settings,
+        string password,
+        string action,
+        Func<string, object> payloadFactory,
+        CancellationToken cancellationToken,
+        Func<T, bool> isSuccess,
+        Func<T, string> getError)
+    {
+        if (string.IsNullOrWhiteSpace(settings.AppsScriptUrl))
+            throw new InvalidOperationException("Apps Script 주소를 설정해 주세요.");
+        if (string.IsNullOrWhiteSpace(password))
+            throw new InvalidOperationException("관리자 비밀번호를 설정해 주세요.");
+
+        if (string.IsNullOrWhiteSpace(_sessionToken))
+            await LoginAsync(settings.AppsScriptUrl, password, cancellationToken);
+
+        var result = await GetAsync<T>(
+            settings.AppsScriptUrl,
+            action,
+            payloadFactory(_sessionToken),
+            cancellationToken);
+        if (!isSuccess(result) && getError(result).Contains("인증", StringComparison.Ordinal))
+        {
+            _sessionToken = "";
+            await LoginAsync(settings.AppsScriptUrl, password, cancellationToken);
+            result = await GetAsync<T>(
+                settings.AppsScriptUrl,
+                action,
+                payloadFactory(_sessionToken),
+                cancellationToken);
+        }
+
+        if (!isSuccess(result))
+            throw new InvalidOperationException(getError(result));
+        return result;
+    }
 
     private async Task LoginAsync(string url, string password, CancellationToken cancellationToken)
     {
