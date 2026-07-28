@@ -134,7 +134,7 @@ function dispatchWebAction_(action, payload) {
   if (action === 'adminChallenge') return handleAdminChallenge_();
   if (action === 'adminLogin') return handleAdminLogin_(payload);
   if (action.indexOf('admin') === 0) {
-    requireAdminSession_(payload);
+    requireAdminSession_(payload, action !== 'adminDashboardSnapshot');
   } else {
     requireEntryToken_(payload);
   }
@@ -148,6 +148,8 @@ function dispatchWebAction_(action, payload) {
       return handleAdminLookupMember_(payload);
     case 'adminSubmitManualLog':
       return handleAdminSubmitManualLog_(payload);
+    case 'adminDashboardSnapshot':
+      return handleAdminDashboardSnapshot_(payload);
     case 'resolveFacilityEntry':
       return handleResolveFacilityEntry_(payload);
     case 'updateMemberBirthDate':
@@ -231,14 +233,286 @@ function handleAdminLogin_(payload) {
   };
 }
 
-function requireAdminSession_(payload) {
+function requireAdminSession_(payload, refreshSession) {
   const sessionToken = str_(payload && payload.adminSession);
   const cache = CacheService.getScriptCache();
   const key = 'admin-session:' + sessionToken;
   if (!sessionToken || !cache.get(key)) {
     throw new Error('관리자 인증이 만료되었습니다. 다시 로그인해 주세요.');
   }
-  cache.put(key, '1', ADMIN_SESSION_SECONDS);
+  if (refreshSession !== false) cache.put(key, '1', ADMIN_SESSION_SECONDS);
+}
+
+function handleAdminDashboardSnapshot_(payload) {
+  const recentLimit = Math.min(500, Math.max(20, Number(payload && payload.limit) || 100));
+  const calendarEntries = getStaffCalendarEntries_(payload && payload.calendarMonth);
+  return {
+    ok: true,
+    serverTime: nowText_(),
+    events: getStaffDashboardEvents_(recentLimit),
+    todayReservations: getStaffTodayReservations_(calendarEntries),
+    calendarEntries: calendarEntries,
+    summary: getStaffDashboardSummary_()
+  };
+}
+
+function getStaffDashboardEvents_(limit) {
+  const events = [];
+  appendStaffEventsFromSheet_(
+    events,
+    SHEET_NAMES.VISIT_LOGS,
+    HEADERS.visitLogs,
+    'visit',
+    '방문',
+    limit
+  );
+  appendStaffEventsFromSheet_(
+    events,
+    SHEET_NAMES.CAREER_LOGS,
+    HEADERS.roomLogs,
+    'career',
+    '커리어존',
+    limit
+  );
+  appendStaffEventsFromSheet_(
+    events,
+    SHEET_NAMES.CONNECT_LOGS,
+    HEADERS.roomLogs,
+    'connect',
+    '커넥트룸',
+    limit
+  );
+  return events.sort(function(a, b) {
+    return str_(b.occurredAt).localeCompare(str_(a.occurredAt));
+  }).slice(0, limit);
+}
+
+function appendStaffEventsFromSheet_(target, sheetName, headers, category, categoryLabel, limit) {
+  const sheet = getOrCreateSheet_(sheetName, headers);
+  if (sheet.getLastRow() < 2) return;
+  const rowCount = Math.min(limit, sheet.getLastRow() - 1);
+  const startRow = sheet.getLastRow() - rowCount + 1;
+  const values = sheet.getRange(startRow, 1, rowCount, headers.length).getValues();
+  const index = {};
+  headers.forEach(function(header, column) { index[header] = column; });
+
+  values.forEach(function(row, offset) {
+    const storedLogId = str_(row[index.logId]);
+    const date = normalizeSheetDate_(row[index.date]);
+    if (!storedLogId && !date) return;
+    const logId = str_(storedLogId, sheetName + ':' + String(startRow + offset));
+    const createdAt = normalizeDashboardDateTime_(row[index.createdAt], date);
+    const name = str_(row[index.name], category === 'visit' ? '방문자' : '이용자');
+    const startTime = category === 'visit' ? '' : normalizeSheetTime_(row[index.startTime]);
+    const endTime = category === 'visit' ? '' : normalizeSheetTime_(row[index.endTime]);
+    const purpose = category === 'visit' ? '' : str_(row[index.purpose]);
+    const headcount = category === 'visit' ? 1 : safePositiveInteger_(row[index.headcount], 1);
+    const createdBy = str_(row[index.createdBy]);
+    const linkedReservationId = category === 'visit' ? '' : str_(row[index.linkedReservationId]);
+    target.push({
+      id: category + ':' + logId,
+      category: category,
+      categoryLabel: categoryLabel,
+      notificationEligible: category !== 'visit' &&
+        createdBy === 'self' &&
+        !linkedReservationId,
+      origin: linkedReservationId ? 'naver' : (createdBy === 'admin' ? 'admin' : 'onsite'),
+      name: name,
+      date: date,
+      startTime: startTime,
+      endTime: endTime,
+      purpose: purpose,
+      headcount: headcount,
+      occurredAt: createdAt
+    });
+  });
+}
+
+function getStaffTodayReservations_(calendarEntries) {
+  const date = today_();
+  return (calendarEntries || [])
+    .filter(function(row) {
+      return row.source === 'naver' && row.date === date;
+    })
+    .map(function(row) {
+      return {
+        id: str_(row.id).replace(/^naver:/, ''),
+        status: str_(row.status),
+        bookerName: str_(row.name),
+        spaceType: str_(row.spaceType),
+        placeName: str_(row.placeName),
+        date: date,
+        startTime: normalizeSheetTime_(row.startTime),
+        endTime: normalizeSheetTime_(row.endTime),
+        headcount: safePositiveInteger_(row.headcount, 1),
+        purpose: str_(row.purpose),
+        cancelled: Boolean(row.cancelled),
+        submitted: Boolean(row.submitted)
+      };
+    })
+    .sort(function(a, b) {
+      return str_(a.startTime).localeCompare(str_(b.startTime));
+    });
+}
+
+function getStaffCalendarEntries_(requestedMonth) {
+  const fallbackMonth = today_().slice(0, 7);
+  const monthKey = /^\d{4}-\d{2}$/.test(str_(requestedMonth))
+    ? str_(requestedMonth)
+    : fallbackMonth;
+  const cache = CacheService.getScriptCache();
+  const cacheKey = 'staff-dashboard-calendar-v1:' + monthKey;
+  const cached = cache.get(cacheKey);
+  if (cached) {
+    try {
+      return JSON.parse(cached);
+    } catch (error) {
+      cache.remove(cacheKey);
+    }
+  }
+
+  const entries = getRowsAsObjects_(SHEET_NAMES.NAVER_SYNC, HEADERS.naverSync)
+    .filter(function(row) {
+      return normalizeSheetDate_(row.usageDate).slice(0, 7) === monthKey;
+    })
+    .map(function(row) {
+      return {
+        id: 'naver:' + str_(row.reservationId),
+        source: 'naver',
+        date: normalizeSheetDate_(row.usageDate),
+        startTime: normalizeSheetTime_(row.startTime),
+        endTime: normalizeSheetTime_(row.endTime),
+        placeName: getReservationSpaceLabel_(str_(row.spaceType)),
+        spaceType: str_(row.spaceType),
+        name: str_(row.bookerName),
+        headcount: safePositiveInteger_(row.headcount, 1),
+        purpose: str_(row.purpose),
+        status: str_(row.status),
+        cancelled: isCancelledNaverStatus_(row.status),
+        submitted: Boolean(str_(row.usageLogId))
+      };
+    });
+
+  [
+    { sheetName: SHEET_NAMES.CAREER_LOGS, label: '커리어존' },
+    { sheetName: SHEET_NAMES.CONNECT_LOGS, label: '커넥트룸' }
+  ].forEach(function(source) {
+    getRowsAsObjects_(source.sheetName, HEADERS.roomLogs)
+      .filter(function(row) {
+        return normalizeSheetDate_(row.date).slice(0, 7) === monthKey;
+      })
+      .forEach(function(row) {
+        entries.push({
+          id: 'usage:' + str_(row.logId),
+          source: 'usage',
+          date: normalizeSheetDate_(row.date),
+          startTime: normalizeSheetTime_(row.startTime),
+          endTime: normalizeSheetTime_(row.endTime),
+          placeName: source.label,
+          spaceType: str_(row.spaceType),
+          name: str_(row.name),
+          headcount: safePositiveInteger_(row.headcount, 1),
+          purpose: str_(row.purpose),
+          status: '이용완료',
+          cancelled: false,
+          submitted: true
+        });
+      });
+  });
+
+  const sorted = entries.sort(function(a, b) {
+    return (a.date + ' ' + a.startTime).localeCompare(b.date + ' ' + b.startTime);
+  });
+  try {
+    cache.put(cacheKey, JSON.stringify(sorted), 30);
+  } catch (error) {
+    Logger.log('직원 대시보드 달력 캐시 생략: ' + (error.message || error));
+  }
+  return sorted;
+}
+
+function getStaffDashboardSummary_() {
+  const cache = CacheService.getScriptCache();
+  const cacheKey = 'staff-dashboard-summary-v2';
+  const cached = cache.get(cacheKey);
+  if (cached) {
+    try {
+      return JSON.parse(cached);
+    } catch (error) {
+      cache.remove(cacheKey);
+    }
+  }
+
+  const today = today_();
+  const monthStart = today.substring(0, 7) + '-01';
+  const todayParts = today.split('-').map(Number);
+  const todayDate = new Date(todayParts[0], todayParts[1] - 1, todayParts[2]);
+  const mondayOffset = (todayDate.getDay() + 6) % 7;
+  todayDate.setDate(todayDate.getDate() - mondayOffset);
+  const weekStart = Utilities.formatDate(todayDate, TZ, 'yyyy-MM-dd');
+  const visits = getRowsAsObjects_(SHEET_NAMES.VISIT_LOGS, HEADERS.visitLogs);
+  const visitorStats = visits.reduce(function(stats, row) {
+    const date = normalizeSheetDate_(row.date);
+    if (date === today) stats.daily += 1;
+    if (date >= weekStart && date <= today) stats.weekly += 1;
+    if (date >= monthStart && date <= today) stats.monthly += 1;
+    return stats;
+  }, { daily: 0, weekly: 0, monthly: 0 });
+
+  const memberSheet = getOrCreateSheet_(SHEET_NAMES.MEMBERS, HEADERS.members);
+  const memberContext = memberHeaderContext_(memberSheet);
+  const memberIdColumn = memberColumn_(memberSheet, 'memberId', memberContext);
+  const phoneColumn = memberColumn_(memberSheet, 'phone', memberContext);
+  const statusColumn = memberColumn_(memberSheet, 'status', memberContext);
+  let activeMemberCount = 0;
+  if (memberSheet.getLastRow() >= 2) {
+    const firstColumn = Math.min(memberIdColumn, phoneColumn, statusColumn);
+    const lastColumn = Math.max(memberIdColumn, phoneColumn, statusColumn);
+    const width = lastColumn - firstColumn + 1;
+    const memberIdOffset = memberIdColumn - firstColumn;
+    const phoneOffset = phoneColumn - firstColumn;
+    const statusOffset = statusColumn - firstColumn;
+    const activeMemberKeys = memberSheet
+      .getRange(2, firstColumn, memberSheet.getLastRow() - 1, width)
+      .getValues()
+      .reduce(function(keys, row) {
+        const memberId = str_(row[memberIdOffset]);
+        const active = str_(row[statusOffset], 'approved') === 'approved';
+        if (!memberId || !active) return keys;
+        const phone = normalizeStoredMemberPhone_(row[phoneOffset]);
+        const key = isValidPhone_(phone) ? 'phone:' + phone : 'member:' + memberId;
+        keys[key] = true;
+        return keys;
+      }, {});
+    activeMemberCount = Object.keys(activeMemberKeys).length;
+  }
+
+  const summary = {
+    visitorStats: visitorStats,
+    activeMemberCount: activeMemberCount,
+    weekStart: weekStart,
+    monthStart: monthStart
+  };
+  cache.put(cacheKey, JSON.stringify(summary), 60);
+  return summary;
+}
+
+function normalizeDashboardDateTime_(value, fallbackDate) {
+  if (value instanceof Date && !isNaN(value.getTime())) {
+    return Utilities.formatDate(value, TZ, 'yyyy-MM-dd HH:mm:ss');
+  }
+  const text = str_(value);
+  if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2})?$/.test(text)) {
+    return text.replace('T', ' ') + (text.length === 16 ? ':00' : '');
+  }
+  return str_(fallbackDate, today_()) + ' 00:00:00';
+}
+
+function safePositiveInteger_(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 1
+    ? Math.floor(number)
+    : Math.max(1, Number(fallback) || 1);
 }
 
 function handleAdminLookupMember_(payload) {
@@ -320,7 +594,7 @@ function handleAdminSubmitManualLog_(payload) {
     throw new Error('수동 일지 종류를 확인해 주세요.');
   }
 
-  return withScriptLock_(function() {
+  const result = withScriptLock_(function() {
     if (logType === 'visit') {
       const visit = ensureVisitLogLocked_(member, date, visitSource, [], 'admin');
       return {
@@ -471,6 +745,12 @@ function handleAdminSubmitManualLog_(payload) {
       date: date
     };
   });
+  try {
+    refreshArchivedPublicSheetsForAdminDate_(date, logType);
+  } catch (error) {
+    Logger.log('과거 월 간소화 시트 갱신 오류 (' + date + '): ' + (error.message || error));
+  }
+  return result;
 }
 
 function handleResolveFacilityEntry_(payload) {
@@ -1325,10 +1605,12 @@ function ensurePublicFormulaSheetSchemas_() {
     const formulaCell = sheet.getRange('A2');
     const formula = str_(formulaCell.getFormula());
     const formulaError = /^#(?:REF|VALUE|ERROR|N\/A)!?$/i.test(str_(formulaCell.getDisplayValue()));
+    const sortedFormulaCurrent = formula.indexOf('SORT(') !== -1 &&
+      formula.indexOf('CHOOSECOLS(') !== -1;
     const roomFormulaCurrent = item.name !== SHEET_NAMES.CAREER && item.name !== SHEET_NAMES.CONNECT
       ? true
       : formula.indexOf('!AC2:INDEX(') !== -1;
-    if (!headersMatch || !formula || formulaError || !roomFormulaCurrent) {
+    if (!headersMatch || !formula || formulaError || !sortedFormulaCurrent || !roomFormulaCurrent) {
       if (item.name === SHEET_NAMES.CAREER) backfillRoomSummaryColumns_(SHEET_NAMES.CAREER_LOGS);
       if (item.name === SHEET_NAMES.CONNECT) backfillRoomSummaryColumns_(SHEET_NAMES.CONNECT_LOGS);
       installPublicSheetFormula_(sheet, item.name, item.headers, monthKey, true);
@@ -1351,25 +1633,61 @@ function installPublicSheetFormula_(sheet, sheetName, headers, monthKey, preserv
 function buildPublicSheetFormula_(sheetName, monthKey) {
   if (sheetName === SHEET_NAMES.VISIT) {
     return '=IFERROR(LET(last,MAX(2,COUNTA(APP_VISIT_LOGS!A:A)),dates,APP_VISIT_LOGS!I2:INDEX(APP_VISIT_LOGS!I:I,last),' +
-      'data,FILTER(HSTACK(dates,APP_VISIT_LOGS!E2:INDEX(APP_VISIT_LOGS!E:E,last),APP_VISIT_LOGS!F2:INDEX(APP_VISIT_LOGS!F:F,last)),' +
-      'IFERROR(TEXT(dates,"yyyy-mm"),LEFT(dates&"",7))="' + monthKey + '"),HSTACK(SEQUENCE(ROWS(data)),data)),"")';
+      'filtered,FILTER(HSTACK(dates,APP_VISIT_LOGS!E2:INDEX(APP_VISIT_LOGS!E:E,last),APP_VISIT_LOGS!F2:INDEX(APP_VISIT_LOGS!F:F,last),' +
+      'APP_VISIT_LOGS!L2:INDEX(APP_VISIT_LOGS!L:L,last),SEQUENCE(ROWS(dates))),' +
+      'IFERROR(TEXT(dates,"yyyy-mm"),LEFT(dates&"",7))="' + monthKey + '"),' +
+      'sorted,SORT(filtered,1,TRUE,4,TRUE,5,TRUE),data,CHOOSECOLS(sorted,1,2,3),HSTACK(SEQUENCE(ROWS(data)),data)),"")';
   }
   if (sheetName === SHEET_NAMES.PRINTER) {
     return '=IFERROR(LET(last,MAX(2,COUNTA(APP_PRINTER_LOGS!A:A)),dates,APP_PRINTER_LOGS!H2:INDEX(APP_PRINTER_LOGS!H:H,last),' +
-      'data,FILTER(HSTACK(dates,APP_PRINTER_LOGS!D2:INDEX(APP_PRINTER_LOGS!D:D,last),APP_PRINTER_LOGS!E2:INDEX(APP_PRINTER_LOGS!E:E,last),' +
-      'APP_PRINTER_LOGS!I2:INDEX(APP_PRINTER_LOGS!I:I,last)),IFERROR(TEXT(dates,"yyyy-mm"),LEFT(dates&"",7))="' + monthKey + '"),' +
-      'HSTACK(SEQUENCE(ROWS(data)),data)),"")';
+      'filtered,FILTER(HSTACK(dates,APP_PRINTER_LOGS!D2:INDEX(APP_PRINTER_LOGS!D:D,last),APP_PRINTER_LOGS!E2:INDEX(APP_PRINTER_LOGS!E:E,last),' +
+      'APP_PRINTER_LOGS!I2:INDEX(APP_PRINTER_LOGS!I:I,last),APP_PRINTER_LOGS!K2:INDEX(APP_PRINTER_LOGS!K:K,last),SEQUENCE(ROWS(dates))),' +
+      'IFERROR(TEXT(dates,"yyyy-mm"),LEFT(dates&"",7))="' + monthKey + '"),' +
+      'sorted,SORT(filtered,1,TRUE,5,TRUE,6,TRUE),data,CHOOSECOLS(sorted,1,2,3,4),HSTACK(SEQUENCE(ROWS(data)),data)),"")';
   }
 
   const source = sheetName === SHEET_NAMES.CAREER ? 'APP_CAREER_LOGS' : 'APP_CONNECT_LOGS';
   return '=IFERROR(LET(last,MAX(2,COUNTA(' + source + '!A:A)),dates,' + source + '!J2:INDEX(' + source + '!J:J,last),' +
-    'data,FILTER(HSTACK(dates,' + source + '!M2:INDEX(' + source + '!M:M,last),' + source + '!T2:INDEX(' + source + '!T:T,last),' +
+    'filtered,FILTER(HSTACK(dates,' + source + '!M2:INDEX(' + source + '!M:M,last),' + source + '!T2:INDEX(' + source + '!T:T,last),' +
     source + '!U2:INDEX(' + source + '!U:U,last),' + source + '!K2:INDEX(' + source + '!K:K,last),' + source + '!L2:INDEX(' + source + '!L:L,last),' +
     source + '!V2:INDEX(' + source + '!V:V,last),' + source + '!W2:INDEX(' + source + '!W:W,last),' + source + '!X2:INDEX(' + source + '!X:X,last),' +
     source + '!Y2:INDEX(' + source + '!Y:Y,last),' + source + '!Z2:INDEX(' + source + '!Z:Z,last),' + source + '!AA2:INDEX(' + source + '!AA:AA,last),' +
-    source + '!AB2:INDEX(' + source + '!AB:AB,last),' + source + '!AC2:INDEX(' + source + '!AC:AC,last)),' +
+    source + '!AB2:INDEX(' + source + '!AB:AB,last),' + source + '!AC2:INDEX(' + source + '!AC:AC,last),' +
+    source + '!Q2:INDEX(' + source + '!Q:Q,last),SEQUENCE(ROWS(dates))),' +
     'IFERROR(TEXT(dates,"yyyy-mm"),LEFT(dates&"",7))="' + monthKey + '"),' +
+    'sorted,SORT(filtered,1,TRUE,15,TRUE,16,TRUE),data,CHOOSECOLS(sorted,1,2,3,4,5,6,7,8,9,10,11,12,13,14),' +
     'HSTACK(SEQUENCE(ROWS(data)),data)),"")';
+}
+
+function refreshArchivedPublicSheetsForAdminDate_(date, logType) {
+  const monthKey = normalizeSheetDate_(date).slice(0, 7);
+  const currentMonthKey = Utilities.formatDate(new Date(), TZ, 'yyyy-MM');
+  if (!isValidMonthKey_(monthKey) || monthKey === currentMonthKey) return;
+
+  const targets = [
+    { name: SHEET_NAMES.VISIT, headers: HEADERS.visit }
+  ];
+  if (logType === 'printer') {
+    targets.push({ name: SHEET_NAMES.PRINTER, headers: HEADERS.printer });
+  } else if (logType === 'careerRoom1' || logType === 'careerRoom2') {
+    targets.push({ name: SHEET_NAMES.CAREER, headers: HEADERS.career });
+  } else if (logType === 'connectRoom') {
+    targets.push({ name: SHEET_NAMES.CONNECT, headers: HEADERS.connect });
+  }
+
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  const archiveSheets = targets.map(function(target) {
+    const archiveName = target.name + '_' + monthKey;
+    const sheet = spreadsheet.getSheetByName(archiveName) || spreadsheet.insertSheet(archiveName);
+    installPublicSheetFormula_(sheet, target.name, target.headers, monthKey, false);
+    return sheet;
+  });
+
+  SpreadsheetApp.flush();
+  archiveSheets.forEach(function(sheet) {
+    freezeSheetFormulasAsValues_(sheet);
+    sheet.hideSheet();
+  });
 }
 
 function backupPublicSheetIfNeeded_(sheet) {
@@ -1449,6 +1767,11 @@ function getMemberEntryById_(memberId) {
 function updateMemberLastUsedAt_(memberId, date, memberEntry) {
   const entry = memberEntry || getMemberEntryById_(memberId);
   if (!entry) throw new Error('회원 정보를 찾을 수 없습니다.');
+  const headerContext = entry.headerContext || memberHeaderContext_(entry.sheet);
+  if (!headerContext.columnByHeader.lastusedat) {
+    ensureSheetHeaders_(entry.sheet, HEADERS.members);
+    entry.headerContext = memberHeaderContext_(entry.sheet);
+  }
   const lastUsedRange = entry.sheet.getRange(
     entry.rowNumber,
     memberColumn_(entry.sheet, 'lastUsedAt', entry.headerContext)

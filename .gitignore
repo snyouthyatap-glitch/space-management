@@ -4,3 +4,9 @@ RoutineTool/
 *.vbs
 *.txt
 yatap-footcenter.html
+.appdata/
+.dotnet-home/
+staff-dashboard/bin/
+staff-dashboard/obj/
+staff-dashboard/preview.png
+staff-dashboard/publish/
