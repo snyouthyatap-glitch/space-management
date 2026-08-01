@@ -2,6 +2,8 @@ using System.Text.Json;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
+using System.IO.Compression;
+using System.Xml.Linq;
 
 namespace YouthSpring.StaffDashboard;
 
@@ -14,6 +16,8 @@ internal static class SelfTest
         TestSessionExpiryRecoveryAsync().GetAwaiter().GetResult();
         TestReservationStatusUpdateAsync().GetAwaiter().GetResult();
         TestManualLogFlowAsync().GetAwaiter().GetResult();
+        TestMonthlyPerformanceAsync().GetAwaiter().GetResult();
+        TestPerformanceWorkbook();
     }
 
     private static void TestWindowsPasswordProtection()
@@ -45,6 +49,17 @@ internal static class SelfTest
             "purpose": "테스트",
             "headcount": 2,
             "occurredAt": "2026-07-28 15:59:00"
+          }, {
+            "id": "restricted:test",
+            "category": "restricted",
+            "categoryLabel": "이용 제한",
+            "notificationEligible": true,
+            "origin": "onsite",
+            "name": "제한회원",
+            "date": "2026-07-28",
+            "purpose": "만 40세 · 시설 이용 가능 연령 초과",
+            "headcount": 1,
+            "occurredAt": "2026-07-28 15:58:00"
           }],
           "todayReservations": [],
           "summary": {
@@ -58,8 +73,9 @@ internal static class SelfTest
         var snapshot = JsonSerializer.Deserialize<DashboardSnapshot>(json);
         if (snapshot is null ||
             !snapshot.Ok ||
-            snapshot.Events.Count != 1 ||
+            snapshot.Events.Count != 2 ||
             !snapshot.Events[0].NotificationEligible ||
+            snapshot.Events[1].Category != "restricted" ||
             snapshot.Summary.ActiveMemberCount != 4)
         {
             throw new InvalidOperationException("대시보드 응답 처리 테스트에 실패했습니다.");
@@ -157,6 +173,89 @@ internal static class SelfTest
         }
     }
 
+    private static async Task TestMonthlyPerformanceAsync()
+    {
+        var handler = new FakeAppsScriptHandler();
+        using var httpClient = new HttpClient(handler);
+        var client = new AppsScriptClient(httpClient);
+        var report = await client.GetMonthlyPerformanceAsync(
+            new DashboardSettings { AppsScriptUrl = "https://example.test/exec" },
+            FakeAppsScriptHandler.Password,
+            "2026-07",
+            CancellationToken.None);
+
+        if (!report.Ok || report.Month != "2026-07" || report.Summary.Count != 4 ||
+            report.TotalUsers != 12 || report.TotalUniqueUsers != 9 ||
+            report.Daily.Visit.Count != 1 || report.Daily.Connect[0].Male20To24 != 2 ||
+            handler.MonthlyPerformanceCount != 1)
+        {
+            throw new InvalidOperationException("월간 실적 응답 처리 테스트에 실패했습니다.");
+        }
+    }
+
+    private static void TestPerformanceWorkbook()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "youth-spring-performance-test.xlsx");
+        try
+        {
+            PerformanceWorkbookWriter.Write(path, CreatePerformanceReport());
+            using var archive = ZipFile.OpenRead(path);
+            foreach (var entry in archive.Entries.Where(entry =>
+                         entry.FullName.EndsWith(".xml", StringComparison.Ordinal)))
+            {
+                using var stream = entry.Open();
+                _ = XDocument.Load(stream);
+            }
+            var worksheetCount = archive.Entries.Count(entry =>
+                entry.FullName.StartsWith("xl/worksheets/sheet", StringComparison.Ordinal));
+            var workbookEntry = archive.GetEntry("xl/workbook.xml")
+                ?? throw new InvalidOperationException("엑셀 통합 문서 정보가 없습니다.");
+            using var reader = new StreamReader(workbookEntry.Open());
+            var workbookXml = reader.ReadToEnd();
+            if (worksheetCount != 5 || !workbookXml.Contains("월간 요약", StringComparison.Ordinal) ||
+                !workbookXml.Contains("커넥트룸", StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("월간 실적 엑셀 생성 테스트에 실패했습니다.");
+            }
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    private static MonthlyPerformanceReport CreatePerformanceReport() => new()
+    {
+        Ok = true,
+        Month = "2026-07",
+        GeneratedAt = "2026-08-01 12:00:00",
+        Summary =
+        [
+            new() { Key = "visit", Label = "방문자", UniqueUsers = 3, TotalUsers = 4 },
+            new() { Key = "connect", Label = "커넥트룸", UniqueUsers = 2, TotalUsers = 3 },
+            new() { Key = "career", Label = "커리어존", UniqueUsers = 2, TotalUsers = 3 },
+            new() { Key = "printer", Label = "프린터", UniqueUsers = 2, TotalUsers = 2 }
+        ],
+        TotalUsers = 12,
+        TotalUniqueUsers = 9,
+        UniqueBasis = "회원 ID 월간 중복 제거, 식별 불가 비회원 및 동반자는 기록별 인원",
+        Daily = new PerformanceDailyGroups
+        {
+            Visit = CreateDailyRows(1),
+            Connect = CreateDailyRows(2),
+            Career = CreateDailyRows(1),
+            Printer = CreateDailyRows(1)
+        }
+    };
+
+    private static List<PerformanceDailyRow> CreateDailyRows(int firstDayMale20To24) =>
+        [new PerformanceDailyRow
+        {
+            Date = "2026-07-01",
+            Male20To24 = firstDayMale20To24,
+            Total = firstDayMale20To24
+        }];
+
     private sealed class FakeAppsScriptHandler : HttpMessageHandler
     {
         public const string Password = "admin-test-password";
@@ -166,6 +265,7 @@ internal static class SelfTest
         public int StatusUpdateCount { get; private set; }
         public int MemberLookupCount { get; private set; }
         public int ManualLogCount { get; private set; }
+        public int MonthlyPerformanceCount { get; private set; }
         public string LastManualLogType { get; private set; } = "";
         public int LastManualCompanionCount { get; private set; }
 
@@ -259,6 +359,11 @@ internal static class SelfTest
                     .GetProperty("companions")
                     .GetArrayLength();
                 json = """{"ok":true,"date":"2026-07-28","logCreated":true,"linkedReservation":false}""";
+            }
+            else if (action == "adminMonthlyPerformance")
+            {
+                MonthlyPerformanceCount++;
+                json = JsonSerializer.Serialize(CreatePerformanceReport());
             }
             else
             {

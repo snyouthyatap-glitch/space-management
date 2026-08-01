@@ -332,3 +332,111 @@ internal sealed class AdminLogin
     [JsonPropertyName("sessionToken")]
     public string SessionToken { get; set; } = "";
 }
+
+internal sealed class MonthlyPerformanceReport
+{
+    [JsonPropertyName("ok")]
+    public bool Ok { get; set; }
+
+    [JsonPropertyName("error")]
+    public string Error { get; set; } = "";
+
+    [JsonPropertyName("month")]
+    public string Month { get; set; } = "";
+
+    [JsonPropertyName("generatedAt")]
+    public string GeneratedAt { get; set; } = "";
+
+    [JsonPropertyName("summary")]
+    public List<PerformanceSummaryRow> Summary { get; set; } = [];
+
+    [JsonPropertyName("totalUsers")]
+    public int TotalUsers { get; set; }
+
+    [JsonPropertyName("totalUniqueUsers")]
+    public int TotalUniqueUsers { get; set; }
+
+    [JsonPropertyName("daily")]
+    public PerformanceDailyGroups Daily { get; set; } = new();
+
+    [JsonPropertyName("uniqueBasis")]
+    public string UniqueBasis { get; set; } = "";
+}
+
+internal sealed class PerformanceSummaryRow
+{
+    [JsonPropertyName("key")]
+    public string Key { get; set; } = "";
+
+    [JsonPropertyName("label")]
+    public string Label { get; set; } = "";
+
+    [JsonPropertyName("uniqueUsers")]
+    public int UniqueUsers { get; set; }
+
+    [JsonPropertyName("totalUsers")]
+    public int TotalUsers { get; set; }
+}
+
+internal sealed class PerformanceDailyGroups
+{
+    [JsonPropertyName("visit")]
+    public List<PerformanceDailyRow> Visit { get; set; } = [];
+
+    [JsonPropertyName("connect")]
+    public List<PerformanceDailyRow> Connect { get; set; } = [];
+
+    [JsonPropertyName("career")]
+    public List<PerformanceDailyRow> Career { get; set; } = [];
+
+    [JsonPropertyName("printer")]
+    public List<PerformanceDailyRow> Printer { get; set; } = [];
+}
+
+internal sealed class PerformanceDailyRow
+{
+    [JsonPropertyName("date")]
+    public string Date { get; set; } = "";
+
+    [JsonPropertyName("maleUnder19")]
+    public int MaleUnder19 { get; set; }
+
+    [JsonPropertyName("femaleUnder19")]
+    public int FemaleUnder19 { get; set; }
+
+    [JsonPropertyName("male20To24")]
+    public int Male20To24 { get; set; }
+
+    [JsonPropertyName("female20To24")]
+    public int Female20To24 { get; set; }
+
+    [JsonPropertyName("male25To29")]
+    public int Male25To29 { get; set; }
+
+    [JsonPropertyName("female25To29")]
+    public int Female25To29 { get; set; }
+
+    [JsonPropertyName("male30To34")]
+    public int Male30To34 { get; set; }
+
+    [JsonPropertyName("female30To34")]
+    public int Female30To34 { get; set; }
+
+    [JsonPropertyName("male35To39")]
+    public int Male35To39 { get; set; }
+
+    [JsonPropertyName("female35To39")]
+    public int Female35To39 { get; set; }
+
+    [JsonPropertyName("male40Plus")]
+    public int Male40Plus { get; set; }
+
+    [JsonPropertyName("female40Plus")]
+    public int Female40Plus { get; set; }
+
+    [JsonPropertyName("unknown")]
+    public int Unknown { get; set; }
+
+    [JsonPropertyName("total")]
+    public int Total { get; set; }
+}

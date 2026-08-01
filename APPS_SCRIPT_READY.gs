@@ -1,6 +1,8 @@
 const TZ = 'Asia/Seoul';
 const QR_ENTRY_TOKEN = 'ybom-qr-2026';
 const MEMBER_RETENTION_YEARS = 3;
+const FACILITY_MIN_AGE = 19;
+const FACILITY_MAX_AGE = 39;
 const ADMIN_ACCESS_HASH_PROPERTY = 'ADMIN_ACCESS_HASH';
 const ADMIN_SESSION_SECONDS = 1800;
 const PENDING_CALENDAR_MONTHS_PROPERTY = 'PENDING_OPERATION_CALENDAR_MONTHS';
@@ -16,6 +18,7 @@ const SHEET_NAMES = {
   CAREER_LOGS: 'APP_CAREER_LOGS',
   CONNECT_LOGS: 'APP_CONNECT_LOGS',
   RETENTION_LOGS: 'APP_RETENTION_LOGS',
+  ACCESS_ALERTS: 'APP_ACCESS_ALERTS',
   NAVER_SYNC: '네이버예약_동기화'
 };
 
@@ -47,7 +50,10 @@ const HEADERS = {
   ],
   retentionLogs: [
     'runId', 'action', 'processedAt', 'memberCount', 'visitLogCount', 'printerLogCount',
-    'careerLogCount', 'connectLogCount', 'reservationLinkCount'
+    'careerLogCount', 'connectLogCount', 'reservationLinkCount', 'accessAlertCount'
+  ],
+  accessAlerts: [
+    'alertId', 'userId', 'name', 'phoneLastDigits', 'age', 'reason', 'date', 'attemptedAt', 'inputType'
   ],
   naverSync: [
     'reservationId', 'status', 'bookerName', 'maskedPhone', 'usageDate', 'startTime', 'endTime',
@@ -152,6 +158,8 @@ function dispatchWebAction_(action, payload) {
       return handleAdminDashboardSnapshot_(payload);
     case 'adminUpdateReservationStatus':
       return handleAdminUpdateReservationStatus_(payload);
+    case 'adminMonthlyPerformance':
+      return handleAdminMonthlyPerformance_(payload);
     case 'resolveFacilityEntry':
       return handleResolveFacilityEntry_(payload);
     case 'updateMemberBirthDate':
@@ -313,6 +321,307 @@ function handleAdminUpdateReservationStatus_(payload) {
   });
 }
 
+function handleAdminMonthlyPerformance_(payload) {
+  const monthKey = str_(payload && payload.month);
+  if (!isValidMonthKey_(monthKey)) {
+    throw new Error('실적을 조회할 월을 YYYY-MM 형식으로 입력해 주세요.');
+  }
+
+  const categories = {
+    visit: createPerformanceCategory_('visit', '방문자', false),
+    connect: createPerformanceCategory_('connect', '커넥트룸', true),
+    career: createPerformanceCategory_('career', '커리어존', false),
+    printer: createPerformanceCategory_('printer', '프린터', false)
+  };
+  const totalUniqueKeys = {};
+  const memberBirthDates = getPerformanceMemberBirthDates_();
+
+  getRowsAsObjectsForMonth_(
+    SHEET_NAMES.VISIT_LOGS,
+    HEADERS.visitLogs,
+    'date',
+    monthKey
+  ).forEach(function(row) {
+    addPerformancePerson_(
+      categories.visit,
+      normalizeSheetDate_(row.date),
+      performancePersonKey_(row.userId, 'visit:' + str_(row.logId)),
+      row.gender,
+      performanceAgeForDate_(row.userId, row.age, row.date, memberBirthDates),
+      totalUniqueKeys
+    );
+  });
+
+  getRowsAsObjectsForMonth_(
+    SHEET_NAMES.PRINTER_LOGS,
+    HEADERS.printerLogs,
+    'date',
+    monthKey
+  ).forEach(function(row) {
+    addPerformancePerson_(
+      categories.printer,
+      normalizeSheetDate_(row.date),
+      performancePersonKey_(row.userId, 'printer:' + str_(row.logId)),
+      row.gender,
+      performanceAgeForDate_(row.userId, row.age, row.date, memberBirthDates),
+      totalUniqueKeys
+    );
+  });
+
+  [
+    { sheetName: SHEET_NAMES.CONNECT_LOGS, category: categories.connect },
+    { sheetName: SHEET_NAMES.CAREER_LOGS, category: categories.career }
+  ].forEach(function(source) {
+    getRowsAsObjectsForMonth_(
+      source.sheetName,
+      HEADERS.roomLogs,
+      'date',
+      monthKey
+    ).forEach(function(row) {
+      addPerformanceRoomLog_(source.category, row, totalUniqueKeys, memberBirthDates);
+    });
+  });
+
+  const order = ['visit', 'connect', 'career', 'printer'];
+  const summary = order.map(function(key) {
+    const category = categories[key];
+    return {
+      key: category.key,
+      label: category.label,
+      uniqueUsers: Object.keys(category.uniqueKeys).length,
+      totalUsers: category.totalUsers
+    };
+  });
+  const totalUsers = summary.reduce(function(sum, item) {
+    return sum + item.totalUsers;
+  }, 0);
+
+  const daily = {};
+  order.forEach(function(key) {
+    daily[key] = buildPerformanceDailyRows_(categories[key], monthKey);
+  });
+  return {
+    ok: true,
+    month: monthKey,
+    generatedAt: nowText_(),
+    summary: summary,
+    totalUsers: totalUsers,
+    totalUniqueUsers: Object.keys(totalUniqueKeys).length,
+    daily: daily,
+    uniqueBasis: '회원 ID 월간 중복 제거, 식별 불가 비회원 및 동반자는 기록별 인원'
+  };
+}
+
+function createPerformanceCategory_(key, label, includeAllAges) {
+  return {
+    key: key,
+    label: label,
+    includeAllAges: includeAllAges === true,
+    totalUsers: 0,
+    uniqueKeys: {},
+    daily: {}
+  };
+}
+
+function createPerformanceCounts_() {
+  return {
+    maleUnder19: 0,
+    femaleUnder19: 0,
+    male20To24: 0,
+    female20To24: 0,
+    male25To29: 0,
+    female25To29: 0,
+    male30To34: 0,
+    female30To34: 0,
+    male35To39: 0,
+    female35To39: 0,
+    male40Plus: 0,
+    female40Plus: 0,
+    unknown: 0,
+    total: 0
+  };
+}
+
+function getPerformanceDay_(category, date) {
+  if (!category.daily[date]) category.daily[date] = createPerformanceCounts_();
+  return category.daily[date];
+}
+
+function addPerformancePerson_(category, date, personKey, gender, age, totalUniqueKeys) {
+  if (!isPerformanceAgeIncluded_(category, age)) return;
+  const day = getPerformanceDay_(category, date);
+  const bucket = performanceBucket_(gender, age);
+  day[bucket] += 1;
+  day.total += 1;
+  category.totalUsers += 1;
+  category.uniqueKeys[personKey] = true;
+  totalUniqueKeys[personKey] = true;
+}
+
+function addPerformanceRoomLog_(category, row, totalUniqueKeys, memberBirthDates) {
+  const date = normalizeSheetDate_(row.date);
+  const people = performanceRoomPeople_(row);
+  if (people.length > 0) {
+    people[0].age = performanceAgeForDate_(row.userId, people[0].age, date, memberBirthDates);
+  }
+  const headcount = Math.max(
+    1,
+    people.length,
+    performanceCount_(row.headcount),
+    performanceCount_(row.companionCount) + 1
+  );
+  const logId = str_(row.logId, category.key + '-row-' + str_(row.__rowNumber));
+  people.slice(0, headcount).forEach(function(person, index) {
+    if (!isPerformanceAgeIncluded_(category, person.age)) return;
+    const personKey = index === 0
+      ? performancePersonKey_(row.userId, category.key + ':' + logId + ':lead')
+      : 'companion:' + logId + ':' + index;
+    addPerformancePerson_(category, date, personKey, person.gender, person.age, totalUniqueKeys);
+  });
+
+  if (category.includeAllAges && people.length < headcount) {
+    const day = getPerformanceDay_(category, date);
+    const missingCount = headcount - people.length;
+    day.unknown += missingCount;
+    day.total += missingCount;
+    category.totalUsers += missingCount;
+    for (let index = people.length; index < headcount; index += 1) {
+      const personKey = index === 0
+        ? performancePersonKey_(row.userId, category.key + ':' + logId + ':lead')
+        : 'companion:' + logId + ':' + index;
+      category.uniqueKeys[personKey] = true;
+      totalUniqueKeys[personKey] = true;
+    }
+  }
+}
+
+function isPerformanceAgeIncluded_(category, age) {
+  if (category.includeAllAges) return true;
+  const numericAge = Number(age);
+  return Number.isFinite(numericAge) && numericAge >= FACILITY_MIN_AGE && numericAge <= FACILITY_MAX_AGE;
+}
+
+function getPerformanceMemberBirthDates_() {
+  const sheet = getOrCreateSheet_(SHEET_NAMES.MEMBERS, HEADERS.members);
+  if (sheet.getLastRow() < 2) return {};
+  const headerContext = memberHeaderContext_(sheet);
+  const idColumn = memberColumn_(sheet, 'memberId', headerContext);
+  const birthDateColumn = memberColumn_(sheet, 'birthDate', headerContext);
+  const rowCount = sheet.getLastRow() - 1;
+  const ids = sheet.getRange(2, idColumn, rowCount, 1).getValues();
+  const birthDates = sheet.getRange(2, birthDateColumn, rowCount, 1).getValues();
+  const result = {};
+  ids.forEach(function(row, index) {
+    const memberId = str_(row[0]);
+    const birthDate = normalizeBirthDate_(birthDates[index][0]);
+    if (memberId && isValidBirthDate_(birthDate)) result[memberId] = birthDate;
+  });
+  return result;
+}
+
+function performanceAgeForDate_(userId, storedAge, usageDate, memberBirthDates) {
+  const birthDate = (memberBirthDates || {})[str_(userId)];
+  return birthDate ? calcAgeOnDate_(birthDate, normalizeSheetDate_(usageDate)) : Number(storedAge || 0);
+}
+
+function performanceRoomPeople_(row) {
+  const participantText = str_(row.participants);
+  if (participantText) {
+    const parsed = participantText.split(',').map(function(item) {
+      const match = str_(item).match(/^(남성|여성)\s*\/\s*(\d{1,3})$/);
+      return match ? { gender: match[1], age: Number(match[2]) } : null;
+    }).filter(function(person) { return person; });
+    if (parsed.length > 0) return parsed;
+  }
+
+  const people = [{ gender: row.gender, age: row.age }];
+  let companions = [];
+  try {
+    companions = JSON.parse(str_(row.companionsJson, '[]'));
+    if (!Array.isArray(companions)) companions = [];
+  } catch (error) {}
+  return people.concat(companions);
+}
+
+function performanceCount_(value) {
+  const number = Number(value || 0);
+  return isFinite(number) ? Math.max(0, Math.floor(number)) : 0;
+}
+
+function performancePersonKey_(userId, fallback) {
+  const id = str_(userId);
+  return id ? 'user:' + id : 'record:' + fallback;
+}
+
+function performanceBucket_(gender, age) {
+  const normalizedGender = str_(gender);
+  const numericAge = Number(age || 0);
+  if ((normalizedGender !== '남성' && normalizedGender !== '여성') || numericAge < 1) {
+    return 'unknown';
+  }
+  const prefix = normalizedGender === '남성' ? 'male' : 'female';
+  if (numericAge <= 19) return prefix + 'Under19';
+  if (numericAge <= 24) return prefix + '20To24';
+  if (numericAge <= 29) return prefix + '25To29';
+  if (numericAge <= 34) return prefix + '30To34';
+  if (numericAge <= 39) return prefix + '35To39';
+  return prefix + '40Plus';
+}
+
+function buildPerformanceDailyRows_(category, monthKey) {
+  const parts = monthKey.split('-').map(Number);
+  const lastDay = new Date(parts[0], parts[1], 0).getDate();
+  const rows = [];
+  for (let day = 1; day <= lastDay; day += 1) {
+    const date = monthKey + '-' + pad2_(day);
+    const counts = category.daily[date] || createPerformanceCounts_();
+    if (counts.total > 0) rows.push(Object.assign({ date: date }, counts));
+  }
+  return rows;
+}
+
+function getRowsAsObjectsForMonth_(sheetName, headers, dateHeader, monthKey) {
+  const sheet = getOrCreateSheet_(sheetName, headers);
+  if (sheet.getLastRow() < 2) return [];
+  const dateColumn = headers.indexOf(dateHeader) + 1;
+  if (dateColumn < 1) throw new Error(sheetName + ' 시트의 날짜 열을 찾을 수 없습니다.');
+
+  const dateValues = sheet
+    .getRange(2, dateColumn, sheet.getLastRow() - 1, 1)
+    .getValues();
+  const rowNumbers = [];
+  dateValues.forEach(function(row, index) {
+    if (normalizeSheetDate_(row[0]).slice(0, 7) === monthKey) {
+      rowNumbers.push(index + 2);
+    }
+  });
+  if (rowNumbers.length === 0) return [];
+
+  const groups = [];
+  rowNumbers.forEach(function(rowNumber) {
+    const last = groups[groups.length - 1];
+    if (last && last.end + 1 === rowNumber) {
+      last.end = rowNumber;
+    } else {
+      groups.push({ start: rowNumber, end: rowNumber });
+    }
+  });
+
+  const result = [];
+  groups.forEach(function(group) {
+    const values = sheet
+      .getRange(group.start, 1, group.end - group.start + 1, headers.length)
+      .getValues();
+    values.forEach(function(row, rowIndex) {
+      const object = {};
+      headers.forEach(function(header, index) { object[header] = row[index]; });
+      object.__rowNumber = group.start + rowIndex;
+      result.push(object);
+    });
+  });
+  return result;
+}
+
 function getStaffDashboardEvents_(limit) {
   const events = [];
   appendStaffEventsFromSheet_(
@@ -339,9 +648,40 @@ function getStaffDashboardEvents_(limit) {
     '커넥트룸',
     limit
   );
+  appendStaffAccessAlerts_(events, limit);
   return events.sort(function(a, b) {
     return str_(b.occurredAt).localeCompare(str_(a.occurredAt));
   }).slice(0, limit);
+}
+
+function appendStaffAccessAlerts_(target, limit) {
+  const sheet = getOrCreateSheet_(SHEET_NAMES.ACCESS_ALERTS, HEADERS.accessAlerts);
+  if (sheet.getLastRow() < 2) return;
+  const rowCount = Math.min(limit, sheet.getLastRow() - 1);
+  const startRow = sheet.getLastRow() - rowCount + 1;
+  const values = sheet.getRange(startRow, 1, rowCount, HEADERS.accessAlerts.length).getValues();
+  const index = {};
+  HEADERS.accessAlerts.forEach(function(header, column) { index[header] = column; });
+
+  values.forEach(function(row, offset) {
+    const alertId = str_(row[index.alertId], 'row-' + String(startRow + offset));
+    const date = normalizeSheetDate_(row[index.date]);
+    const phoneLastDigits = digits_(row[index.phoneLastDigits]).slice(-4);
+    target.push({
+      id: 'restricted:' + alertId,
+      category: 'restricted',
+      categoryLabel: '이용 제한',
+      notificationEligible: true,
+      origin: 'onsite',
+      name: str_(row[index.name], '회원'),
+      date: date,
+      startTime: '',
+      endTime: '',
+      purpose: str_(row[index.reason]) + (phoneLastDigits ? ' · 끝자리 ' + phoneLastDigits : ''),
+      headcount: 1,
+      occurredAt: normalizeDashboardDateTime_(row[index.attemptedAt], date)
+    });
+  });
 }
 
 function appendStaffEventsFromSheet_(target, sheetName, headers, category, categoryLabel, limit) {
@@ -702,7 +1042,7 @@ function handleAdminSubmitManualLog_(payload) {
         userId: member.id,
         name: member.name,
         gender: member.gender,
-        age: member.age,
+        age: member.birthDate ? calcAgeOnDate_(member.birthDate, date) : member.age,
         phone: member.phone,
         phoneLastDigits: member.phoneLastDigits,
         date: date,
@@ -822,12 +1162,12 @@ function handleResolveFacilityEntry_(payload) {
     if (exact.length === 0) return { ok: true, mode: 'signup', suggestedPhone: digits };
     const activeExact = exact.filter(isActiveMember_);
     if (activeExact.length === 0) throw new Error('현재 이용할 수 없는 회원입니다.');
-    return { ok: true, mode: 'member', member: publicMember_(activeExact[0]) };
+    return facilityEntryResponseForMember_(activeExact[0], 'full-phone');
   }
 
   const tail = findMembersByField_('phoneLastDigits', digits).filter(isActiveMember_);
   if (tail.length === 0) return { ok: true, mode: 'signup', suggestedPhone: digits };
-  if (tail.length === 1) return { ok: true, mode: 'member', member: publicMember_(tail[0]) };
+  if (tail.length === 1) return facilityEntryResponseForMember_(tail[0], 'phone-tail');
 
   return {
     ok: true,
@@ -836,18 +1176,98 @@ function handleResolveFacilityEntry_(payload) {
   };
 }
 
+function facilityEntryResponseForMember_(member, inputType) {
+  if (!member.birthDate || isFacilityAgeEligible_(member, today_())) {
+    return { ok: true, mode: 'member', member: publicMember_(member) };
+  }
+  recordAgeRestrictionAlert_(member, inputType);
+  return ageRestrictionResponse_(member);
+}
+
+function isFacilityAgeEligible_(member, referenceDate) {
+  if (!member || !member.birthDate) return false;
+  const age = calcAgeOnDate_(member.birthDate, referenceDate);
+  return age >= FACILITY_MIN_AGE && age <= FACILITY_MAX_AGE;
+}
+
+function ageRestrictionMessage_(age) {
+  return '청년이봄 시설은 만 19세 이상 만 39세 이하만 이용할 수 있습니다. 현재 만 ' +
+    age + '세로 이용이 불가능합니다.';
+}
+
+function assertMemberCanUseSpace_(member, spaceType, referenceDate) {
+  const age = calcAgeOnDate_(member.birthDate, referenceDate);
+  if (age < FACILITY_MIN_AGE || age > FACILITY_MAX_AGE) {
+    throw new Error(ageRestrictionMessage_(age));
+  }
+}
+
+function ageRestrictionResponse_(member) {
+  const age = calcAgeOnDate_(member.birthDate, today_());
+  return {
+    ok: true,
+    mode: 'restricted',
+    restricted: true,
+    age: age,
+    message: ageRestrictionMessage_(age)
+  };
+}
+
+function recordAgeRestrictionAlert_(member, inputType) {
+  return withScriptLock_(function() {
+    return recordAgeRestrictionAlertLocked_(member, inputType);
+  });
+}
+
+function recordAgeRestrictionAlertLocked_(member, inputType) {
+  const date = today_();
+  const sheet = getOrCreateSheet_(SHEET_NAMES.ACCESS_ALERTS, HEADERS.accessAlerts);
+  ensureSheetHeaders_(sheet, HEADERS.accessAlerts);
+  const alreadyRecorded = findObjectsByColumnValue_(
+    sheet,
+    HEADERS.accessAlerts,
+    'userId',
+    member.id
+  ).some(function(row) {
+    return normalizeSheetDate_(row.date) === date;
+  });
+  if (alreadyRecorded) return false;
+
+  const age = calcAgeOnDate_(member.birthDate, date);
+  appendObjectRow_(SHEET_NAMES.ACCESS_ALERTS, HEADERS.accessAlerts, {
+    alertId: Utilities.getUuid(),
+    userId: member.id,
+    name: member.name,
+    phoneLastDigits: member.phoneLastDigits,
+    age: age,
+    reason: ageRestrictionMessage_(age),
+    date: date,
+    attemptedAt: nowText_(),
+    inputType: str_(inputType, 'facility-qr')
+  });
+  return true;
+}
+
 function handleRegisterFacilityMember_(payload) {
   const member = normalizeFacilityMember_(payload.member || {});
   if (!member.name || !isValidGender_(member.gender) || !isValidBirthDate_(member.birthDate) || !isValidPhone_(member.phone) || !member.privacyConsent) {
     throw new Error('필수 정보와 개인정보 수집·이용 동의를 모두 확인해 주세요.');
   }
+  const registrationAge = calcAgeOnDate_(member.birthDate, today_());
 
   return withScriptLock_(function() {
     const existing = findMembersByField_('phone', member.phone);
     if (existing.length > 0) {
       const activeExisting = existing.filter(isActiveMember_);
       if (activeExisting.length === 0) throw new Error('현재 이용할 수 없는 회원입니다.');
+      if (activeExisting[0].birthDate && !isFacilityAgeEligible_(activeExisting[0], today_())) {
+        recordAgeRestrictionAlertLocked_(activeExisting[0], 'signup-existing');
+        return ageRestrictionResponse_(activeExisting[0]);
+      }
       return { ok: true, existing: true, member: publicMember_(activeExisting[0]) };
+    }
+    if (registrationAge < FACILITY_MIN_AGE || registrationAge > FACILITY_MAX_AGE) {
+      throw new Error(ageRestrictionMessage_(registrationAge) + ' 회원가입을 진행할 수 없습니다.');
     }
 
     const row = {
@@ -907,6 +1327,12 @@ function handleUpdateMemberBirthDate_(payload) {
       sheet.getRange(rowNumber, memberColumn_(sheet, 'updatedAt')).setValue(nowText_());
     }
     const updatedMember = memberAtRow_(sheet, rowNumber);
+    if (!isFacilityAgeEligible_(updatedMember, date)) {
+      recordAgeRestrictionAlertLocked_(updatedMember, 'birthdate-update');
+      return Object.assign(ageRestrictionResponse_(updatedMember), {
+        member: publicMember_(updatedMember)
+      });
+    }
     const visit = ensureVisitLogLocked_(updatedMember, date, source, []);
     return {
       ok: true,
@@ -923,6 +1349,10 @@ function handleSubmitVisitLog_(payload) {
   const source = normalizeVisitSource_(payload.source);
 
   if (!member.birthDate) throw new Error('생년월일을 먼저 입력해 주세요.');
+  if (!isFacilityAgeEligible_(member, date)) {
+    recordAgeRestrictionAlert_(member, 'visit-submit');
+    throw new Error(ageRestrictionMessage_(calcAgeOnDate_(member.birthDate, date)));
+  }
 
   return withScriptLock_(function() {
     return ensureVisitLogLocked_(member, date, source, [], 'self', memberEntry);
@@ -957,7 +1387,7 @@ function ensureVisitLogLocked_(member, date, source, preparedReservations, creat
     memberType: member.role,
     name: member.name,
     gender: member.gender,
-    age: member.age,
+    age: member.birthDate ? calcAgeOnDate_(member.birthDate, date) : member.age,
     phone: member.phone,
     phoneLastDigits: member.phoneLastDigits,
     date: date,
@@ -991,6 +1421,7 @@ function handleSubmitUsageRecord_(payload) {
   const date = today_();
   if (!member.birthDate) throw new Error('생년월일을 먼저 입력해 주세요.');
   if (!hasVisitLog_(member.id, date)) throw new Error('오늘 방문 확인을 먼저 진행해 주세요.');
+  assertMemberCanUseSpace_(member, type, date);
 
   if (type === 'printer') {
     const count = Number(data.count || 0);
@@ -1026,7 +1457,7 @@ function handleSubmitUsageRecord_(payload) {
         userId: member.id,
         name: member.name,
         gender: member.gender,
-        age: member.age,
+        age: member.birthDate ? calcAgeOnDate_(member.birthDate, date) : member.age,
         phone: member.phone,
         phoneLastDigits: member.phoneLastDigits,
         date: date,
@@ -1118,6 +1549,7 @@ function handleSubmitReservationUsage_(payload) {
     const sheet = ensureNaverReservationSchema_();
     const entry = findNaverReservationEntry_(sheet, reservationId);
     if (!entry) throw new Error('예약 정보를 찾을 수 없습니다. 시트에서 예약 동기화를 다시 실행해 주세요.');
+    assertMemberCanUseSpace_(member, str_(entry.values.spaceType), date);
     return submitReservationUsageLocked_(member, sheet, entry, payload.companions, {
       duplicateAsError: true,
       repairedAsSuccess: true,
@@ -1189,6 +1621,9 @@ function submitReservationUsageLocked_(member, sheet, entry, companionsValue, op
 
 function buildRoomLogRow_(member, spaceType, roomData, metadata) {
   const details = metadata || {};
+  const memberAge = member.birthDate
+    ? calcAgeOnDate_(member.birthDate, roomData.date)
+    : member.age;
   const row = {
     logId: Utilities.getUuid(),
     userId: member.id,
@@ -1196,7 +1631,7 @@ function buildRoomLogRow_(member, spaceType, roomData, metadata) {
     name: member.name,
     memberNameKey: normalizeNameKey_(member.name),
     gender: member.gender,
-    age: member.age,
+    age: memberAge,
     phone: member.phone,
     phoneLastDigits: member.phoneLastDigits,
     date: roomData.date,
@@ -1210,7 +1645,7 @@ function buildRoomLogRow_(member, spaceType, roomData, metadata) {
     linkedReservationId: str_(details.linkedReservationId),
     dedupeStatus: str_(details.dedupeStatus)
   };
-  const summary = buildRoomSummary_(member, roomData);
+  const summary = buildRoomSummary_(Object.assign({}, member, { age: memberAge }), roomData);
   Object.keys(summary).forEach(function(key) { row[key] = summary[key]; });
   return row;
 }
@@ -1497,6 +1932,12 @@ function anonymizeMemberLogs_(memberIds) {
       ids,
       ['userId', 'name', 'memberNameKey', 'phone', 'phoneLastDigits']
     ),
+    accessAlertCount: anonymizeLogSheet_(
+      SHEET_NAMES.ACCESS_ALERTS,
+      HEADERS.accessAlerts,
+      ids,
+      ['userId', 'name', 'phoneLastDigits']
+    ),
     reservationLinkCount: anonymizeNaverMemberLinks_(ids)
   };
 }
@@ -1556,7 +1997,8 @@ function appendRetentionAudit_(action, memberCount, logCounts) {
     printerLogCount: logCounts.printerLogCount || 0,
     careerLogCount: logCounts.careerLogCount || 0,
     connectLogCount: logCounts.connectLogCount || 0,
-    reservationLinkCount: logCounts.reservationLinkCount || 0
+    reservationLinkCount: logCounts.reservationLinkCount || 0,
+    accessAlertCount: logCounts.accessAlertCount || 0
   });
 }
 
@@ -1567,10 +2009,11 @@ function retentionResult_(memberCount, logCounts) {
     printerLogCount: logCounts.printerLogCount || 0,
     careerLogCount: logCounts.careerLogCount || 0,
     connectLogCount: logCounts.connectLogCount || 0,
-    reservationLinkCount: logCounts.reservationLinkCount || 0
+    reservationLinkCount: logCounts.reservationLinkCount || 0,
+    accessAlertCount: logCounts.accessAlertCount || 0
   };
   result.totalLogCount = result.visitLogCount + result.printerLogCount + result.careerLogCount +
-    result.connectLogCount + result.reservationLinkCount;
+    result.connectLogCount + result.reservationLinkCount + result.accessAlertCount;
   return result;
 }
 
@@ -2088,7 +2531,8 @@ function ensureDataSheetSchemas_() {
     { name: SHEET_NAMES.PRINTER_LOGS, headers: HEADERS.printerLogs },
     { name: SHEET_NAMES.CAREER_LOGS, headers: HEADERS.roomLogs },
     { name: SHEET_NAMES.CONNECT_LOGS, headers: HEADERS.roomLogs },
-    { name: SHEET_NAMES.RETENTION_LOGS, headers: HEADERS.retentionLogs }
+    { name: SHEET_NAMES.RETENTION_LOGS, headers: HEADERS.retentionLogs },
+    { name: SHEET_NAMES.ACCESS_ALERTS, headers: HEADERS.accessAlerts }
   ].forEach(function(item) {
     ensureSheetHeaders_(getOrCreateSheet_(item.name, item.headers), item.headers);
   });
@@ -3048,11 +3492,18 @@ function isValidLogDate_(value) {
 }
 
 function calcAge_(birthDate) {
-  const birth = str_(birthDate).split('-').map(Number);
-  const today = today_().split('-').map(Number);
-  if (birth.length !== 3 || birth.some(function(value) { return !Number.isFinite(value); })) return 0;
-  let age = today[0] - birth[0];
-  if (today[1] < birth[1] || (today[1] === birth[1] && today[2] < birth[2])) age -= 1;
+  return calcAgeOnDate_(birthDate, today_());
+}
+
+function calcAgeOnDate_(birthDate, referenceDate) {
+  const birth = normalizeBirthDate_(birthDate).split('-').map(Number);
+  const reference = normalizeSheetDate_(referenceDate).split('-').map(Number);
+  if (birth.length !== 3 || reference.length !== 3 ||
+      birth.some(function(value) { return !Number.isFinite(value); }) ||
+      reference.some(function(value) { return !Number.isFinite(value); })) return 0;
+  let age = reference[0] - birth[0];
+  if (reference[1] < birth[1] ||
+      (reference[1] === birth[1] && reference[2] < birth[2])) age -= 1;
   return age;
 }
 

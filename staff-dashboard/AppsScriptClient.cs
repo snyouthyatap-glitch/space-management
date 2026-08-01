@@ -18,7 +18,7 @@ internal sealed class AppsScriptClient
     public AppsScriptClient(HttpClient? httpClient = null)
     {
         _httpClient = httpClient ?? new HttpClient();
-        _httpClient.Timeout = TimeSpan.FromSeconds(25);
+        _httpClient.Timeout = TimeSpan.FromSeconds(90);
     }
 
     public async Task<DashboardSnapshot> GetSnapshotAsync(
@@ -132,6 +132,20 @@ internal sealed class AppsScriptClient
                 data = request.Data,
                 requestId = request.RequestId
             },
+            cancellationToken,
+            response => response.Ok,
+            response => response.Error);
+
+    public Task<MonthlyPerformanceReport> GetMonthlyPerformanceAsync(
+        DashboardSettings settings,
+        string password,
+        string month,
+        CancellationToken cancellationToken) =>
+        ExecuteAdminActionAsync<MonthlyPerformanceReport>(
+            settings,
+            password,
+            "adminMonthlyPerformance",
+            session => new { adminSession = session, month },
             cancellationToken,
             response => response.Ok,
             response => response.Error);

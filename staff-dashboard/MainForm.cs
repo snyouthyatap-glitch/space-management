@@ -51,7 +51,7 @@ internal sealed class MainForm : Form
 
         Text = "청년이봄 직원 운영";
         StartPosition = FormStartPosition.CenterScreen;
-        MinimumSize = new Size(1100, 700);
+        MinimumSize = new Size(1280, 700);
         Size = new Size(1380, 860);
         Font = new Font("맑은 고딕", 9.5F);
         BackColor = Color.FromArgb(247, 247, 246);
@@ -149,6 +149,8 @@ internal sealed class MainForm : Form
             WrapContents = false,
             Padding = new Padding(0, 12, 0, 0)
         };
+        actions.Controls.Add(CreateActionButton("실적 다운로드", async (_, _) =>
+            await DownloadMonthlyPerformanceAsync(), Color.FromArgb(196, 112, 37)));
         actions.Controls.Add(CreateActionButton("수동 일지", async (_, _) =>
         {
             _pollTimer.Stop();
@@ -235,7 +237,7 @@ internal sealed class MainForm : Form
         };
         _categoryFilter.DropDownStyle = ComboBoxStyle.DropDownList;
         _categoryFilter.Width = 120;
-        _categoryFilter.Items.AddRange(["전체", "방문", "커넥트룸", "커리어존"]);
+        _categoryFilter.Items.AddRange(["전체", "방문", "커넥트룸", "커리어존", "이용 제한"]);
         _categoryFilter.SelectedIndex = 0;
         _categoryFilter.SelectedIndexChanged += (_, _) => RenderEvents();
         filterPanel.Controls.Add(_categoryFilter);
@@ -438,6 +440,15 @@ internal sealed class MainForm : Form
         if (newAlertEvents.Count == 1)
         {
             var item = newAlertEvents[0];
+            if (item.Category == "restricted")
+            {
+                _notifyIcon.ShowBalloonTip(
+                    7000,
+                    "이용 제한 회원 확인",
+                    $"{item.Name}\n{item.Purpose}",
+                    ToolTipIcon.Warning);
+                return;
+            }
             var time = string.IsNullOrWhiteSpace(item.StartTime)
                 ? ""
                 : $" {item.StartTime}~{item.EndTime}";
@@ -451,11 +462,16 @@ internal sealed class MainForm : Form
         {
             var careerCount = newAlertEvents.Count(item => item.Category == "career");
             var connectCount = newAlertEvents.Count(item => item.Category == "connect");
+            var restrictedCount = newAlertEvents.Count(item => item.Category == "restricted");
+            var parts = new List<string>();
+            if (careerCount > 0) parts.Add($"커리어존 {careerCount}건");
+            if (connectCount > 0) parts.Add($"커넥트룸 {connectCount}건");
+            if (restrictedCount > 0) parts.Add($"이용 제한 {restrictedCount}건");
             _notifyIcon.ShowBalloonTip(
                 6000,
-                $"새 현장예약 {newAlertEvents.Count}건",
-                $"커리어존 {careerCount}건 · 커넥트룸 {connectCount}건\n프로그램에서 내용을 확인해 주세요.",
-                ToolTipIcon.Info);
+                $"새 알림 {newAlertEvents.Count}건",
+                string.Join(" · ", parts) + "\n프로그램에서 내용을 확인해 주세요.",
+                restrictedCount > 0 ? ToolTipIcon.Warning : ToolTipIcon.Info);
         }
     }
 
@@ -467,6 +483,7 @@ internal sealed class MainForm : Form
             "방문" => "visit",
             "커넥트룸" => "connect",
             "커리어존" => "career",
+            "이용 제한" => "restricted",
             _ => ""
         };
         var filtered = _state.Events
@@ -477,9 +494,12 @@ internal sealed class MainForm : Form
         _eventsGrid.Rows.Clear();
         foreach (var item in filtered)
         {
-            var detail = item.Category == "visit"
-                ? "방문 등록"
-                : $"{item.StartTime}~{item.EndTime} · {item.Headcount}명 · {item.Purpose}";
+            var detail = item.Category switch
+            {
+                "visit" => "방문 등록",
+                "restricted" => item.Purpose,
+                _ => $"{item.StartTime}~{item.EndTime} · {item.Headcount}명 · {item.Purpose}"
+            };
             var rowIndex = _eventsGrid.Rows.Add(
                 item.IsRead ? "확인" : "미확인",
                 item.CategoryLabel,
@@ -643,6 +663,56 @@ internal sealed class MainForm : Form
         return true;
     }
 
+    private async Task DownloadMonthlyPerformanceAsync()
+    {
+        using var monthDialog = new MonthSelectionForm();
+        if (monthDialog.ShowDialog(this) != DialogResult.OK) return;
+
+        using var saveDialog = new SaveFileDialog
+        {
+            Title = "월간 실적 저장",
+            Filter = "Excel 통합 문서 (*.xlsx)|*.xlsx",
+            DefaultExt = "xlsx",
+            AddExtension = true,
+            FileName = $"청년이봄_{monthDialog.SelectedMonth}_월간실적.xlsx"
+        };
+        if (saveDialog.ShowDialog(this) != DialogResult.OK) return;
+
+        _pollTimer.Stop();
+        _statusLabel.Text = $"{monthDialog.SelectedMonth} 실적을 정리하고 있습니다...";
+        Cursor = Cursors.WaitCursor;
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+            var report = await _client.GetMonthlyPerformanceAsync(
+                _settings,
+                _password,
+                monthDialog.SelectedMonth,
+                timeout.Token);
+            PerformanceWorkbookWriter.Write(saveDialog.FileName, report);
+            _statusLabel.Text = $"{monthDialog.SelectedMonth} 실적 저장 완료";
+            MessageBox.Show(this, "실적 파일을 저장했습니다.\n\n" + saveDialog.FileName,
+                "실적 다운로드 완료", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (OperationCanceledException)
+        {
+            _statusLabel.Text = "실적 다운로드 시간 초과";
+            MessageBox.Show(this, "실적 집계 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요.",
+                "실적 다운로드 실패", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+        catch (Exception exception)
+        {
+            _statusLabel.Text = "실적 다운로드 오류 · " + exception.Message;
+            MessageBox.Show(this, exception.Message, "실적 다운로드 실패",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally
+        {
+            Cursor = Cursors.Default;
+            _pollTimer.Start();
+        }
+    }
+
     private void ConfigureTray()
     {
         var menu = new ContextMenuStrip();
@@ -721,6 +791,7 @@ internal sealed class MainForm : Form
             Events =
             [
                 new StaffEvent { Id = "career:1", Category = "career", CategoryLabel = "커리어존", Name = "김봄", Date = "2026-07-28", StartTime = "16:00", EndTime = "17:00", Purpose = "진로 상담 준비", Headcount = 2, OccurredAt = "2026-07-28 15:42:10", IsRead = false },
+                new StaffEvent { Id = "restricted:1", Category = "restricted", CategoryLabel = "이용 제한", Name = "최회원", Date = "2026-07-28", Purpose = "만 40세 · 시설 이용 가능 연령 초과 · 끝자리 0926", Headcount = 1, OccurredAt = "2026-07-28 15:38:20", IsRead = false },
                 new StaffEvent { Id = "connect:1", Category = "connect", CategoryLabel = "커넥트룸", Name = "이청년", Date = "2026-07-28", StartTime = "15:30", EndTime = "17:30", Purpose = "팀 프로젝트 회의", Headcount = 4, OccurredAt = "2026-07-28 15:31:04", IsRead = false },
                 new StaffEvent { Id = "visit:1", Category = "visit", CategoryLabel = "방문", Name = "박이봄", Date = "2026-07-28", OccurredAt = "2026-07-28 14:55:21", IsRead = true }
             ]

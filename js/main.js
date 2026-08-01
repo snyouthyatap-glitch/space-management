@@ -4,6 +4,8 @@ import { showToast, toggleLoading } from "./utils.js?v=20260724-3";
 const QR_ENTRY_SESSION_KEY = "space-management-qr-entry-ok";
 const PENDING_PRINTER_SUBMISSION_KEY = "space-management-pending-printer-submission";
 const SCRIPT_REQUEST_TIMEOUT_MS = 25000;
+const FACILITY_MIN_AGE = 19;
+const FACILITY_MAX_AGE = 39;
 let inMemoryEntryToken = "";
 
 const state = {
@@ -161,6 +163,10 @@ function birthDateToAge(birthDate) {
         age -= 1;
     }
     return age;
+}
+
+function isFacilityAgeEligible(age) {
+    return Number.isInteger(age) && age >= FACILITY_MIN_AGE && age <= FACILITY_MAX_AGE;
 }
 
 function parseBirthDateInput(value) {
@@ -403,6 +409,16 @@ function showFullPhoneStep(message) {
     document.getElementById("fullPhoneInput")?.focus();
 }
 
+function showFacilityAgeRestriction(message) {
+    state.currentMember = null;
+    state.pendingMember = null;
+    state.candidateMember = null;
+    state.candidateSource = "facility-qr";
+    showSection("facilityEntry");
+    resetEntryStep();
+    showToast(message || "시설 이용 가능 연령을 확인해 주세요.", "error");
+}
+
 function setupPinInputs() {
     const inputs = Array.from(document.querySelectorAll(".pin-input"));
     inputs.forEach((input, index) => {
@@ -515,6 +531,10 @@ async function verifySignupPhone() {
     }
 
     const response = await callScript("resolveFacilityEntry", { inputValue: phone });
+    if (response.mode === "restricted" || response.restricted) {
+        showFacilityAgeRestriction(response.message);
+        return;
+    }
     if (response.mode === "member" && response.member) {
         showMemberConfirmation(response.member, "facility-phone-recheck");
         return;
@@ -835,6 +855,11 @@ async function handleFacilityEntry(inputValue) {
         return;
     }
 
+    if (response.mode === "restricted" || response.restricted) {
+        showFacilityAgeRestriction(response.message);
+        return;
+    }
+
     if (response.mode === "member" && response.member) {
         showMemberConfirmation(response.member, "facility-qr");
         return;
@@ -866,6 +891,10 @@ async function updateMissingBirthDate() {
         birthDate,
         source: "facility-birthdate-update"
     });
+    if (response.mode === "restricted" || response.restricted) {
+        showFacilityAgeRestriction(response.message);
+        return;
+    }
     if (!response.member) {
         throw new Error("생년월일을 저장하지 못했습니다.");
     }
@@ -890,8 +919,17 @@ async function registerFacilityMember() {
         privacyConsent: document.getElementById("signupPrivacyConsent")?.checked
     });
 
-    if (!payload.name || !payload.gender || !payload.birthDate || birthDateToAge(payload.birthDate) < 0 || !payload.phone) {
+    const registrationAge = birthDateToAge(payload.birthDate);
+    if (!payload.name || !payload.gender || !payload.birthDate || registrationAge < 0 || !payload.phone) {
         setAlert("signupAlert", "입력 항목을 모두 확인해 주세요.");
+        return;
+    }
+
+    if (!isFacilityAgeEligible(registrationAge)) {
+        setAlert(
+            "signupAlert",
+            `청년이봄 시설은 만 19세 이상 만 39세 이하만 가입할 수 있습니다. 현재 만 ${registrationAge}세로 회원가입 및 이용이 불가능합니다.`
+        );
         return;
     }
 
@@ -908,6 +946,11 @@ async function registerFacilityMember() {
     const response = await callScript("registerFacilityMember", {
         member: payload
     });
+
+    if (response.mode === "restricted" || response.restricted) {
+        showFacilityAgeRestriction(response.message);
+        return;
+    }
 
     if (response.existing) {
         showMemberConfirmation(response.member, "facility-signup-existing");
