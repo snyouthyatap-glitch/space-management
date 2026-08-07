@@ -29,6 +29,14 @@ internal sealed class MainForm : Form
     private readonly Label _memberValue = CreateStatValue();
     private readonly Label _statusLabel = new();
     private readonly Label _unreadLabel = new();
+    private readonly FlowLayoutPanel _reservationActionPanel = new();
+    private readonly Button _reservationConfirmButton = new();
+    private readonly Button _reservationCompleteButton = new();
+    private readonly Button _reservationCancelButton = new();
+    private readonly Button _reservationNoShowButton = new();
+    private readonly FlowLayoutPanel _statusActionPanel = new();
+    private readonly Button _retryStatusButton = new();
+    private readonly Button _settingsStatusButton = new();
     private DashboardSettings _settings;
     private LocalState _state;
     private string _password;
@@ -38,6 +46,7 @@ internal sealed class MainForm : Form
     private bool _updatingReservationStatus;
     private bool _runtimeSyncCompleted;
     private bool _allowClose;
+    private bool _trayNoticeShown;
     private readonly bool _demoMode;
     private readonly string _previewPath;
 
@@ -95,7 +104,19 @@ internal sealed class MainForm : Form
                     "백그라운드에서 현장예약을 확인하고 있습니다.", ToolTipIcon.Info);
             }
         };
-        FormClosing += OnFormClosing;
+        FormClosing += HandleFormClosingToTray;
+    }
+
+    private void HandleFormClosingToTray(object? sender, FormClosingEventArgs eventArgs)
+    {
+        if (_allowClose || eventArgs.CloseReason == CloseReason.WindowsShutDown)
+        {
+            _notifyIcon.Visible = false;
+            return;
+        }
+
+        eventArgs.Cancel = true;
+        HideToTray(showBalloonTip: !_trayNoticeShown);
     }
 
     private void BuildLayout()
@@ -280,10 +301,19 @@ internal sealed class MainForm : Form
     private Control BuildReservationsPanel()
     {
         var panel = CreateSectionPanel();
+        var headerPanel = new Panel
+        {
+            Dock = DockStyle.Top,
+            Height = 96,
+            Padding = new Padding(16, 14, 16, 8)
+        };
+        _reservationsTitle.AutoSize = false;
         _reservationsTitle.Dock = DockStyle.Top;
-        _reservationsTitle.Height = 52;
-        _reservationsTitle.Padding = new Padding(16, 14, 0, 0);
-        panel.Controls.Add(_reservationsTitle);
+        _reservationsTitle.Height = 28;
+        headerPanel.Controls.Add(_reservationsTitle);
+        ConfigureReservationActions();
+        headerPanel.Controls.Add(_reservationActionPanel);
+        panel.Controls.Add(headerPanel);
 
         var calendarPanel = new Panel
         {
@@ -314,10 +344,44 @@ internal sealed class MainForm : Form
         _reservationsGrid.Columns["time"]!.Width = 96;
         _reservationsGrid.Columns["reservation"]!.AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
         _reservationsGrid.Columns["status"]!.Width = 92;
+        _reservationsGrid.SelectionChanged += (_, _) => UpdateReservationActionButtons();
         ConfigureReservationContextMenu();
         panel.Controls.Add(_reservationsGrid);
         _reservationsGrid.BringToFront();
         return panel;
+    }
+
+    private void ConfigureReservationActions()
+    {
+        _reservationActionPanel.Dock = DockStyle.Bottom;
+        _reservationActionPanel.Height = 40;
+        _reservationActionPanel.FlowDirection = FlowDirection.LeftToRight;
+        _reservationActionPanel.WrapContents = false;
+
+        ConfigureReservationActionButton(_reservationConfirmButton, "?뺤젙", Color.FromArgb(74, 156, 68));
+        ConfigureReservationActionButton(_reservationCompleteButton, "?댁슜?꾨즺", Color.FromArgb(55, 108, 142));
+        ConfigureReservationActionButton(_reservationCancelButton, "痍⑥냼", Color.FromArgb(196, 112, 37));
+        ConfigureReservationActionButton(_reservationNoShowButton, "?몄눥", Color.FromArgb(233, 63, 111));
+        _reservationConfirmButton.Text = "\uD655\uC815";
+        _reservationCompleteButton.Text = "\uC774\uC6A9\uC644\uB8CC";
+        _reservationCancelButton.Text = "\uCDE8\uC18C";
+        _reservationNoShowButton.Text = "\uB178\uC1FC";
+        UpdateReservationActionButtons();
+    }
+
+    private void ConfigureReservationActionButton(Button button, string status, Color color)
+    {
+        button.Text = status;
+        button.AutoSize = true;
+        button.Height = 32;
+        button.Padding = new Padding(10, 0, 10, 0);
+        button.Margin = new Padding(0, 0, 8, 0);
+        button.BackColor = color;
+        button.ForeColor = Color.White;
+        button.FlatStyle = FlatStyle.Flat;
+        button.FlatAppearance.BorderSize = 0;
+        button.Click += async (_, _) => await UpdateSelectedReservationStatusAsync(status);
+        _reservationActionPanel.Controls.Add(button);
     }
 
     private void ConfigureReservationContextMenu()
@@ -363,6 +427,41 @@ internal sealed class MainForm : Form
         _statusLabel.AutoSize = true;
         _statusLabel.Location = new Point(3, 9);
         panel.Controls.Add(_statusLabel);
+
+        _statusActionPanel.Dock = DockStyle.Right;
+        _statusActionPanel.AutoSize = true;
+        _statusActionPanel.Visible = true;
+        _statusActionPanel.WrapContents = false;
+        _statusActionPanel.Padding = new Padding(0, 2, 0, 0);
+
+        _retryStatusButton.Text = "?ㅻ쪟 ?댁떆 ?쒕룄";
+        _retryStatusButton.Width = 96;
+        _retryStatusButton.Height = 28;
+        _retryStatusButton.Text = "\uB2E4\uC2DC \uC2DC\uB3C4";
+        _retryStatusButton.Click += async (_, _) => await RefreshDashboardAsync();
+
+        _settingsStatusButton.Text = "?곌껐 ?ㅼ젙";
+        _settingsStatusButton.Width = 88;
+        _settingsStatusButton.Height = 28;
+        _settingsStatusButton.Text = "\uC124\uC815 \uC5F4\uAE30";
+        _settingsStatusButton.Click += async (_, _) =>
+        {
+            if (ShowSettings())
+            {
+                _pollTimer.Start();
+                await RefreshDashboardAsync();
+            }
+        };
+
+        foreach (var button in new[] { _retryStatusButton, _settingsStatusButton })
+        {
+            button.FlatStyle = FlatStyle.Flat;
+            button.BackColor = Color.White;
+            button.Margin = new Padding(8, 0, 0, 0);
+            _statusActionPanel.Controls.Add(button);
+        }
+
+        panel.Controls.Add(_statusActionPanel);
         return panel;
     }
 
@@ -553,6 +652,26 @@ internal sealed class MainForm : Form
         }
     }
 
+    private void UpdateReservationActionButtons()
+    {
+        var selectedEntry = _reservationsGrid.SelectedRows.Count > 0
+            ? _reservationsGrid.SelectedRows[0].Tag as CalendarEntry
+            : null;
+        var canChangeStatus = selectedEntry?.Source == "naver" && !_updatingReservationStatus;
+
+        foreach (var button in new[]
+                 {
+                     (_reservationConfirmButton, "?뺤젙"),
+                     (_reservationCompleteButton, "?댁슜?꾨즺"),
+                     (_reservationCancelButton, "痍⑥냼"),
+                     (_reservationNoShowButton, "?몄눥")
+                 })
+        {
+            button.Item1.Enabled = canChangeStatus &&
+                !string.Equals(selectedEntry?.Status, button.Item2, StringComparison.Ordinal);
+        }
+    }
+
     private static List<CalendarEntry> ConvertTodayReservations(IEnumerable<Reservation> reservations) =>
         reservations.Select(item => new CalendarEntry
         {
@@ -738,13 +857,25 @@ internal sealed class MainForm : Form
         Activate();
     }
 
-    private void OnFormClosing(object? sender, FormClosingEventArgs eventArgs)
+    private void HideToTray(bool showBalloonTip)
     {
-        if (_allowClose || eventArgs.CloseReason == CloseReason.WindowsShutDown)
-        {
-            _notifyIcon.Visible = false;
-            return;
-        }
+        Hide();
+        if (!showBalloonTip) return;
+        const string trayTitle = "\uCCAD\uB144\uC774\uBD04 \uC9C1\uC6D0 \uC6B4\uC601";
+        const string trayMessage = "\uBC31\uADF8\uB77C\uC6B4\uB4DC\uC5D0\uC11C \uD604\uC7A5 \uC608\uC57D\uC744 \uD655\uC778\uD558\uACE0 \uC788\uC2B5\uB2C8\uB2E4.";
+        _notifyIcon.ShowBalloonTip(1500, trayTitle, trayMessage, ToolTipIcon.Info);
+        _trayNoticeShown = true;
+        return;
+
+        _notifyIcon.ShowBalloonTip(
+            1500,
+            "泥?뀈?대큵 吏곸썝 ?댁쁺",
+            "諛깃렇?쇱슫?쒖뿉???꾩옣?덉빟???뺤씤?섍퀬 ?덉뒿?덈떎.",
+            ToolTipIcon.Info);
+        _trayNoticeShown = true;
+    }
+
+#if false
 
         var result = MessageBox.Show(this,
             "프로그램을 종료하면 현장예약 알림도 중지됩니다.\n종료하시겠습니까?",
@@ -759,6 +890,8 @@ internal sealed class MainForm : Form
         }
         eventArgs.Cancel = true;
     }
+
+#endif
 
     private void OpenChrome(string url)
     {
@@ -908,6 +1041,7 @@ internal sealed class MainForm : Form
         grid.Dock = DockStyle.Fill;
         grid.BackgroundColor = Color.White;
         grid.BorderStyle = BorderStyle.None;
+        grid.ShowCellToolTips = false;
         grid.ReadOnly = true;
         grid.AllowUserToAddRows = false;
         grid.AllowUserToDeleteRows = false;

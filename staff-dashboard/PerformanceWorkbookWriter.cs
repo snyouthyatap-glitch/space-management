@@ -69,8 +69,89 @@ internal static class PerformanceWorkbookWriter
             BuildDailySheet("방문자", report.Daily.Visit),
             BuildDailySheet("커넥트룸", report.Daily.Connect),
             BuildDailySheet("커리어존", report.Daily.Career),
-            BuildDailySheet("프린터", report.Daily.Printer)
+            BuildDailySheet("프린터", report.Daily.Printer),
+            BuildVisitSimplifiedSheet(report.Simplified.Visit),
+            BuildPrinterSimplifiedSheet(report.Simplified.Printer),
+            BuildRoomSimplifiedSheet("커리어존 간소화", report.Simplified.Career, true),
+            BuildRoomSimplifiedSheet("커넥트룸 간소화", report.Simplified.Connect, false)
         };
+    }
+
+    private static SheetData BuildVisitSimplifiedSheet(List<PerformanceVisitSimplifiedRow> rows)
+    {
+        var sheetRows = new List<List<CellValue>>
+        {
+            new() { Text("연번", 2), Text("날짜", 2), Text("성별", 2), Text("나이", 2) }
+        };
+        for (var index = 0; index < rows.Count; index++)
+        {
+            var row = rows[index];
+            sheetRows.Add(new()
+            {
+                Number(index + 1), Text(row.Date), Text(row.Gender), Number(row.Age)
+            });
+        }
+        return new SheetData("방문일지 간소화", sheetRows, new double[] { 9, 14, 12, 10 });
+    }
+
+    private static SheetData BuildPrinterSimplifiedSheet(List<PerformancePrinterSimplifiedRow> rows)
+    {
+        var sheetRows = new List<List<CellValue>>
+        {
+            new()
+            {
+                Text("연번", 2), Text("날짜", 2), Text("성별", 2), Text("나이", 2), Text("사용 매수", 2)
+            }
+        };
+        for (var index = 0; index < rows.Count; index++)
+        {
+            var row = rows[index];
+            sheetRows.Add(new()
+            {
+                Number(index + 1), Text(row.Date), Text(row.Gender), Number(row.Age), Number(row.Count)
+            });
+        }
+        return new SheetData("프린터 간소화", sheetRows, new double[] { 9, 14, 12, 10, 13 });
+    }
+
+    private static SheetData BuildRoomSimplifiedSheet(
+        string name,
+        List<PerformanceRoomSimplifiedRow> rows,
+        bool includeSpace)
+    {
+        var header = new List<CellValue> { Text("연번", 2), Text("날짜", 2) };
+        if (includeSpace) header.Add(Text("사용공간", 2));
+        header.AddRange(
+        [
+            Text("사용목적", 2), Text("인원수", 2), Text("비고", 2),
+            Text("시작시간", 2), Text("종료시간", 2),
+            Text("20~29세(남)", 2), Text("20~29세(여)", 2),
+            Text("30~39세(남)", 2), Text("30~39세(여)", 2),
+            Text("~19세(남)", 2), Text("~19세(여)", 2),
+            Text("40세 이상(남)", 2), Text("40세 이상(여)", 2)
+        ]);
+        var sheetRows = new List<List<CellValue>> { header };
+        for (var index = 0; index < rows.Count; index++)
+        {
+            var row = rows[index];
+            var data = new List<CellValue> { Number(index + 1), Text(row.Date) };
+            if (includeSpace) data.Add(Text(row.Space));
+            data.AddRange(
+            [
+                Text(row.Purpose), Number(row.Headcount), Text(row.Note),
+                Text(row.StartTime), Text(row.EndTime),
+                Number(row.Male20s), Number(row.Female20s),
+                Number(row.Male30s), Number(row.Female30s),
+                Number(row.MaleUnder19), Number(row.FemaleUnder19),
+                Number(row.Male40Plus), Number(row.Female40Plus)
+            ]);
+            sheetRows.Add(data);
+        }
+
+        var widths = new List<double> { 9, 14 };
+        if (includeSpace) widths.Add(13);
+        widths.AddRange(new double[] { 24, 10, 28, 12, 12, 14, 14, 14, 14, 13, 13, 16, 16 });
+        return new SheetData(name, sheetRows, widths.ToArray());
     }
 
     private static SheetData BuildDailySheet(string name, List<PerformanceDailyRow> rows)

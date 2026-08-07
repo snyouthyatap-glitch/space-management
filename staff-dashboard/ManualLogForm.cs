@@ -33,6 +33,7 @@ internal sealed class ManualLogForm : Form
     private readonly NumericUpDown _companionCount = new();
     private readonly DataGridView _companionGrid = new();
     private readonly Button _submitButton = new();
+    private readonly Label _validationLabel = new();
     private readonly Label _statusLabel = new();
     private readonly DataGridView _recentGrid = new();
 
@@ -64,6 +65,7 @@ internal sealed class ManualLogForm : Form
         BuildLayout();
         SetSubjectMode(false);
         UpdateLogTypeFields();
+        RefreshValidationStateSafe();
         if (!string.IsNullOrWhiteSpace(previewPath))
         {
             Shown += async (_, _) =>
@@ -128,17 +130,48 @@ internal sealed class ManualLogForm : Form
         tabs.TabPages.Add(recentTab);
         root.Controls.Add(tabs, 0, 1);
 
-        var submitLayout = new TableLayoutPanel
+        var submitContent = new Panel
         {
             Dock = DockStyle.Fill,
+            AutoScroll = true
+        };
+        submitTab.Controls.Add(submitContent);
+
+        var submitFooter = new Panel
+        {
+            Dock = DockStyle.Bottom,
+            Height = 58,
+            Padding = new Padding(0, 10, 0, 0),
+            BackColor = Color.White
+        };
+        submitTab.Controls.Add(submitFooter);
+
+        var submitLayout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
             ColumnCount = 1,
-            RowCount = 2
+            RowCount = 2,
+            AutoSize = true
         };
         submitLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 174));
         submitLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        submitTab.Controls.Add(submitLayout);
+        submitContent.Controls.Add(submitLayout);
         submitLayout.Controls.Add(BuildSubjectGroup(), 0, 0);
         submitLayout.Controls.Add(BuildLogGroup(), 0, 1);
+
+        _validationLabel.AutoSize = true;
+        _validationLabel.ForeColor = Muted;
+        _validationLabel.Dock = DockStyle.Left;
+        _validationLabel.Padding = new Padding(0, 10, 0, 0);
+        submitFooter.Controls.Add(_validationLabel);
+
+        _submitButton.Text = "?쇱? ?쒖텧";
+        _submitButton.Size = new Size(150, 38);
+        _submitButton.Dock = DockStyle.Right;
+        StyleCommandButton(_submitButton, Green);
+        _submitButton.Click += async (_, _) => await SubmitManualLogAsync();
+        submitFooter.Controls.Add(_submitButton);
+        _submitButton.Text = "\uC77C\uC9C0 \uC81C\uCD9C";
 
         ConfigureRecentGrid();
         recentTab.Controls.Add(_recentGrid);
@@ -234,14 +267,26 @@ internal sealed class ManualLogForm : Form
         _guestGender.DropDownStyle = ComboBoxStyle.DropDownList;
         _guestGender.Items.AddRange(["선택", "남성", "여성"]);
         _guestGender.SelectedIndex = 0;
+        _guestGender.SelectedIndexChanged += (_, _) => RefreshValidationStateSafe();
         _guestPanel.Controls.Add(_guestGender);
 
         _guestPanel.Controls.Add(CreateFieldLabel("만 나이", 212, 0));
         _guestAge.SetBounds(212, 24, 140, 32);
-        _guestAge.Minimum = 1;
+        _guestAge.Minimum = 0;
         _guestAge.Maximum = 100;
-        _guestAge.Value = 20;
+        _guestAge.Value = 0;
+        _guestAge.ValueChanged += (_, _) => RefreshValidationStateSafe();
         _guestPanel.Controls.Add(_guestAge);
+        _guestPanel.Controls.Add(new Label
+        {
+            Text = "留??섏씠瑜?吏곸젒 ?낅젰??二쇱꽭??",
+            AutoSize = true,
+            ForeColor = Muted,
+            Location = new Point(212, 61)
+        });
+        var guestHint = _guestPanel.Controls.OfType<Label>().OrderByDescending(label => label.Top).FirstOrDefault();
+        if (guestHint is not null)
+            guestHint.Text = "\uB9CC \uB098\uC774\uB97C \uC9C1\uC811 \uC785\uB825\uD574 \uC8FC\uC138\uC694.";
     }
 
     private Control BuildLogGroup()
@@ -296,6 +341,10 @@ internal sealed class ManualLogForm : Form
         _submitButton.Location = new Point(690, 374);
         StyleCommandButton(_submitButton, Green);
         _submitButton.Click += async (_, _) => await SubmitManualLogAsync();
+        _validationLabel.AutoSize = true;
+        _validationLabel.ForeColor = Muted;
+        _validationLabel.Location = new Point(20, 383);
+        group.Controls.Add(_validationLabel);
         group.Controls.Add(_submitButton);
         group.Resize += (_, _) =>
         {
@@ -303,6 +352,7 @@ internal sealed class ManualLogForm : Form
                 group.ClientSize.Width - _submitButton.Width - 20,
                 group.ClientSize.Height - _submitButton.Height - 18);
         };
+        _validationLabel.BringToFront();
         return group;
     }
 
@@ -322,16 +372,19 @@ internal sealed class ManualLogForm : Form
         _roomPanel.Dock = DockStyle.Fill;
         _roomPanel.Controls.Add(CreateFieldLabel("시작 시간", 0, 0));
         ConfigureTimePicker(_startTime, 0, 24, new TimeSpan(9, 0, 0));
+        _startTime.ValueChanged += (_, _) => RefreshValidationStateSafe();
         _roomPanel.Controls.Add(_startTime);
 
         _roomPanel.Controls.Add(CreateFieldLabel("종료 시간", 172, 0));
         ConfigureTimePicker(_endTime, 172, 24, new TimeSpan(10, 0, 0));
+        _endTime.ValueChanged += (_, _) => RefreshValidationStateSafe();
         _roomPanel.Controls.Add(_endTime);
 
         _roomPanel.Controls.Add(CreateFieldLabel("이용 목적", 354, 0));
         _purpose.SetBounds(354, 24, 430, 32);
         _purpose.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
         _purpose.MaxLength = 200;
+        _purpose.TextChanged += (_, _) => RefreshValidationStateSafe();
         _roomPanel.Controls.Add(_purpose);
 
         _roomPanel.Controls.Add(CreateFieldLabel("추가 인원", 0, 69));
@@ -465,7 +518,7 @@ internal sealed class ManualLogForm : Form
             {
                 _guestToken = NewRequestId();
                 _guestGender.SelectedIndex = 0;
-                _guestAge.Value = 20;
+                _guestAge.Value = 0;
             }
 
             SetStatus(result.LinkedReservation
@@ -617,6 +670,7 @@ internal sealed class ManualLogForm : Form
         _roomPanel.Visible = IsRoomType(logType);
         _pendingPrinterSignature = "";
         _pendingPrinterRequestId = "";
+        RefreshValidationStateSafe();
     }
 
     private void RenderCompanionRows()
@@ -638,6 +692,7 @@ internal sealed class ManualLogForm : Form
             _companionGrid.Rows[rowIndex].Cells["gender"].Value = previous[index].Gender;
             _companionGrid.Rows[rowIndex].Cells["age"].Value = previous[index].Age;
         }
+        RefreshValidationStateSafe();
     }
 
     private void ResetLogDetails()
@@ -647,6 +702,7 @@ internal sealed class ManualLogForm : Form
         _companionCount.Value = 0;
         _startTime.Value = DateTime.Today.AddHours(9);
         _endTime.Value = DateTime.Today.AddHours(10);
+        RefreshValidationStateSafe();
     }
 
     private void SetBusy(bool busy, string buttonText = "")
@@ -661,8 +717,109 @@ internal sealed class ManualLogForm : Form
             : "일지 제출";
     }
 
-    private void UpdateSubmitEnabled() =>
-        _submitButton.Enabled = !_busy && (_guestMode.Checked || _member is not null);
+    private void UpdateSubmitEnabled() => RefreshValidationStateSafe();
+
+    private void RefreshValidationStateSafe()
+    {
+        var message = GetValidationMessageSafe();
+        _validationLabel.Text = string.IsNullOrWhiteSpace(message)
+            ? "\uC785\uB825\uC744 \uC644\uB8CC\uD558\uBA74 \uC77C\uC9C0\uB97C \uC81C\uCD9C\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4."
+            : message;
+        _validationLabel.ForeColor = string.IsNullOrWhiteSpace(message)
+            ? Muted
+            : Color.FromArgb(190, 55, 55);
+        _submitButton.Enabled = !_busy && string.IsNullOrWhiteSpace(message);
+        if (!_busy)
+            _submitButton.Text = "\uC77C\uC9C0 \uC81C\uCD9C";
+    }
+
+    private string GetValidationMessageSafe()
+    {
+        if (_guestMode.Checked)
+        {
+            if (_guestGender.SelectedIndex <= 0)
+                return "\uBE44\uD68C\uC6D0 \uC131\uBCC4\uB97C \uC120\uD0DD\uD574 \uC8FC\uC138\uC694.";
+            if ((int)_guestAge.Value <= 0)
+                return "\uBE44\uD68C\uC6D0 \uB9CC \uB098\uC774\uB97C \uC785\uB825\uD574 \uC8FC\uC138\uC694.";
+        }
+        else if (_member is null)
+        {
+            return "\uD68C\uC6D0\uC744 \uBA3C\uC800 \uC870\uD68C\uD574 \uC8FC\uC138\uC694.";
+        }
+
+        var logType = SelectedLogType();
+        if (logType == "printer") return "";
+        if (!IsRoomType(logType)) return "";
+
+        if (_endTime.Value.TimeOfDay <= _startTime.Value.TimeOfDay)
+            return "\uC885\uB8CC \uC2DC\uAC04\uC740 \uC2DC\uC791 \uC2DC\uAC04\uBCF4\uB2E4 \uB2A6\uC5B4\uC57C \uD569\uB2C8\uB2E4.";
+        if (string.IsNullOrWhiteSpace(_purpose.Text))
+            return "\uC774\uC6A9 \uBAA9\uC801\uC744 \uC785\uB825\uD574 \uC8FC\uC138\uC694.";
+
+        foreach (DataGridViewRow row in _companionGrid.Rows)
+        {
+            var gender = row.Cells["gender"].Value?.ToString() ?? "";
+            var ageText = row.Cells["age"].Value?.ToString() ?? "";
+            if (gender is not ("?⑥꽦" or "?ъ꽦") ||
+                !int.TryParse(ageText, out var age) ||
+                age is < 1 or > 100)
+            {
+                return "\uCD94\uAC00 \uC778\uC6D0\uC758 \uC131\uBCC4\uC640 \uB9CC \uB098\uC774\uB97C \uBAA8\uB450 \uC785\uB825\uD574 \uC8FC\uC138\uC694.";
+            }
+        }
+
+        return "";
+    }
+
+    private void RefreshValidationState()
+    {
+        var message = GetValidationMessage();
+        _validationLabel.Text = string.IsNullOrWhiteSpace(message)
+            ? "?낅젰???꾨즺?섎㈃ ?쇱?瑜??쒖텧???덉뒿?덈떎."
+            : message;
+        _validationLabel.ForeColor = string.IsNullOrWhiteSpace(message)
+            ? Muted
+            : Color.FromArgb(190, 55, 55);
+        _submitButton.Enabled = !_busy && string.IsNullOrWhiteSpace(message);
+    }
+
+    private string GetValidationMessage()
+    {
+        if (_guestMode.Checked)
+        {
+            if (_guestGender.SelectedIndex <= 0)
+                return "鍮꾪쉶???깅퀎???좏깮??二쇱꽭??";
+            if ((int)_guestAge.Value <= 0)
+                return "鍮꾪쉶??留??섏씠瑜??낅젰??二쇱꽭??";
+        }
+        else if (_member is null)
+        {
+            return "?뚯썝??癒쇱? 議고쉶??二쇱꽭??";
+        }
+
+        var logType = SelectedLogType();
+        if (logType == "printer") return "";
+        if (!IsRoomType(logType)) return "";
+
+        if (_endTime.Value.TimeOfDay <= _startTime.Value.TimeOfDay)
+            return "醫낅즺 ?쒓컙? ?쒖옉 ?쒓컙蹂대떎 ??뼱???⑸땲??";
+        if (string.IsNullOrWhiteSpace(_purpose.Text))
+            return "?댁슜 紐⑹쟻???낅젰??二쇱꽭??";
+
+        foreach (DataGridViewRow row in _companionGrid.Rows)
+        {
+            var gender = row.Cells["gender"].Value?.ToString() ?? "";
+            var ageText = row.Cells["age"].Value?.ToString() ?? "";
+            if (gender is not ("?⑥꽦" or "?ъ꽦") ||
+                !int.TryParse(ageText, out var age) ||
+                age is < 1 or > 100)
+            {
+                return "異붽? ?몄썝???깅퀎??留??섏씠瑜?紐⑤몢 ?낅젰??二쇱꽭??";
+            }
+        }
+
+        return "";
+    }
 
     private void SetStatus(string message, bool error = false)
     {

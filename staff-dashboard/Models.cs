@@ -359,6 +359,9 @@ internal sealed class MonthlyPerformanceReport
     [JsonPropertyName("daily")]
     public PerformanceDailyGroups Daily { get; set; } = new();
 
+    [JsonPropertyName("simplified")]
+    public PerformanceSimplifiedGroups Simplified { get; set; } = new();
+
     [JsonPropertyName("uniqueBasis")]
     public string UniqueBasis { get; set; } = "";
 }
@@ -439,4 +442,85 @@ internal sealed class PerformanceDailyRow
 
     [JsonPropertyName("total")]
     public int Total { get; set; }
+}
+
+internal sealed class PerformanceSimplifiedGroups
+{
+    [JsonPropertyName("visit")]
+    public List<PerformanceVisitSimplifiedRow> Visit { get; set; } = [];
+
+    [JsonPropertyName("printer")]
+    public List<PerformancePrinterSimplifiedRow> Printer { get; set; } = [];
+
+    [JsonPropertyName("career")]
+    public List<PerformanceRoomSimplifiedRow> Career { get; set; } = [];
+
+    [JsonPropertyName("connect")]
+    public List<PerformanceRoomSimplifiedRow> Connect { get; set; } = [];
+}
+
+internal class PerformanceVisitSimplifiedRow
+{
+    [JsonPropertyName("date")]
+    public string Date { get; set; } = "";
+
+    [JsonPropertyName("gender")]
+    public string Gender { get; set; } = "";
+
+    [JsonPropertyName("age")]
+    public int Age { get; set; }
+}
+
+internal sealed class PerformancePrinterSimplifiedRow : PerformanceVisitSimplifiedRow
+{
+    [JsonPropertyName("count")]
+    public int Count { get; set; }
+}
+
+internal sealed class PerformanceRoomSimplifiedRow
+{
+    [JsonPropertyName("date")]
+    public string Date { get; set; } = "";
+
+    [JsonPropertyName("space")]
+    public string Space { get; set; } = "";
+
+    [JsonPropertyName("purpose")]
+    public string Purpose { get; set; } = "";
+
+    [JsonPropertyName("headcount")]
+    public int Headcount { get; set; }
+
+    [JsonPropertyName("note")]
+    public string Note { get; set; } = "";
+
+    [JsonPropertyName("startTime")]
+    public string StartTime { get; set; } = "";
+
+    [JsonPropertyName("endTime")]
+    public string EndTime { get; set; } = "";
+
+    [JsonPropertyName("male20s")]
+    public int Male20s { get; set; }
+
+    [JsonPropertyName("female20s")]
+    public int Female20s { get; set; }
+
+    [JsonPropertyName("male30s")]
+    public int Male30s { get; set; }
+
+    [JsonPropertyName("female30s")]
+    public int Female30s { get; set; }
+
+    [JsonPropertyName("maleUnder19")]
+    public int MaleUnder19 { get; set; }
+
+    [JsonPropertyName("femaleUnder19")]
+    public int FemaleUnder19 { get; set; }
+
+    [JsonPropertyName("male40Plus")]
+    public int Male40Plus { get; set; }
+
+    [JsonPropertyName("female40Plus")]
+    public int Female40Plus { get; set; }
 }

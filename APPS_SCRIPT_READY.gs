@@ -26,7 +26,7 @@ const HEADERS = {
   visit: ['연번', '날짜', '성별', '나이'],
   printer: ['연번', '날짜', '성별', '나이', '사용 매수'],
   career: [
-    '연번', '날짜', '사용목적', '인원수', '비고', '시작시간', '종료시간',
+    '연번', '날짜', '사용공간', '사용목적', '인원수', '비고', '시작시간', '종료시간',
     '20~29세(남)', '20~29세(여)', '30~39세(남)', '30~39세(여)', '~19세(남)', '~19세(여)',
     '40세 이상(남)', '40세 이상(여)'
   ],
@@ -335,13 +335,32 @@ function handleAdminMonthlyPerformance_(payload) {
   };
   const totalUniqueKeys = {};
   const memberBirthDates = getPerformanceMemberBirthDates_();
-
-  getRowsAsObjectsForMonth_(
+  const visitRows = getRowsAsObjectsForMonth_(
     SHEET_NAMES.VISIT_LOGS,
     HEADERS.visitLogs,
     'date',
     monthKey
-  ).forEach(function(row) {
+  );
+  const printerRows = getRowsAsObjectsForMonth_(
+    SHEET_NAMES.PRINTER_LOGS,
+    HEADERS.printerLogs,
+    'date',
+    monthKey
+  );
+  const connectRows = getRowsAsObjectsForMonth_(
+    SHEET_NAMES.CONNECT_LOGS,
+    HEADERS.roomLogs,
+    'date',
+    monthKey
+  );
+  const careerRows = getRowsAsObjectsForMonth_(
+    SHEET_NAMES.CAREER_LOGS,
+    HEADERS.roomLogs,
+    'date',
+    monthKey
+  );
+
+  visitRows.forEach(function(row) {
     addPerformancePerson_(
       categories.visit,
       normalizeSheetDate_(row.date),
@@ -352,12 +371,7 @@ function handleAdminMonthlyPerformance_(payload) {
     );
   });
 
-  getRowsAsObjectsForMonth_(
-    SHEET_NAMES.PRINTER_LOGS,
-    HEADERS.printerLogs,
-    'date',
-    monthKey
-  ).forEach(function(row) {
+  printerRows.forEach(function(row) {
     addPerformancePerson_(
       categories.printer,
       normalizeSheetDate_(row.date),
@@ -369,15 +383,10 @@ function handleAdminMonthlyPerformance_(payload) {
   });
 
   [
-    { sheetName: SHEET_NAMES.CONNECT_LOGS, category: categories.connect },
-    { sheetName: SHEET_NAMES.CAREER_LOGS, category: categories.career }
+    { rows: connectRows, category: categories.connect },
+    { rows: careerRows, category: categories.career }
   ].forEach(function(source) {
-    getRowsAsObjectsForMonth_(
-      source.sheetName,
-      HEADERS.roomLogs,
-      'date',
-      monthKey
-    ).forEach(function(row) {
+    source.rows.forEach(function(row) {
       addPerformanceRoomLog_(source.category, row, totalUniqueKeys, memberBirthDates);
     });
   });
@@ -408,8 +417,71 @@ function handleAdminMonthlyPerformance_(payload) {
     totalUsers: totalUsers,
     totalUniqueUsers: Object.keys(totalUniqueKeys).length,
     daily: daily,
+    simplified: {
+      visit: buildPerformanceVisitSimplifiedRows_(visitRows, memberBirthDates),
+      printer: buildPerformancePrinterSimplifiedRows_(printerRows, memberBirthDates),
+      career: buildPerformanceRoomSimplifiedRows_(careerRows, true),
+      connect: buildPerformanceRoomSimplifiedRows_(connectRows, false)
+    },
     uniqueBasis: '회원 ID 월간 중복 제거, 식별 불가 비회원 및 동반자는 기록별 인원'
   };
+}
+
+function buildPerformanceVisitSimplifiedRows_(rows, memberBirthDates) {
+  return sortPerformanceSimplifiedRows_(rows).map(function(row) {
+    return {
+      date: normalizeSheetDate_(row.date),
+      gender: str_(row.gender),
+      age: performanceAgeForDate_(row.userId, row.age, row.date, memberBirthDates)
+    };
+  });
+}
+
+function buildPerformancePrinterSimplifiedRows_(rows, memberBirthDates) {
+  return sortPerformanceSimplifiedRows_(rows).map(function(row) {
+    return {
+      date: normalizeSheetDate_(row.date),
+      gender: str_(row.gender),
+      age: performanceAgeForDate_(row.userId, row.age, row.date, memberBirthDates),
+      count: performanceCount_(row.count)
+    };
+  });
+}
+
+function buildPerformanceRoomSimplifiedRows_(rows, includeSpace) {
+  return sortPerformanceSimplifiedRows_(rows).map(function(row) {
+    return {
+      date: normalizeSheetDate_(row.date),
+      space: includeSpace ? performanceCareerSpaceLabel_(row.spaceType) : '',
+      purpose: str_(row.purpose),
+      headcount: Math.max(1, performanceCount_(row.headcount)),
+      note: str_(row.participants),
+      startTime: normalizeSheetTime_(row.startTime),
+      endTime: normalizeSheetTime_(row.endTime),
+      male20s: performanceCount_(row.male20s),
+      female20s: performanceCount_(row.female20s),
+      male30s: performanceCount_(row.male30s),
+      female30s: performanceCount_(row.female30s),
+      maleUnder19: performanceCount_(row.maleUnder19),
+      femaleUnder19: performanceCount_(row.femaleUnder19),
+      male40Plus: performanceCount_(row.male40Plus),
+      female40Plus: performanceCount_(row.female40Plus)
+    };
+  });
+}
+
+function performanceCareerSpaceLabel_(spaceType) {
+  if (spaceType === 'careerRoom1') return 'Room1';
+  if (spaceType === 'careerRoom2') return 'Room2';
+  return '미지정';
+}
+
+function sortPerformanceSimplifiedRows_(rows) {
+  return rows.slice().sort(function(left, right) {
+    return normalizeSheetDate_(left.date).localeCompare(normalizeSheetDate_(right.date)) ||
+      str_(left.createdAt).localeCompare(str_(right.createdAt)) ||
+      Number(left.__rowNumber || 0) - Number(right.__rowNumber || 0);
+  });
 }
 
 function createPerformanceCategory_(key, label, includeAllAges) {
@@ -2109,7 +2181,8 @@ function ensurePublicFormulaSheetSchemas_() {
       formula.indexOf('CHOOSECOLS(') !== -1;
     const roomFormulaCurrent = item.name !== SHEET_NAMES.CAREER && item.name !== SHEET_NAMES.CONNECT
       ? true
-      : formula.indexOf('!AC2:INDEX(') !== -1;
+      : formula.indexOf('!AC2:INDEX(') !== -1 &&
+        (item.name !== SHEET_NAMES.CAREER || formula.indexOf('!C2:INDEX(') !== -1);
     if (!headersMatch || !formula || formulaError || !sortedFormulaCurrent || !roomFormulaCurrent) {
       if (item.name === SHEET_NAMES.CAREER) backfillRoomSummaryColumns_(SHEET_NAMES.CAREER_LOGS);
       if (item.name === SHEET_NAMES.CONNECT) backfillRoomSummaryColumns_(SHEET_NAMES.CONNECT_LOGS);
@@ -2147,6 +2220,20 @@ function buildPublicSheetFormula_(sheetName, monthKey) {
   }
 
   const source = sheetName === SHEET_NAMES.CAREER ? 'APP_CAREER_LOGS' : 'APP_CONNECT_LOGS';
+  if (sheetName === SHEET_NAMES.CAREER) {
+    return '=IFERROR(LET(last,MAX(2,COUNTA(' + source + '!A:A)),dates,' + source + '!J2:INDEX(' + source + '!J:J,last),' +
+      'spaces,IF(' + source + '!C2:INDEX(' + source + '!C:C,last)="careerRoom1","Room1",IF(' +
+      source + '!C2:INDEX(' + source + '!C:C,last)="careerRoom2","Room2",' + source + '!C2:INDEX(' + source + '!C:C,last))),' +
+      'filtered,FILTER(HSTACK(dates,spaces,' + source + '!M2:INDEX(' + source + '!M:M,last),' + source + '!T2:INDEX(' + source + '!T:T,last),' +
+      source + '!U2:INDEX(' + source + '!U:U,last),' + source + '!K2:INDEX(' + source + '!K:K,last),' + source + '!L2:INDEX(' + source + '!L:L,last),' +
+      source + '!V2:INDEX(' + source + '!V:V,last),' + source + '!W2:INDEX(' + source + '!W:W,last),' + source + '!X2:INDEX(' + source + '!X:X,last),' +
+      source + '!Y2:INDEX(' + source + '!Y:Y,last),' + source + '!Z2:INDEX(' + source + '!Z:Z,last),' + source + '!AA2:INDEX(' + source + '!AA:AA,last),' +
+      source + '!AB2:INDEX(' + source + '!AB:AB,last),' + source + '!AC2:INDEX(' + source + '!AC:AC,last),' +
+      source + '!Q2:INDEX(' + source + '!Q:Q,last),SEQUENCE(ROWS(dates))),' +
+      'IFERROR(TEXT(dates,"yyyy-mm"),LEFT(dates&"",7))="' + monthKey + '"),' +
+      'sorted,SORT(filtered,1,TRUE,16,TRUE,17,TRUE),data,CHOOSECOLS(sorted,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15),' +
+      'HSTACK(SEQUENCE(ROWS(data)),data)),"")';
+  }
   return '=IFERROR(LET(last,MAX(2,COUNTA(' + source + '!A:A)),dates,' + source + '!J2:INDEX(' + source + '!J:J,last),' +
     'filtered,FILTER(HSTACK(dates,' + source + '!M2:INDEX(' + source + '!M:M,last),' + source + '!T2:INDEX(' + source + '!T:T,last),' +
     source + '!U2:INDEX(' + source + '!U:U,last),' + source + '!K2:INDEX(' + source + '!K:K,last),' + source + '!L2:INDEX(' + source + '!L:L,last),' +

@@ -187,6 +187,7 @@ internal static class SelfTest
         if (!report.Ok || report.Month != "2026-07" || report.Summary.Count != 4 ||
             report.TotalUsers != 12 || report.TotalUniqueUsers != 9 ||
             report.Daily.Visit.Count != 1 || report.Daily.Connect[0].Male20To24 != 2 ||
+            report.Simplified.Career.Count != 2 || report.Simplified.Career[0].Space != "Room1" ||
             handler.MonthlyPerformanceCount != 1)
         {
             throw new InvalidOperationException("월간 실적 응답 처리 테스트에 실패했습니다.");
@@ -212,8 +213,16 @@ internal static class SelfTest
                 ?? throw new InvalidOperationException("엑셀 통합 문서 정보가 없습니다.");
             using var reader = new StreamReader(workbookEntry.Open());
             var workbookXml = reader.ReadToEnd();
-            if (worksheetCount != 5 || !workbookXml.Contains("월간 요약", StringComparison.Ordinal) ||
-                !workbookXml.Contains("커넥트룸", StringComparison.Ordinal))
+            var careerSimplifiedEntry = archive.GetEntry("xl/worksheets/sheet8.xml")
+                ?? throw new InvalidOperationException("커리어존 간소화 시트가 없습니다.");
+            using var careerReader = new StreamReader(careerSimplifiedEntry.Open());
+            var careerXml = careerReader.ReadToEnd();
+            if (worksheetCount != 9 || !workbookXml.Contains("월간 요약", StringComparison.Ordinal) ||
+                !workbookXml.Contains("커넥트룸", StringComparison.Ordinal) ||
+                !workbookXml.Contains("커리어존 간소화", StringComparison.Ordinal) ||
+                !careerXml.Contains("사용공간", StringComparison.Ordinal) ||
+                !careerXml.Contains("Room1", StringComparison.Ordinal) ||
+                !careerXml.Contains("Room2", StringComparison.Ordinal))
             {
                 throw new InvalidOperationException("월간 실적 엑셀 생성 테스트에 실패했습니다.");
             }
@@ -245,6 +254,40 @@ internal static class SelfTest
             Connect = CreateDailyRows(2),
             Career = CreateDailyRows(1),
             Printer = CreateDailyRows(1)
+        },
+        Simplified = new PerformanceSimplifiedGroups
+        {
+            Visit =
+            [
+                new() { Date = "2026-07-01", Gender = "남성", Age = 24 }
+            ],
+            Printer =
+            [
+                new() { Date = "2026-07-01", Gender = "여성", Age = 29, Count = 2 }
+            ],
+            Career =
+            [
+                new()
+                {
+                    Date = "2026-07-01", Space = "Room1", Purpose = "상담",
+                    Headcount = 1, Note = "남성 / 24", StartTime = "10:00", EndTime = "11:00",
+                    Male20s = 1
+                },
+                new()
+                {
+                    Date = "2026-07-02", Space = "Room2", Purpose = "회의",
+                    Headcount = 2, Note = "여성 / 28, 여성 / 18", StartTime = "13:00", EndTime = "14:00",
+                    Female20s = 1, FemaleUnder19 = 1
+                }
+            ],
+            Connect =
+            [
+                new()
+                {
+                    Date = "2026-07-03", Purpose = "모임", Headcount = 1,
+                    Note = "남성 / 31", StartTime = "15:00", EndTime = "16:00", Male30s = 1
+                }
+            ]
         }
     };
 
