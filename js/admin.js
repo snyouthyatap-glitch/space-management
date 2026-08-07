@@ -9,7 +9,8 @@ const state = {
     subjectType: "member",
     member: null,
     guestToken: "",
-    pendingPrinterRequest: null
+    pendingPrinterRequest: null,
+    reservationRequests: []
 };
 
 const logTypeLabels = {
@@ -42,6 +43,11 @@ function getSeoulDateParts() {
 function todayString() {
     const { year, month, day } = getSeoulDateParts();
     return `${year}-${month}-${day}`;
+}
+
+function currentMonthString() {
+    const { year, month } = getSeoulDateParts();
+    return `${year}-${month}`;
 }
 
 function formatDate(date) {
@@ -172,6 +178,7 @@ function showWorkspace() {
     document.getElementById("workspaceSection").classList.remove("hidden");
     document.getElementById("logoutBtn").classList.remove("hidden");
     document.getElementById(state.subjectType === "guest" ? "guestGender" : "memberPhone").focus();
+    refreshReservationRequests();
 }
 
 function logout(message = "") {
@@ -382,6 +389,142 @@ function addRecentEntry(member, date, logType, response) {
     document.getElementById("recentBody").prepend(row);
 }
 
+function isReservationRequestSource(source) {
+    return ["reservationRequest", "webReservation", "web", "app"].includes(source);
+}
+
+function normalizeReservationRequest(item) {
+    const id = item.id || item.requestId || "";
+    return {
+        id,
+        date: item.date || "",
+        startTime: item.startTime || "",
+        endTime: item.endTime || "",
+        placeName: item.placeName || item.spaceLabel || formatSpaceLabel(item.spaceType, item.room),
+        name: item.bookerName || item.name || "예약자",
+        headcount: Number(item.headcount || 1),
+        purpose: item.purpose || "",
+        status: item.status || "신청"
+    };
+}
+
+function formatSpaceLabel(spaceType = "", room = "") {
+    if (spaceType === "connectRoom") return "커넥트룸";
+    if (room === "careerRoom1" || spaceType === "careerRoom1") return "커리어존 Room1";
+    if (room === "careerRoom2" || spaceType === "careerRoom2") return "커리어존 Room2";
+    return spaceType || "공간 예약";
+}
+
+function getSnapshotReservationRequests(snapshot) {
+    const direct = Array.isArray(snapshot.reservationRequests)
+        ? snapshot.reservationRequests.map(normalizeReservationRequest)
+        : [];
+    const fromCalendar = Array.isArray(snapshot.calendarEntries)
+        ? snapshot.calendarEntries
+            .filter((item) => isReservationRequestSource(item.source))
+            .map(normalizeReservationRequest)
+        : [];
+    const byId = new Map();
+    [...direct, ...fromCalendar]
+        .filter((item) => item.id)
+        .forEach((item) => byId.set(item.id, item));
+    return Array.from(byId.values())
+        .sort((a, b) => `${a.date} ${a.startTime}`.localeCompare(`${b.date} ${b.startTime}`));
+}
+
+function renderReservationRequests() {
+    const body = document.getElementById("reservationRequestsBody");
+    body.replaceChildren();
+    const pending = state.reservationRequests.filter((item) => item.status === "신청");
+    if (pending.length === 0) {
+        const row = document.createElement("tr");
+        const cell = document.createElement("td");
+        cell.colSpan = 8;
+        cell.className = "empty-cell";
+        cell.textContent = "처리할 예약 신청이 없습니다.";
+        row.appendChild(cell);
+        body.appendChild(row);
+        return;
+    }
+
+    pending.forEach((item) => {
+        const row = document.createElement("tr");
+        [
+            formatDate(item.date),
+            `${item.startTime}~${item.endTime}`,
+            item.placeName,
+            item.name,
+            `${item.headcount}명`,
+            item.purpose || "-",
+            item.status
+        ].forEach((value, index) => {
+            const cell = document.createElement("td");
+            cell.textContent = value;
+            if (index === 6) cell.className = "status-pending";
+            row.appendChild(cell);
+        });
+
+        const actionCell = document.createElement("td");
+        actionCell.className = "row-actions";
+        const approveButton = document.createElement("button");
+        approveButton.type = "button";
+        approveButton.className = "mini-button approve";
+        approveButton.textContent = "승인";
+        approveButton.addEventListener("click", () => updateReservationRequestStatus(item.id, "승인"));
+
+        const rejectButton = document.createElement("button");
+        rejectButton.type = "button";
+        rejectButton.className = "mini-button reject";
+        rejectButton.textContent = "반려";
+        rejectButton.addEventListener("click", () => updateReservationRequestStatus(item.id, "반려"));
+
+        actionCell.append(approveButton, rejectButton);
+        row.appendChild(actionCell);
+        body.appendChild(row);
+    });
+}
+
+async function refreshReservationRequests() {
+    if (!state.sessionToken) return;
+    setMessage("reservationRequestMessage");
+    setLoading("refreshReservationRequestsBtn", true, "확인 중...");
+    try {
+        const snapshot = await callScript("adminDashboardSnapshot", {
+            calendarMonth: currentMonthString(),
+            limit: 100
+        });
+        state.reservationRequests = getSnapshotReservationRequests(snapshot);
+        renderReservationRequests();
+    } catch (error) {
+        if (!handleAuthError(error)) {
+            setMessage("reservationRequestMessage", error.message || "예약 신청을 불러오지 못했습니다.");
+        }
+    } finally {
+        setLoading("refreshReservationRequestsBtn", false);
+    }
+}
+
+async function updateReservationRequestStatus(reservationRequestId, status) {
+    if (status === "반려") {
+        const confirmed = window.confirm("예약 신청을 반려할까요?");
+        if (!confirmed) return;
+    }
+    setMessage("reservationRequestMessage");
+    try {
+        await callScript("adminUpdateReservationRequestStatus", {
+            reservationRequestId,
+            status
+        });
+        showToast(`예약 신청을 ${status} 처리했습니다.`);
+        await refreshReservationRequests();
+    } catch (error) {
+        if (!handleAuthError(error)) {
+            setMessage("reservationRequestMessage", error.message || "예약 신청 상태 변경에 실패했습니다.");
+            showToast(error.message || "예약 신청 상태 변경에 실패했습니다.", "error");
+        }
+    }
+}
+
 function resetLogDetails() {
     document.getElementById("printerCount").value = "1";
     document.getElementById("startTime").value = "";
@@ -501,6 +644,8 @@ function setupListeners() {
         resetMember();
         document.getElementById("memberPhone").focus();
     });
+
+    document.getElementById("refreshReservationRequestsBtn").addEventListener("click", refreshReservationRequests);
 
     document.getElementById("logType").addEventListener("change", updateConditionalFields);
     document.getElementById("companionCount").addEventListener("input", renderCompanions);

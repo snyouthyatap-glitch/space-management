@@ -14,10 +14,17 @@
 
 ## 실행
 
-처음 한 번은 로그인 세션을 저장합니다.
+처음 한 번은 의존성과 Playwright Chromium을 설치합니다.
 
 ```powershell
-& 'C:\Users\SNYOUTH\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe' .\automation\naver-booking-sync.js --setup-login
+npm.cmd install
+npm.cmd run playwright:install
+```
+
+그 다음 처음 한 번은 네이버 로그인 세션을 저장합니다.
+
+```powershell
+npm.cmd run naver:setup-login
 ```
 
 로그인 후 콘솔에서 Enter를 누르면 프로필이 저장됩니다.
@@ -25,7 +32,7 @@
 이후에는 일반 실행만 하면 됩니다.
 
 ```powershell
-& 'C:\Users\SNYOUTH\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe' .\automation\naver-booking-sync.js
+npm.cmd run naver:sync
 ```
 
 ## 결과 파일

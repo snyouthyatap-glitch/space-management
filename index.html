@@ -3,13 +3,13 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content">
     <title>청년이봄 야탑 | QR 방문 확인</title>
     <meta property="og:title" content="청년이봄 야탑">
     <meta property="og:description" content="QR 기반 방문 확인과 시설 이용 기록 페이지">
     <meta property="og:type" content="website">
     <meta name="description" content="청년이봄 야탑 QR 방문 확인과 시설 이용 기록 페이지">
-    <link rel="stylesheet" href="css/style.css?v=20260724-5">
+    <link rel="stylesheet" href="css/style.css?v=20260807-mobile-4">
 </head>
 
 <body>
@@ -41,7 +41,7 @@
             <div class="checkin-heading">
                 <span class="eyebrow">WELCOME</span>
                 <h2>전화번호 뒷 4자리를<br>입력해 주세요</h2>
-                <p class="section-description">등록된 정보로 방문을 확인합니다.</p>
+                <p class="section-description">처음 방문도 여기서 시작합니다.</p>
             </div>
 
             <div id="entryAlert" class="alert alert-error hidden"></div>
@@ -187,17 +187,17 @@
         </div>
 
         <div id="facilitySection" class="hidden">
-            <div class="card card-premium">
+            <div id="facilitySummaryCard" class="card card-premium">
                 <div class="dashboard-header">
                     <div>
-                        <span class="eyebrow">FACILITY GUIDE</span>
                         <h2 id="facilityWelcome">시설 이용 안내</h2>
                         <p id="facilityMemberInfo" class="section-description compact"></p>
                     </div>
-                    <div class="header-actions">
-                        <span class="membership-contact">회원 탈퇴는 담당자 문의</span>
-                        <button type="button" id="facilityExitBtn" class="btn-chip">이용 종료</button>
-                    </div>
+                </div>
+
+                <div class="facility-quick-actions" aria-label="빠른 이동">
+                    <button type="button" id="quickBookingBtn" class="btn-chip">공간 예약</button>
+                    <button type="button" id="quickPrinterBtn" class="btn-chip">프린터 이용</button>
                 </div>
 
                 <div class="status-strip">
@@ -230,104 +230,120 @@
 
             <div id="facilityAlert" class="alert alert-error hidden"></div>
 
-            <div class="card">
-                <div class="tabs">
-                    <div class="tab active" data-target="printerPanel">프린터 사용</div>
-                    <div class="tab" data-target="careerPanel">커리어존 이용</div>
-                    <div class="tab" data-target="connectPanel">커넥트룸 이용</div>
+            <div id="facilityUsageCard" class="card facility-usage-card">
+                <button type="button" id="printerMainBackBtn" class="btn btn-outline booking-main-back hidden">메인으로 돌아가기</button>
+                <div class="reservation-heading">
+                    <div>
+                        <span class="eyebrow">FACILITY USE</span>
+                        <h3>시설 이용</h3>
+                    </div>
                 </div>
-
-                <div id="printerPanel" class="tab-content">
-                    <form id="printerForm">
-                        <div class="form-group">
-                            <label for="printerCount">사용 매수</label>
-                            <input type="number" id="printerCount" class="form-control" min="1" max="10" value="1" required>
-                            <small class="helper-text">하루 최대 10장까지 기록할 수 있습니다.</small>
+                <form id="printerForm" class="printer-usage-form">
+                    <div class="facility-use-header">
+                        <div>
+                            <strong>프린터 사용 기록</strong>
+                            <span>이용 후 사용 매수를 남겨주세요.</span>
                         </div>
-                        <button type="submit" id="printerSubmitBtn" class="btn btn-primary">
-                            <span class="btn-text">프린터 기록 제출</span>
-                            <div class="spinner"></div>
+                    </div>
+                    <div class="form-group">
+                        <label for="printerCount">사용 매수</label>
+                        <input type="number" id="printerCount" class="form-control" min="1" max="10" value="1" required>
+                        <small class="helper-text">하루 최대 10장까지 기록할 수 있습니다.</small>
+                    </div>
+                    <button type="submit" id="printerSubmitBtn" class="btn btn-primary">
+                        <span class="btn-text">프린터 기록 제출</span>
+                        <div class="spinner"></div>
+                    </button>
+                </form>
+            </div>
+
+            <div id="spaceBookingCard" class="card space-booking-card">
+                <div id="spaceMenuView" class="space-booking-view">
+                    <button type="button" id="bookingMenuMainBackBtn" class="btn btn-outline booking-main-back hidden">메인으로 돌아가기</button>
+                    <div class="reservation-heading">
+                        <div>
+                            <span class="eyebrow">SPACE BOOKING</span>
+                            <h3>공간 예약 신청</h3>
+                        </div>
+                    </div>
+                    <div class="space-menu-grid" aria-label="공간 선택">
+                        <button type="button" class="space-menu-item" data-booking-space="careerZone">
+                            <span class="space-menu-title">커리어존</span>
+                            <span class="space-menu-meta">예약하기</span>
                         </button>
-                    </form>
-                </div>
-
-                <div id="careerPanel" class="tab-content hidden">
-                    <form id="careerForm">
-                        <div class="form-group">
-                            <label for="careerSpaceType">이용 공간</label>
-                            <select id="careerSpaceType" class="form-control" required>
-                                <option value="">선택</option>
-                                <option value="careerRoom1">커리어존 Room1</option>
-                                <option value="careerRoom2">커리어존 Room2</option>
-                            </select>
-                        </div>
-                        <div class="row">
-                            <div class="col form-group">
-                                <label for="careerStartTime">시작 시간</label>
-                                <input type="text" id="careerStartTime" class="form-control time-input" placeholder="예: 1400" maxlength="5" required>
-                            </div>
-                            <div class="col form-group">
-                                <label for="careerEndTime">종료 시간</label>
-                                <input type="text" id="careerEndTime" class="form-control time-input" placeholder="예: 1600" maxlength="5" required>
-                            </div>
-                        </div>
-                        <div class="form-group">
-                            <label for="careerPurpose">이용 목적</label>
-                            <input type="text" id="careerPurpose" class="form-control" placeholder="이용 목적을 입력해주세요" required>
-                        </div>
-                        <div class="form-group">
-                            <label>추가 인원</label>
-                            <div class="stepper-container">
-                                <button type="button" class="stepper-btn minus" data-target="careerCompanionCount">-</button>
-                                <input type="number" id="careerCompanionCount" class="stepper-input" value="0" readonly>
-                                <button type="button" class="stepper-btn plus" data-target="careerCompanionCount">+</button>
-                            </div>
-                        </div>
-                        <div id="careerCompanions" class="companion-list-container"></div>
-                        <button type="submit" id="careerSubmitBtn" class="btn btn-primary">
-                            <span class="btn-text">커리어존 기록 제출</span>
-                            <div class="spinner"></div>
+                        <button type="button" class="space-menu-item" data-booking-space="connectRoom">
+                            <span class="space-menu-title">커넥트룸</span>
+                            <span class="space-menu-meta">예약하기</span>
                         </button>
-                    </form>
+                    </div>
                 </div>
 
-                <div id="connectPanel" class="tab-content hidden">
-                    <form id="connectForm">
-                        <div class="row">
-                            <div class="col form-group">
-                                <label for="connectStartTime">시작 시간</label>
-                                <input type="text" id="connectStartTime" class="form-control time-input" placeholder="예: 1030" maxlength="5" required>
-                            </div>
-                            <div class="col form-group">
-                                <label for="connectEndTime">종료 시간</label>
-                                <input type="text" id="connectEndTime" class="form-control time-input" placeholder="예: 1230" maxlength="5" required>
-                            </div>
+                <div id="bookingCalendarView" class="space-booking-view hidden">
+                    <button type="button" id="bookingCalendarBackBtn" class="btn btn-outline booking-main-back">메인으로 돌아가기</button>
+                    <div class="booking-topbar">
+                        <div>
+                            <span class="eyebrow">SELECT DATE</span>
+                            <h3 id="bookingCalendarTitle">예약 날짜 선택</h3>
                         </div>
+                    </div>
+                    <div class="booking-month-nav">
+                        <button type="button" id="bookingPrevMonthBtn" class="calendar-nav-btn" aria-label="이전 달">‹</button>
+                        <strong id="bookingMonthLabel"></strong>
+                        <button type="button" id="bookingNextMonthBtn" class="calendar-nav-btn" aria-label="다음 달">›</button>
+                    </div>
+                    <div class="calendar-weekdays" aria-hidden="true">
+                        <span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span>
+                    </div>
+                    <div id="bookingCalendarGrid" class="booking-calendar-grid"></div>
+                </div>
+
+                <div id="bookingTimeView" class="space-booking-view hidden">
+                    <button type="button" id="bookingSpaceBackBtn" class="btn btn-outline booking-main-back">메인으로 돌아가기</button>
+                    <div class="booking-topbar">
+                        <div>
+                            <span class="eyebrow">SELECT TIME</span>
+                            <h3 id="bookingTimeTitle">예약 시간 선택</h3>
+                            <p id="bookingTimeDate" class="section-description compact"></p>
+                        </div>
+                        <button type="button" id="bookingTimeBackBtn" class="btn-chip">다른 날짜 예약</button>
+                    </div>
+                    <div id="bookingPlaceSelector" class="booking-place-selector hidden" aria-label="커리어존 방 선택"></div>
+                    <div class="time-grid-legend">
+                        <span><i class="available"></i>예약 가능</span>
+                        <span><i class="selected"></i>선택</span>
+                        <span><i class="booked"></i>예약 있음</span>
+                    </div>
+                    <div id="bookingTimeGrid" class="booking-time-grid" aria-label="예약 시간 선택"></div>
+                    <form id="bookingRequestForm" class="booking-request-form">
+                        <div class="booking-selection-summary" id="bookingSelectionSummary">예약할 시간을 선택해 주세요.</div>
                         <div class="form-group">
-                            <label for="connectPurpose">이용 목적</label>
-                            <input type="text" id="connectPurpose" class="form-control" placeholder="이용 목적을 입력해주세요" required>
+                            <label for="bookingPurpose">이용 목적</label>
+                            <input type="text" id="bookingPurpose" class="form-control" placeholder="예: 상담 준비, 회의, 스터디" required>
                         </div>
-                        <div class="form-group">
-                            <label>추가 인원</label>
-                            <div class="stepper-container">
-                                <button type="button" class="stepper-btn minus" data-target="connectCompanionCount">-</button>
-                                <input type="number" id="connectCompanionCount" class="stepper-input" value="0" readonly>
-                                <button type="button" class="stepper-btn plus" data-target="connectCompanionCount">+</button>
+                        <div id="bookingHeadcountGroup" class="form-group">
+                            <label for="bookingHeadcount">이용 인원</label>
+                            <input type="number" id="bookingHeadcount" class="form-control" min="1" max="8" value="1" required>
+                        </div>
+                        <div id="bookingCompanionSection" class="booking-companion-section hidden">
+                            <div class="reservation-companion-heading">
+                                <h4>동반 이용자 정보</h4>
+                                <span id="bookingCompanionCount"></span>
                             </div>
+                            <div id="bookingCompanions" class="companion-list-container"></div>
                         </div>
-                        <div id="connectCompanions" class="companion-list-container"></div>
-                        <button type="submit" id="connectSubmitBtn" class="btn btn-primary">
-                            <span class="btn-text">커넥트룸 기록 제출</span>
+                        <button type="submit" id="bookingRequestSubmitBtn" class="btn btn-primary" disabled>
+                            <span class="btn-text">예약 신청</span>
                             <div class="spinner"></div>
                         </button>
                     </form>
                 </div>
             </div>
+
         </div>
 
     </div>
 
-    <script type="module" src="js/main.js?v=20260801-3"></script>
+    <script type="module" src="js/main.js?v=20260807-mobile-10"></script>
 </body>
 
 </html>

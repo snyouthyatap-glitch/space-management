@@ -1,0 +1,16 @@
+{
+  "name": "space-management",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Youth Spring Yatap space management tools and booking automation.",
+  "scripts": {
+    "naver:help": "node automation/naver-booking-sync.js --help",
+    "naver:setup-login": "node automation/naver-booking-sync.js --setup-login",
+    "naver:sync": "node automation/naver-booking-sync.js",
+    "naver:sync:headless": "node automation/naver-booking-sync.js --headless",
+    "playwright:install": "playwright install chromium"
+  },
+  "devDependencies": {
+    "playwright": "^1.62.1"
+  }
+}

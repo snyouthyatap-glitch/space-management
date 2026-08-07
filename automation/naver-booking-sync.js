@@ -1,16 +1,40 @@
 #!/usr/bin/env node
 
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 
-const PLAYWRIGHT_NODE_MODULES =
-  "C:\\Users\\SNYOUTH\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules";
-process.env.NODE_PATH = process.env.NODE_PATH
-  ? `${PLAYWRIGHT_NODE_MODULES}${path.delimiter}${process.env.NODE_PATH}`
-  : PLAYWRIGHT_NODE_MODULES;
-require("module").Module._initPaths();
+function loadPlaywright() {
+  try {
+    return require("playwright");
+  } catch (error) {
+    const candidates = [
+      process.env.PLAYWRIGHT_NODE_MODULES,
+      path.join(
+        os.homedir(),
+        ".cache",
+        "codex-runtimes",
+        "codex-primary-runtime",
+        "dependencies",
+        "node",
+        "node_modules",
+        "playwright"
+      ),
+    ].filter(Boolean);
 
-const { chromium } = require("playwright");
+    for (const candidate of candidates) {
+      try {
+        return require(candidate);
+      } catch {
+        // Try the next configured runtime path.
+      }
+    }
+
+    throw error;
+  }
+}
+
+const { chromium } = loadPlaywright();
 
 const DEFAULT_BASE_URL =
   "https://partner.booking.naver.com/bizes/1002115/booking-list-view";
@@ -40,11 +64,13 @@ function parseArgs(argv) {
     timeoutMs: Number(process.env.NAVER_BOOKING_TIMEOUT_MS || 30000),
     products: DEFAULT_PRODUCTS.slice(),
     keepOpen: false,
+    detail: process.env.NAVER_BOOKING_DETAIL !== "0",
   };
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--headless") out.headless = true;
+    else if (arg === "--no-detail") out.detail = false;
     else if (arg === "--setup-login") out.setupLogin = true;
     else if (arg === "--keep-open") out.keepOpen = true;
     else if (arg === "--base-url") out.baseUrl = argv[++i];
@@ -73,6 +99,7 @@ function printHelp() {
 Options:
   --setup-login           Open the page and wait for manual login confirmation
   --headless              Run headless
+  --no-detail             Skip opening each reservation detail page
   --keep-open             Keep the browser open after sync
   --base-url <url>        Booking list URL
   --output <path>         Output JSON path
@@ -234,6 +261,108 @@ function dedupeByReservation(rows) {
   return Array.from(map.values());
 }
 
+function detailUrl(baseUrl, detailPath) {
+  if (!detailPath) return "";
+  if (/^https?:\/\//i.test(detailPath)) return detailPath;
+  return new URL(detailPath, baseUrl).toString();
+}
+
+function detailFieldValue(fields, labelPattern) {
+  const field = (fields || []).find((item) => labelPattern.test(item.label || ""));
+  return field ? field.value || "" : "";
+}
+
+function parseHeadcount(value) {
+  const match = String(value || "").match(/\d+/);
+  return match ? Number(match[0]) : null;
+}
+
+function parseDetailFields(fields) {
+  const bookerName = detailFieldValue(fields, /^예약자$/);
+  const phone = detailFieldValue(fields, /^전화번호$/);
+  const reservationNo = detailFieldValue(fields, /^예약번호$/);
+  const productName = detailFieldValue(fields, /^상품$/);
+  const useDateTime = detailFieldValue(fields, /^이용일시$/);
+  const purpose = detailFieldValue(fields, /^이용 목적$/);
+  const headcount = parseHeadcount(detailFieldValue(fields, /^이용 인원/));
+  const requestedAt = detailFieldValue(fields, /^신청$/);
+  const confirmedAt = detailFieldValue(fields, /^확정$/);
+
+  return {
+    ...(bookerName ? { bookerName } : {}),
+    ...(phone ? { phone } : {}),
+    ...(reservationNo ? { reservationNo } : {}),
+    ...(productName ? { productName } : {}),
+    ...(useDateTime ? { useDateTime } : {}),
+    ...(purpose ? { purpose } : {}),
+    ...(headcount ? { headcount } : {}),
+    ...(requestedAt ? { requestedAt } : {}),
+    ...(confirmedAt ? { confirmedAt } : {}),
+  };
+}
+
+async function collectDetail(page) {
+  return page.evaluate(() => {
+    const clean = (value) => (value || "").replace(/\s+/g, " ").trim();
+    const text = clean(document.body?.innerText || document.body?.textContent || "");
+    const fields = [];
+    const candidates = Array.from(
+      document.querySelectorAll("dt, th, label, [class*='label'], [class*='title'], [class*='key']")
+    );
+
+    for (const labelNode of candidates) {
+      const label = clean(labelNode.textContent);
+      if (!label || label.length > 30) continue;
+      const parent = labelNode.parentElement;
+      const valueNode =
+        labelNode.nextElementSibling ||
+        parent?.querySelector("dd, td, [class*='value'], [class*='content'], [class*='desc']");
+      const value = clean(valueNode?.textContent || "");
+      if (!value || value === label || value.length > 200) continue;
+      fields.push({ label, value });
+    }
+
+    return { detailText: text, detailFields: fields.slice(0, 80) };
+  });
+}
+
+async function enrichRowsWithDetails(context, baseUrl, rows, timeoutMs) {
+  const enriched = [];
+  for (const row of rows) {
+    const url = detailUrl(baseUrl, row.detailPath);
+    if (!url) {
+      enriched.push(row);
+      continue;
+    }
+
+    const detailPage = await context.newPage();
+    detailPage.setDefaultTimeout(timeoutMs);
+    try {
+      await detailPage.goto(url, { waitUntil: "domcontentloaded", timeout: timeoutMs });
+      await waitForPageReady(detailPage, timeoutMs);
+      const detail = await collectDetail(detailPage);
+      const parsedDetail = parseDetailFields(detail.detailFields);
+      enriched.push({
+        ...row,
+        ...parsedDetail,
+        detailUrl: url,
+        detailText: detail.detailText,
+        detailFields: detail.detailFields,
+        detailCollectedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      enriched.push({
+        ...row,
+        detailUrl: url,
+        detailError: error.message || String(error),
+      });
+    } finally {
+      await detailPage.close().catch(() => {});
+    }
+  }
+  return enriched;
+}
+
 function buildSummary(results) {
   return Object.fromEntries(
     Object.entries(results).map(([key, rows]) => [key, { count: rows.length }])
@@ -265,12 +394,15 @@ async function sync(config) {
     const results = {};
     for (const filter of QUICK_FILTERS) {
       await activateQuickFilter(page, filter.label, config.timeoutMs);
-      const rows = dedupeByReservation(await collectRows(page)).map((row) => ({
+      let rows = dedupeByReservation(await collectRows(page)).map((row) => ({
         ...row,
         filterType: filter.key,
         filterLabel: filter.label,
         collectedAt: new Date().toISOString(),
       }));
+      if (config.detail) {
+        rows = await enrichRowsWithDetails(context, config.baseUrl, rows, config.timeoutMs);
+      }
       results[filter.key] = rows;
     }
 

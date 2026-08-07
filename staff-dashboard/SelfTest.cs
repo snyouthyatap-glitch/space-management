@@ -15,6 +15,7 @@ internal static class SelfTest
         TestDashboardResponseParsing();
         TestSessionExpiryRecoveryAsync().GetAwaiter().GetResult();
         TestReservationStatusUpdateAsync().GetAwaiter().GetResult();
+        TestReservationRequestStatusUpdateAsync().GetAwaiter().GetResult();
         TestManualLogFlowAsync().GetAwaiter().GetResult();
         TestMonthlyPerformanceAsync().GetAwaiter().GetResult();
         TestPerformanceWorkbook();
@@ -122,6 +123,27 @@ internal static class SelfTest
             handler.StatusUpdateCount != 1)
         {
             throw new InvalidOperationException("예약 상태 변경 요청 테스트에 실패했습니다.");
+        }
+    }
+
+    private static async Task TestReservationRequestStatusUpdateAsync()
+    {
+        var handler = new FakeAppsScriptHandler();
+        using var httpClient = new HttpClient(handler);
+        var client = new AppsScriptClient(httpClient);
+        var result = await client.UpdateReservationRequestStatusAsync(
+            new DashboardSettings { AppsScriptUrl = "https://example.test/exec" },
+            FakeAppsScriptHandler.Password,
+            "request-123",
+            "승인",
+            CancellationToken.None);
+
+        if (!result.Ok ||
+            result.ReservationId != "request-123" ||
+            result.Status != "승인" ||
+            handler.ReservationRequestStatusUpdateCount != 1)
+        {
+            throw new InvalidOperationException("웹 예약 신청 상태 변경 요청 테스트에 실패했습니다.");
         }
     }
 
@@ -306,6 +328,7 @@ internal static class SelfTest
         public int LoginCount { get; private set; }
         public int SnapshotCount { get; private set; }
         public int StatusUpdateCount { get; private set; }
+        public int ReservationRequestStatusUpdateCount { get; private set; }
         public int MemberLookupCount { get; private set; }
         public int ManualLogCount { get; private set; }
         public int MonthlyPerformanceCount { get; private set; }
@@ -356,6 +379,19 @@ internal static class SelfTest
                         "events": [],
                         "todayReservations": [],
                         "calendarEntries": [],
+                        "reservationRequests": [
+                          {
+                            "id": "request-1",
+                            "status": "신청",
+                            "bookerName": "테스트 회원",
+                            "date": "2026-07-28",
+                            "startTime": "14:00",
+                            "endTime": "15:00",
+                            "placeName": "커리어존 Room1",
+                            "headcount": 1,
+                            "purpose": "상담"
+                          }
+                        ],
                         "summary": {
                           "visitorStats": { "daily": 1, "weekly": 2, "monthly": 3 },
                           "activeMemberCount": 4
@@ -374,6 +410,19 @@ internal static class SelfTest
                     reservationId,
                     status,
                     cancelled = status is "취소" or "노쇼"
+                });
+            }
+            else if (action == "adminUpdateReservationRequestStatus")
+            {
+                ReservationRequestStatusUpdateCount++;
+                var reservationRequestId = payload.GetProperty("reservationRequestId").GetString() ?? "";
+                var status = payload.GetProperty("status").GetString() ?? "";
+                json = JsonSerializer.Serialize(new
+                {
+                    ok = true,
+                    reservationId = reservationRequestId,
+                    status,
+                    cancelled = status == "반려"
                 });
             }
             else if (action == "adminLookupMember")

@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex, nofollow">
     <title>청년이봄 야탑 | 관리자 수동 일지</title>
-    <link rel="stylesheet" href="css/admin.css?v=20260725-2">
+    <link rel="stylesheet" href="css/admin.css?v=20260807-admin-requests-1">
 </head>
 
 <body>
@@ -45,6 +45,41 @@
                 </div>
                 <time id="todayText"></time>
             </div>
+
+            <section class="work-section reservation-request-section" aria-labelledby="reservationRequestTitle">
+                <div class="section-heading">
+                    <div>
+                        <span class="step-number">예약</span>
+                        <h2 id="reservationRequestTitle">예약 신청 관리</h2>
+                    </div>
+                    <button type="button" id="refreshReservationRequestsBtn" class="button button-secondary compact-button">
+                        <span class="button-text">새로고침</span>
+                        <span class="spinner" aria-hidden="true"></span>
+                    </button>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>날짜</th>
+                                <th>시간</th>
+                                <th>공간</th>
+                                <th>신청자</th>
+                                <th>인원</th>
+                                <th>목적</th>
+                                <th>상태</th>
+                                <th>처리</th>
+                            </tr>
+                        </thead>
+                        <tbody id="reservationRequestsBody">
+                            <tr>
+                                <td colspan="8" class="empty-cell">예약 신청을 불러오는 중</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <p id="reservationRequestMessage" class="form-message" role="alert"></p>
+            </section>
 
             <section class="work-section" aria-labelledby="memberSearchTitle">
                 <div class="section-heading">
@@ -202,7 +237,7 @@
         </div>
     </main>
 
-    <script type="module" src="js/admin.js?v=20260725-3"></script>
+    <script type="module" src="js/admin.js?v=20260807-admin-requests-1"></script>
 </body>
 
 </html>

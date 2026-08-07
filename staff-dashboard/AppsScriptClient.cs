@@ -95,6 +95,21 @@ internal sealed class AppsScriptClient
         return result;
     }
 
+    public Task<ReservationStatusUpdate> UpdateReservationRequestStatusAsync(
+        DashboardSettings settings,
+        string password,
+        string reservationRequestId,
+        string status,
+        CancellationToken cancellationToken) =>
+        ExecuteAdminActionAsync<ReservationStatusUpdate>(
+            settings,
+            password,
+            "adminUpdateReservationRequestStatus",
+            session => new { adminSession = session, reservationRequestId, status },
+            cancellationToken,
+            response => response.Ok,
+            response => response.Error);
+
     public async Task<AdminMember> LookupMemberAsync(
         DashboardSettings settings,
         string password,

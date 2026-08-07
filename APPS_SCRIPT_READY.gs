@@ -3,6 +3,7 @@ const QR_ENTRY_TOKEN = 'ybom-qr-2026';
 const MEMBER_RETENTION_YEARS = 3;
 const FACILITY_MIN_AGE = 19;
 const FACILITY_MAX_AGE = 39;
+const RESERVATION_SUBMIT_UNLOCK_MINUTES = 20;
 const ADMIN_ACCESS_HASH_PROPERTY = 'ADMIN_ACCESS_HASH';
 const ADMIN_SESSION_SECONDS = 1800;
 const PENDING_CALENDAR_MONTHS_PROPERTY = 'PENDING_OPERATION_CALENDAR_MONTHS';
@@ -17,6 +18,7 @@ const SHEET_NAMES = {
   PRINTER_LOGS: 'APP_PRINTER_LOGS',
   CAREER_LOGS: 'APP_CAREER_LOGS',
   CONNECT_LOGS: 'APP_CONNECT_LOGS',
+  RESERVATION_REQUESTS: 'APP_RESERVATION_REQUESTS',
   RETENTION_LOGS: 'APP_RETENTION_LOGS',
   ACCESS_ALERTS: 'APP_ACCESS_ALERTS',
   NAVER_SYNC: '네이버예약_동기화'
@@ -47,6 +49,12 @@ const HEADERS = {
     'date', 'startTime', 'endTime', 'purpose', 'companionsJson', 'companionCount', 'createdBy', 'createdAt',
     'linkedReservationId', 'dedupeStatus', 'headcount', 'participants', 'male20s', 'female20s', 'male30s',
     'female30s', 'maleUnder19', 'femaleUnder19', 'male40Plus', 'female40Plus'
+  ],
+  reservationRequests: [
+    'requestId', 'status', 'memberId', 'name', 'memberNameKey', 'gender', 'age', 'phone', 'phoneLastDigits',
+    'spaceType', 'placeId', 'placeName', 'date', 'startTime', 'endTime', 'purpose', 'headcount',
+    'companionsJson', 'companionCount', 'requestedAt', 'decidedAt', 'decidedBy', 'decisionNote',
+    'usageLogId', 'submittedAt', 'submittedByMemberId', 'updatedAt'
   ],
   retentionLogs: [
     'runId', 'action', 'processedAt', 'memberCount', 'visitLogCount', 'printerLogCount',
@@ -158,6 +166,8 @@ function dispatchWebAction_(action, payload) {
       return handleAdminDashboardSnapshot_(payload);
     case 'adminUpdateReservationStatus':
       return handleAdminUpdateReservationStatus_(payload);
+    case 'adminUpdateReservationRequestStatus':
+      return handleAdminUpdateReservationRequestStatus_(payload);
     case 'adminMonthlyPerformance':
       return handleAdminMonthlyPerformance_(payload);
     case 'resolveFacilityEntry':
@@ -170,6 +180,10 @@ function dispatchWebAction_(action, payload) {
       return handleSubmitVisitLog_(payload);
     case 'getTodayReservations':
       return handleGetTodayReservations_(payload);
+    case 'getSpaceAvailability':
+      return handleGetSpaceAvailability_(payload);
+    case 'submitSpaceReservationRequest':
+      return handleSubmitSpaceReservationRequest_(payload);
     case 'submitUsageRecord':
       return handleSubmitUsageRecord_(payload);
     case 'submitReservationUsage':
@@ -262,6 +276,7 @@ function handleAdminDashboardSnapshot_(payload) {
     events: getStaffDashboardEvents_(recentLimit),
     todayReservations: getStaffTodayReservations_(calendarEntries),
     calendarEntries: calendarEntries,
+    reservationRequests: getStaffReservationRequests_(calendarEntries),
     summary: getStaffDashboardSummary_()
   };
 }
@@ -317,6 +332,58 @@ function handleAdminUpdateReservationStatus_(payload) {
       reservationId: reservationId,
       status: status,
       cancelled: isCancelledNaverStatus_(status)
+    };
+  });
+}
+
+function handleAdminUpdateReservationRequestStatus_(payload) {
+  const requestId = str_(
+    payload && (payload.reservationRequestId || payload.requestId || payload.reservationId)
+  ).replace(/^(web|reservationRequest|webReservation):/, '');
+  const status = str_(payload && payload.status);
+  const note = str_(payload && payload.note);
+  const allowedStatuses = ['신청', '승인', '반려', '취소'];
+  if (!requestId) throw new Error('변경할 예약 신청번호가 없습니다.');
+  if (allowedStatuses.indexOf(status) === -1) {
+    throw new Error('지원하지 않는 예약 신청 상태입니다.');
+  }
+
+  return withScriptLock_(function() {
+    const sheet = getOrCreateSheet_(SHEET_NAMES.RESERVATION_REQUESTS, HEADERS.reservationRequests);
+    ensureSheetHeaders_(sheet, HEADERS.reservationRequests);
+    const entry = findReservationRequestEntry_(sheet, requestId);
+    if (!entry) throw new Error('예약 신청 ' + requestId + '을(를) 찾을 수 없습니다.');
+    if (str_(entry.values.usageLogId)) {
+      throw new Error('이미 이용일지가 제출된 예약은 상태를 변경할 수 없습니다.');
+    }
+
+    if (status === '승인' || status === '신청') {
+      assertNoReservationRequestConflict_(
+        str_(entry.values.spaceType),
+        normalizeSheetDate_(entry.values.date),
+        normalizeSheetTime_(entry.values.startTime),
+        normalizeSheetTime_(entry.values.endTime),
+        requestId
+      );
+    }
+
+    const now = nowText_();
+    updateReservationRequestRow_(sheet, entry.rowNumber, {
+      status: status,
+      decidedAt: status === '신청' ? '' : now,
+      decidedBy: 'admin',
+      decisionNote: note,
+      updatedAt: now
+    });
+    const date = normalizeSheetDate_(entry.values.date);
+    clearReservationCaches_(date);
+    markOperationCalendarMonthPending_(date);
+    return {
+      ok: true,
+      requestId: 'web:' + requestId,
+      reservationId: 'web:' + requestId,
+      status: status,
+      cancelled: status === '취소' || status === '반려'
     };
   });
 }
@@ -801,11 +868,12 @@ function getStaffTodayReservations_(calendarEntries) {
   const date = today_();
   return (calendarEntries || [])
     .filter(function(row) {
-      return row.source === 'naver' && row.date === date;
+      return (row.source === 'naver' || row.source === 'reservationRequest') && row.date === date;
     })
     .map(function(row) {
       return {
-        id: str_(row.id).replace(/^naver:/, ''),
+        id: row.source === 'naver' ? str_(row.id).replace(/^naver:/, '') : str_(row.id),
+        source: str_(row.source),
         status: str_(row.status),
         bookerName: str_(row.name),
         spaceType: str_(row.spaceType),
@@ -821,6 +889,28 @@ function getStaffTodayReservations_(calendarEntries) {
     })
     .sort(function(a, b) {
       return str_(a.startTime).localeCompare(str_(b.startTime));
+    });
+}
+
+function getStaffReservationRequests_(calendarEntries) {
+  return (calendarEntries || [])
+    .filter(function(row) {
+      return row.source === 'web' || row.source === 'reservationRequest';
+    })
+    .map(function(row) {
+      return {
+        id: str_(row.id),
+        requestId: str_(row.id).replace(/^(web|reservationRequest|webReservation):/, ''),
+        status: str_(row.status),
+        bookerName: str_(row.name),
+        date: normalizeSheetDate_(row.date),
+        startTime: normalizeSheetTime_(row.startTime),
+        endTime: normalizeSheetTime_(row.endTime),
+        placeName: str_(row.placeName),
+        spaceType: str_(row.spaceType),
+        headcount: safePositiveInteger_(row.headcount, 1),
+        purpose: str_(row.purpose)
+      };
     });
 }
 
@@ -860,6 +950,29 @@ function getStaffCalendarEntries_(requestedMonth) {
         cancelled: isCancelledNaverStatus_(row.status),
         submitted: Boolean(str_(row.usageLogId))
       };
+    });
+
+  getRowsAsObjects_(SHEET_NAMES.RESERVATION_REQUESTS, HEADERS.reservationRequests)
+    .filter(function(row) {
+      return normalizeSheetDate_(row.date).slice(0, 7) === monthKey &&
+        visibleReservationRequestStatus_(row.status);
+    })
+    .forEach(function(row) {
+      entries.push({
+        id: 'web:' + str_(row.requestId),
+        source: 'reservationRequest',
+        date: normalizeSheetDate_(row.date),
+        startTime: normalizeSheetTime_(row.startTime),
+        endTime: normalizeSheetTime_(row.endTime),
+        placeName: str_(row.placeName, getReservationSpaceLabel_(row.spaceType)),
+        spaceType: str_(row.spaceType),
+        name: str_(row.name),
+        headcount: safePositiveInteger_(row.headcount, 1),
+        purpose: str_(row.purpose),
+        status: str_(row.status),
+        cancelled: str_(row.status) === '취소' || str_(row.status) === '반려',
+        submitted: Boolean(str_(row.usageLogId)) || str_(row.status) === '일지제출완료'
+      });
     });
 
   [
@@ -1184,6 +1297,7 @@ function handleAdminSubmitManualLog_(payload) {
           duplicateAsError: true,
           repairedAsSuccess: true,
           source: 'admin-linked-reservation',
+          skipSubmitWindowCheck: true,
           date: date
         }
       );
@@ -1439,6 +1553,97 @@ function handleGetTodayReservations_(payload) {
   };
 }
 
+function handleGetSpaceAvailability_(payload) {
+  const spaceType = normalizeReservationSpaceType_(payload.spaceType, payload.placeId);
+  const date = normalizeSheetDate_(payload.date);
+  if (!isValidReservationDate_(date)) throw new Error('예약 날짜를 확인해 주세요.');
+  return {
+    ok: true,
+    date: date,
+    spaceType: spaceType,
+    reservations: getPublicSpaceReservations_(spaceType, date)
+  };
+}
+
+function handleSubmitSpaceReservationRequest_(payload) {
+  const member = requireActiveMember_(payload.memberId);
+  const spaceType = normalizeReservationSpaceType_(payload.spaceType, payload.placeId);
+  const date = normalizeSheetDate_(payload.date);
+  const startTime = normalizeSheetTime_(payload.startTime);
+  const endTime = normalizeSheetTime_(payload.endTime);
+  const purpose = str_(payload.purpose);
+  const headcount = Number(payload.headcount || 1);
+  const maxHeadcount = maxHeadcountForSpace_(spaceType);
+  const expectedCompanionCount = Math.max(0, headcount - 1);
+  const companions = normalizeCompanions_(payload.companions, expectedCompanionCount);
+
+  if (!isValidReservationDate_(date)) throw new Error('예약 날짜를 확인해 주세요.');
+  if (!startTime || !endTime || endTime <= startTime) throw new Error('예약 시간을 확인해 주세요.');
+  if (!purpose) throw new Error('이용 목적을 입력해 주세요.');
+  if (purpose.length > 200) throw new Error('이용 목적은 200자 이내로 입력해 주세요.');
+  if (!Number.isInteger(headcount) || headcount < 1 || headcount > maxHeadcount) {
+    throw new Error(getReservationSpaceLabel_(spaceType) + '은 1~' + maxHeadcount + '명까지 신청할 수 있습니다.');
+  }
+  if (companions.length !== expectedCompanionCount) {
+    throw new Error('동반 이용자의 성별과 나이를 모두 입력해 주세요.');
+  }
+  assertMemberCanUseSpace_(member, spaceType, date);
+
+  return withScriptLock_(function() {
+    assertNoReservationRequestConflict_(spaceType, date, startTime, endTime, '');
+    const requestId = 'web-' + Utilities.getUuid();
+    appendObjectRow_(SHEET_NAMES.RESERVATION_REQUESTS, HEADERS.reservationRequests, {
+      requestId: requestId,
+      status: '신청',
+      memberId: member.id,
+      name: member.name,
+      memberNameKey: normalizeNameKey_(member.name),
+      gender: member.gender,
+      age: member.birthDate ? calcAgeOnDate_(member.birthDate, date) : member.age,
+      phone: member.phone,
+      phoneLastDigits: member.phoneLastDigits,
+      spaceType: spaceType,
+      placeId: spaceType,
+      placeName: getReservationSpaceLabel_(spaceType),
+      date: date,
+      startTime: startTime,
+      endTime: endTime,
+      purpose: purpose,
+      headcount: headcount,
+      companionsJson: JSON.stringify(companions),
+      companionCount: companions.length,
+      requestedAt: nowText_(),
+      decidedAt: '',
+      decidedBy: '',
+      decisionNote: '',
+      usageLogId: '',
+      submittedAt: '',
+      submittedByMemberId: '',
+      updatedAt: nowText_()
+    });
+    clearReservationCaches_(date);
+    return {
+      ok: true,
+      requestId: requestId,
+      status: '신청',
+      reservation: publicReservationRequest_({
+        requestId: requestId,
+        status: '신청',
+        memberId: member.id,
+        name: member.name,
+        spaceType: spaceType,
+        date: date,
+        startTime: startTime,
+        endTime: endTime,
+        purpose: purpose,
+        headcount: headcount,
+        companionsJson: JSON.stringify(companions),
+        usageLogId: ''
+      })
+    };
+  });
+}
+
 function ensureVisitLogLocked_(member, date, source, preparedReservations, createdBy, memberEntry) {
   const reservations = Array.isArray(preparedReservations)
     ? preparedReservations
@@ -1618,6 +1823,9 @@ function handleSubmitReservationUsage_(payload) {
   if (!hasVisitLog_(member.id, date)) throw new Error('오늘 방문 확인을 먼저 진행해 주세요.');
 
   return withScriptLock_(function() {
+    if (reservationId.indexOf('web:') === 0) {
+      return submitWebReservationUsageLocked_(member, reservationId.replace(/^web:/, ''), payload.companions);
+    }
     const sheet = ensureNaverReservationSchema_();
     const entry = findNaverReservationEntry_(sheet, reservationId);
     if (!entry) throw new Error('예약 정보를 찾을 수 없습니다. 시트에서 예약 동기화를 다시 실행해 주세요.');
@@ -1647,6 +1855,9 @@ function submitReservationUsageLocked_(member, sheet, entry, companionsValue, op
   if (str_(reservation.usageLogId)) {
     if (settings.duplicateAsError) throw new Error('이미 동일한 시간대로 제출하였습니다.');
     return { ok: true, created: false, reservationId: reservationId };
+  }
+  if (!settings.skipSubmitWindowCheck) {
+    assertReservationSubmitWindow_(reservation);
   }
 
   const linkedLog = findLinkedReservationLog_(reservationId);
@@ -1689,6 +1900,90 @@ function submitReservationUsageLocked_(member, sheet, entry, companionsValue, op
   updateNaverReservationSubmission_(sheet, entry.rowNumber, member, reservation, roomRow.logId);
   markOperationCalendarMonthPending_(date);
   return { ok: true, created: true, reservationId: reservationId, linkedReservation: true };
+}
+
+function submitWebReservationUsageLocked_(member, requestId, companionsValue) {
+  const sheet = getOrCreateSheet_(SHEET_NAMES.RESERVATION_REQUESTS, HEADERS.reservationRequests);
+  ensureSheetHeaders_(sheet, HEADERS.reservationRequests);
+  const entry = findReservationRequestEntry_(sheet, requestId);
+  if (!entry) throw new Error('예약 신청 정보를 찾을 수 없습니다.');
+
+  const reservation = entry.values;
+  const status = str_(reservation.status);
+  if (!activeReservationRequestStatus_(status)) {
+    throw new Error('이용할 수 없는 예약 상태입니다.');
+  }
+  if (str_(reservation.memberId) !== str_(member.id)) {
+    throw new Error('로그인한 회원의 예약과 일치하지 않습니다.');
+  }
+  if (str_(reservation.usageLogId)) {
+    throw new Error('이미 동일한 시간대로 제출하였습니다.');
+  }
+  assertReservationSubmitWindow_({
+    usageDate: reservation.date,
+    startTime: reservation.startTime
+  });
+
+  const spaceType = str_(reservation.spaceType);
+  const roomLogSheet = getRoomLogSheetName_(spaceType);
+  const expectedCompanionCount = Math.max(0, Number(reservation.headcount || 1) - 1);
+  const storedCompanions = parseCompanionsJson_(reservation.companionsJson);
+  const companions = storedCompanions.length === expectedCompanionCount
+    ? storedCompanions
+    : normalizeCompanions_(companionsValue, expectedCompanionCount);
+  if (companions.length !== expectedCompanionCount) {
+    throw new Error('예약 인원에 맞게 동반 이용자의 성별과 나이를 모두 입력해 주세요.');
+  }
+
+  const roomData = {
+    date: normalizeSheetDate_(reservation.date),
+    startTime: normalizeSheetTime_(reservation.startTime),
+    endTime: normalizeSheetTime_(reservation.endTime),
+    purpose: str_(reservation.purpose, '웹 예약 이용'),
+    companions: companions
+  };
+  if (!roomData.startTime || !roomData.endTime || roomData.endTime <= roomData.startTime) {
+    throw new Error('예약 시간이 올바르지 않습니다.');
+  }
+  assertNoRoomLogConflict_(roomLogSheet, member, spaceType, roomData);
+
+  const roomRow = buildRoomLogRow_(member, spaceType, roomData, {
+    createdBy: 'web-reservation',
+    linkedReservationId: requestId,
+    dedupeStatus: 'web-reservation'
+  });
+  appendObjectRow_(roomLogSheet, HEADERS.roomLogs, roomRow);
+  updateReservationRequestRow_(sheet, entry.rowNumber, {
+    status: '일지제출완료',
+    usageLogId: roomRow.logId,
+    submittedAt: nowText_(),
+    submittedByMemberId: member.id,
+    updatedAt: nowText_()
+  });
+  clearReservationCaches_(roomData.date);
+  markOperationCalendarMonthPending_(roomData.date);
+  return { ok: true, created: true, reservationId: 'web:' + requestId, linkedReservation: true };
+}
+
+function assertReservationSubmitWindow_(reservation) {
+  const usageDate = normalizeSheetDate_(reservation.usageDate);
+  const nowDate = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd');
+  if (usageDate !== nowDate) {
+    throw new Error('예약 당일에 일지를 제출할 수 있습니다.');
+  }
+
+  const startTime = normalizeSheetTime_(reservation.startTime);
+  const timeMatch = startTime.match(/^(\d{2}):(\d{2})$/);
+  if (!timeMatch) {
+    throw new Error('예약 시간을 확인한 뒤 일지를 제출할 수 있습니다.');
+  }
+
+  const nowMinutes = Number(Utilities.formatDate(new Date(), TZ, 'H')) * 60 +
+    Number(Utilities.formatDate(new Date(), TZ, 'm'));
+  const startMinutes = Number(timeMatch[1]) * 60 + Number(timeMatch[2]);
+  if (nowMinutes < startMinutes - RESERVATION_SUBMIT_UNLOCK_MINUTES) {
+    throw new Error('이용 시작 20분 전부터 일지를 제출할 수 있습니다.');
+  }
 }
 
 function buildRoomLogRow_(member, spaceType, roomData, metadata) {
@@ -2618,6 +2913,7 @@ function ensureDataSheetSchemas_() {
     { name: SHEET_NAMES.PRINTER_LOGS, headers: HEADERS.printerLogs },
     { name: SHEET_NAMES.CAREER_LOGS, headers: HEADERS.roomLogs },
     { name: SHEET_NAMES.CONNECT_LOGS, headers: HEADERS.roomLogs },
+    { name: SHEET_NAMES.RESERVATION_REQUESTS, headers: HEADERS.reservationRequests },
     { name: SHEET_NAMES.RETENTION_LOGS, headers: HEADERS.retentionLogs },
     { name: SHEET_NAMES.ACCESS_ALERTS, headers: HEADERS.accessAlerts }
   ].forEach(function(item) {
@@ -2947,6 +3243,14 @@ function markOperationCalendarMonthPending_(value) {
   );
 }
 
+function clearReservationCaches_(date) {
+  const monthKey = normalizeSheetDate_(date).slice(0, 7);
+  if (!isValidMonthKey_(monthKey)) return;
+  const cache = CacheService.getScriptCache();
+  cache.remove('staff-dashboard-calendar-v1:' + monthKey);
+  cache.remove('staff-dashboard-summary-v2');
+}
+
 function clearPendingOperationCalendarMonth_(monthKey, expectedVersion) {
   const pending = readPendingOperationCalendarMonths_();
   if (expectedVersion !== undefined && pending[monthKey] !== expectedVersion) return;
@@ -3009,7 +3313,26 @@ function renderMonthlyOperationCalendarByMonthKey_(monthKey) {
   ensureNaverReservationSchema_();
   const reservations = getRowsAsObjects_(SHEET_NAMES.NAVER_SYNC, HEADERS.naverSync).filter(function(reservation) {
     return normalizeSheetDate_(reservation.usageDate).slice(0, 7) === monthKey;
-  });
+  }).concat(getRowsAsObjects_(SHEET_NAMES.RESERVATION_REQUESTS, HEADERS.reservationRequests)
+    .filter(function(reservation) {
+      return normalizeSheetDate_(reservation.date).slice(0, 7) === monthKey &&
+        visibleReservationRequestStatus_(reservation.status);
+    })
+    .map(function(reservation) {
+      return {
+        reservationId: str_(reservation.requestId),
+        status: str_(reservation.status),
+        bookerName: str_(reservation.name),
+        usageDate: normalizeSheetDate_(reservation.date),
+        startTime: normalizeSheetTime_(reservation.startTime),
+        endTime: normalizeSheetTime_(reservation.endTime),
+        spaceType: str_(reservation.spaceType),
+        headcount: reservation.headcount,
+        purpose: str_(reservation.purpose, '웹 예약 이용'),
+        usageLogId: str_(reservation.usageLogId),
+        source: 'reservationRequest'
+      };
+    }));
   const roomLogs = [
     { sheetName: SHEET_NAMES.CAREER_LOGS, headers: HEADERS.roomLogs },
     { sheetName: SHEET_NAMES.CONNECT_LOGS, headers: HEADERS.roomLogs }
@@ -3409,15 +3732,23 @@ function getReservationSpaceLabel_(spaceType) {
 
 function getTodayReservationsForMember_(member, date) {
   const sheet = ensureNaverReservationSchema_();
-  return findObjectsByColumnValue_(sheet, HEADERS.naverSync, 'usageDate', date)
+  const naver = findObjectsByColumnValue_(sheet, HEADERS.naverSync, 'usageDate', date)
     .filter(function(reservation) {
       return !isCancelledNaverStatus_(reservation.status) &&
         reservationBelongsToMember_(reservation, member);
     })
+    .map(publicNaverReservation_);
+  const web = getRowsAsObjects_(SHEET_NAMES.RESERVATION_REQUESTS, HEADERS.reservationRequests)
+    .filter(function(reservation) {
+      return normalizeSheetDate_(reservation.date) === date &&
+        str_(reservation.memberId) === str_(member.id) &&
+        visibleReservationRequestStatus_(reservation.status);
+    })
+    .map(publicReservationRequest_);
+  return naver.concat(web)
     .sort(function(a, b) {
       return str_(a.startTime).localeCompare(str_(b.startTime));
-    })
-    .map(publicNaverReservation_);
+    });
 }
 
 function reservationBelongsToMember_(reservation, member) {
@@ -3429,6 +3760,7 @@ function reservationBelongsToMember_(reservation, member) {
 function publicNaverReservation_(reservation) {
   return {
     id: str_(reservation.reservationId),
+    source: 'naver',
     spaceType: str_(reservation.spaceType),
     placeName: getReservationSpaceLabel_(reservation.spaceType),
     date: normalizeSheetDate_(reservation.usageDate),
@@ -3440,8 +3772,116 @@ function publicNaverReservation_(reservation) {
   };
 }
 
+function publicReservationRequest_(reservation) {
+  return {
+    id: 'web:' + str_(reservation.requestId),
+    source: 'reservationRequest',
+    status: str_(reservation.status),
+    spaceType: str_(reservation.spaceType),
+    placeName: str_(reservation.placeName, getReservationSpaceLabel_(reservation.spaceType)),
+    date: normalizeSheetDate_(reservation.date),
+    startTime: normalizeSheetTime_(reservation.startTime),
+    endTime: normalizeSheetTime_(reservation.endTime),
+    headcount: Math.max(1, Number(reservation.headcount || 1)),
+    purpose: str_(reservation.purpose, '웹 예약 이용'),
+    companions: parseCompanionsJson_(reservation.companionsJson),
+    submitted: Boolean(str_(reservation.usageLogId)) || str_(reservation.status) === '일지제출완료'
+  };
+}
+
+function normalizeReservationSpaceType_(spaceType, placeId) {
+  const candidate = str_(placeId) || str_(spaceType);
+  if (candidate === 'careerRoom1' || candidate === 'careerRoom2' || candidate === 'connectRoom') return candidate;
+  throw new Error('예약 공간을 확인해 주세요.');
+}
+
+function maxHeadcountForSpace_(spaceType) {
+  if (spaceType === 'careerRoom1') return 1;
+  if (spaceType === 'careerRoom2') return 2;
+  if (spaceType === 'connectRoom') return 8;
+  throw new Error('예약 공간을 확인해 주세요.');
+}
+
+function isValidReservationDate_(value) {
+  const date = str_(value);
+  const match = date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match || date < today_()) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  return year >= 2000 &&
+    parsed.getUTCFullYear() === year &&
+    parsed.getUTCMonth() === month - 1 &&
+    parsed.getUTCDate() === day;
+}
+
+function visibleReservationRequestStatus_(status) {
+  const value = str_(status);
+  return value === '신청' || value === '승인' || value === '일지제출완료';
+}
+
+function activeReservationRequestStatus_(status) {
+  const value = str_(status);
+  return value === '신청' || value === '승인';
+}
+
+function blockingReservationRequestStatus_(status) {
+  const value = str_(status);
+  return value === '신청' || value === '승인';
+}
+
+function getPublicSpaceReservations_(spaceType, date) {
+  const naverSheet = ensureNaverReservationSchema_();
+  const naver = findObjectsByColumnValue_(naverSheet, HEADERS.naverSync, 'usageDate', date)
+    .filter(function(reservation) {
+      return roomResourcesConflict_(reservation.spaceType, spaceType) &&
+        !isCancelledNaverStatus_(reservation.status);
+    })
+    .map(function(reservation) {
+      return {
+        id: 'naver:' + str_(reservation.reservationId),
+        source: 'naver',
+        status: str_(reservation.status),
+        spaceType: str_(reservation.spaceType),
+        placeName: getReservationSpaceLabel_(reservation.spaceType),
+        date: normalizeSheetDate_(reservation.usageDate),
+        startTime: normalizeSheetTime_(reservation.startTime),
+        endTime: normalizeSheetTime_(reservation.endTime),
+        headcount: safePositiveInteger_(reservation.headcount, 1)
+      };
+    });
+  const web = getRowsAsObjects_(SHEET_NAMES.RESERVATION_REQUESTS, HEADERS.reservationRequests)
+    .filter(function(reservation) {
+      return normalizeSheetDate_(reservation.date) === date &&
+        roomResourcesConflict_(reservation.spaceType, spaceType) &&
+        blockingReservationRequestStatus_(reservation.status);
+    })
+    .map(function(reservation) {
+      return {
+        id: 'web:' + str_(reservation.requestId),
+        source: 'reservationRequest',
+        status: str_(reservation.status),
+        spaceType: str_(reservation.spaceType),
+        placeName: str_(reservation.placeName, getReservationSpaceLabel_(reservation.spaceType)),
+        date: normalizeSheetDate_(reservation.date),
+        startTime: normalizeSheetTime_(reservation.startTime),
+        endTime: normalizeSheetTime_(reservation.endTime),
+        headcount: safePositiveInteger_(reservation.headcount, 1)
+      };
+    });
+  return naver.concat(web).sort(function(a, b) {
+    return str_(a.startTime).localeCompare(str_(b.startTime));
+  });
+}
+
 function findNaverReservationEntry_(sheet, reservationId) {
   const entries = findEntriesByColumnValue_(sheet, HEADERS.naverSync, 'reservationId', reservationId);
+  return entries.length > 0 ? entries[0] : null;
+}
+
+function findReservationRequestEntry_(sheet, requestId) {
+  const entries = findEntriesByColumnValue_(sheet, HEADERS.reservationRequests, 'requestId', requestId);
   return entries.length > 0 ? entries[0] : null;
 }
 
@@ -3452,6 +3892,55 @@ function updateNaverReservationRow_(sheet, rowNumber, changes) {
     if (column >= 0) values[column] = changes[header] || '';
   });
   sheet.getRange(rowNumber, 1, 1, HEADERS.naverSync.length).setValues([values]);
+}
+
+function updateReservationRequestRow_(sheet, rowNumber, changes) {
+  const values = sheet.getRange(rowNumber, 1, 1, HEADERS.reservationRequests.length).getValues()[0];
+  Object.keys(changes).forEach(function(header) {
+    const column = HEADERS.reservationRequests.indexOf(header);
+    if (column >= 0) values[column] = changes[header] || '';
+  });
+  sheet.getRange(rowNumber, 1, 1, HEADERS.reservationRequests.length).setValues([values]);
+}
+
+function assertNoReservationRequestConflict_(spaceType, date, startTime, endTime, ignoredRequestId) {
+  const naverSheet = ensureNaverReservationSchema_();
+  const naverConflicts = findOverlappingNaverReservationEntries_(naverSheet, spaceType, date, startTime, endTime);
+  if (naverConflicts.length > 0) {
+    throw new Error('해당 시간대에는 이미 예약이 있습니다.');
+  }
+
+  const roomLogSheetName = getRoomLogSheetName_(spaceType);
+  const roomLogConflicts = getRowsAsObjects_(roomLogSheetName, HEADERS.roomLogs)
+    .filter(function(row) {
+      return normalizeSheetDate_(row.date) === date &&
+        roomResourcesConflict_(row.spaceType, spaceType) &&
+        timeRangesOverlap_(row.startTime, row.endTime, startTime, endTime);
+    });
+  if (roomLogConflicts.length > 0) {
+    throw new Error('해당 시간대에는 이미 이용 기록이 있습니다.');
+  }
+
+  const requestConflicts = getRowsAsObjects_(SHEET_NAMES.RESERVATION_REQUESTS, HEADERS.reservationRequests)
+    .filter(function(row) {
+      return str_(row.requestId) !== str_(ignoredRequestId) &&
+        normalizeSheetDate_(row.date) === date &&
+        blockingReservationRequestStatus_(row.status) &&
+        roomResourcesConflict_(row.spaceType, spaceType) &&
+        timeRangesOverlap_(row.startTime, row.endTime, startTime, endTime);
+    });
+  if (requestConflicts.length > 0) {
+    throw new Error('해당 시간대에는 이미 예약 신청이 있습니다.');
+  }
+}
+
+function parseCompanionsJson_(value) {
+  try {
+    const parsed = JSON.parse(str_(value, '[]'));
+    return normalizeCompanions_(Array.isArray(parsed) ? parsed : [], 10);
+  } catch (error) {
+    return [];
+  }
 }
 
 function findLinkedReservationLog_(reservationId) {

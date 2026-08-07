@@ -62,11 +62,20 @@ internal sealed class Reservation
     [JsonPropertyName("id")]
     public string Id { get; set; } = "";
 
+    [JsonPropertyName("source")]
+    public string Source { get; set; } = "";
+
     [JsonPropertyName("status")]
     public string Status { get; set; } = "";
 
     [JsonPropertyName("bookerName")]
     public string BookerName { get; set; } = "";
+
+    [JsonPropertyName("date")]
+    public string Date { get; set; } = "";
+
+    [JsonPropertyName("spaceType")]
+    public string SpaceType { get; set; } = "";
 
     [JsonPropertyName("placeName")]
     public string PlaceName { get; set; } = "";
@@ -110,17 +119,71 @@ internal sealed class CalendarEntry
     [JsonPropertyName("placeName")]
     public string PlaceName { get; set; } = "";
 
+    [JsonPropertyName("spaceType")]
+    public string SpaceType { get; set; } = "";
+
     [JsonPropertyName("name")]
     public string Name { get; set; } = "";
 
     [JsonPropertyName("purpose")]
     public string Purpose { get; set; } = "";
 
+    [JsonPropertyName("headcount")]
+    public int Headcount { get; set; } = 1;
+
     [JsonPropertyName("status")]
     public string Status { get; set; } = "";
 
     [JsonPropertyName("cancelled")]
     public bool Cancelled { get; set; }
+
+    [JsonPropertyName("submitted")]
+    public bool Submitted { get; set; }
+}
+
+internal sealed class ReservationRequest
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = "";
+
+    [JsonPropertyName("requestId")]
+    public string RequestId { get; set; } = "";
+
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "";
+
+    [JsonPropertyName("bookerName")]
+    public string BookerName { get; set; } = "";
+
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = "";
+
+    [JsonPropertyName("date")]
+    public string Date { get; set; } = "";
+
+    [JsonPropertyName("startTime")]
+    public string StartTime { get; set; } = "";
+
+    [JsonPropertyName("endTime")]
+    public string EndTime { get; set; } = "";
+
+    [JsonPropertyName("placeName")]
+    public string PlaceName { get; set; } = "";
+
+    [JsonPropertyName("spaceLabel")]
+    public string SpaceLabel { get; set; } = "";
+
+    [JsonPropertyName("spaceType")]
+    public string SpaceType { get; set; } = "";
+
+    [JsonPropertyName("room")]
+    public string Room { get; set; } = "";
+
+    [JsonPropertyName("headcount")]
+    public int Headcount { get; set; } = 1;
+
+    [JsonPropertyName("purpose")]
+    public string Purpose { get; set; } = "";
 
     [JsonPropertyName("submitted")]
     public bool Submitted { get; set; }
@@ -172,6 +235,9 @@ internal sealed class DashboardSnapshot
 
     [JsonPropertyName("calendarEntries")]
     public List<CalendarEntry> CalendarEntries { get; set; } = [];
+
+    [JsonPropertyName("reservationRequests")]
+    public List<ReservationRequest> ReservationRequests { get; set; } = [];
 
     [JsonPropertyName("summary")]
     public DashboardSummary Summary { get; set; } = new();

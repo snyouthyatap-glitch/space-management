@@ -173,6 +173,12 @@ select:focus {
     color: var(--ink);
 }
 
+.compact-button {
+    width: auto;
+    min-height: 38px;
+    padding: 8px 12px;
+}
+
 .spinner {
     display: none;
     width: 16px;
@@ -417,6 +423,10 @@ fieldset {
     border-top: 3px solid var(--pink);
 }
 
+.reservation-request-section {
+    border-top: 3px solid var(--green);
+}
+
 .table-wrap {
     overflow-x: auto;
 }
@@ -450,6 +460,36 @@ th {
 .status-success {
     color: var(--green-dark);
     font-weight: 800;
+}
+
+.status-pending {
+    color: var(--pink);
+    font-weight: 900;
+}
+
+.row-actions {
+    display: flex;
+    gap: 6px;
+}
+
+.mini-button {
+    min-height: 32px;
+    padding: 6px 10px;
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    background: var(--surface);
+    font-size: 12px;
+    font-weight: 900;
+}
+
+.mini-button.approve {
+    border-color: var(--green);
+    color: var(--green-dark);
+}
+
+.mini-button.reject {
+    border-color: var(--pink);
+    color: var(--pink);
 }
 
 .toast-container {
