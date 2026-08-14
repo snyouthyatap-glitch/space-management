@@ -16,7 +16,7 @@ internal sealed class ManualLogForm : Form
     private readonly RadioButton _guestMode = new();
     private readonly Panel _memberPanel = new();
     private readonly Panel _guestPanel = new();
-    private readonly TextBox _phone = new();
+    private readonly TextBox _memberSearch = new();
     private readonly Button _lookupButton = new();
     private readonly Label _memberSummary = new();
     private readonly Button _changeMemberButton = new();
@@ -41,7 +41,6 @@ internal sealed class ManualLogForm : Form
     private string _guestToken = NewRequestId();
     private string _pendingPrinterSignature = "";
     private string _pendingPrinterRequestId = "";
-    private bool _normalizingPhone;
     private bool _busy;
 
     public ManualLogForm(
@@ -225,18 +224,17 @@ internal sealed class ManualLogForm : Form
 
     private void ConfigureMemberPanel()
     {
-        _memberPanel.Controls.Add(CreateFieldLabel("휴대폰 번호 전체", 0, 0));
-        _phone.SetBounds(0, 24, 320, 32);
-        _phone.MaxLength = 11;
-        _phone.PlaceholderText = "01012341234";
-        _phone.TextChanged += (_, _) => NormalizePhoneInput();
-        _phone.KeyDown += async (_, eventArgs) =>
+        _memberPanel.Controls.Add(CreateFieldLabel("회원 이름", 0, 0));
+        _memberSearch.SetBounds(0, 24, 320, 32);
+        _memberSearch.MaxLength = 30;
+        _memberSearch.PlaceholderText = "예: 안치우";
+        _memberSearch.KeyDown += async (_, eventArgs) =>
         {
             if (eventArgs.KeyCode != Keys.Enter) return;
             eventArgs.SuppressKeyPress = true;
             await LookupMemberAsync();
         };
-        _memberPanel.Controls.Add(_phone);
+        _memberPanel.Controls.Add(_memberSearch);
 
         _lookupButton.Text = "회원 찾기";
         _lookupButton.SetBounds(330, 23, 104, 34);
@@ -454,10 +452,10 @@ internal sealed class ManualLogForm : Form
     private async Task LookupMemberAsync()
     {
         if (_busy) return;
-        var phone = Regex.Replace(_phone.Text, @"\D", "");
-        if (!Regex.IsMatch(phone, @"^010\d{8}$"))
+        var query = _memberSearch.Text.Trim();
+        if (query.Length < 2)
         {
-            SetStatus("휴대폰 번호 11자리를 정확히 입력해 주세요.", true);
+            SetStatus("회원 이름을 2글자 이상 입력해 주세요.", true);
             return;
         }
 
@@ -465,12 +463,25 @@ internal sealed class ManualLogForm : Form
         try
         {
             using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-            _member = await _client.LookupMemberAsync(
+            var members = await _client.LookupMembersAsync(
                 _settings,
                 _password,
-                phone,
+                query,
                 cancellation.Token);
-            _phone.Visible = false;
+            if (members.Count == 0)
+            {
+                SetStatus("등록된 회원을 찾을 수 없습니다.", true);
+                return;
+            }
+
+            _member = members.Count == 1 ? members[0] : ShowMemberSelectionDialog(members);
+            if (_member is null)
+            {
+                SetStatus("회원 선택을 취소했습니다.", true);
+                return;
+            }
+
+            _memberSearch.Visible = false;
             _lookupButton.Visible = false;
             _memberSummary.Text =
                 $"{_member.Name} · {_member.Gender} · " +
@@ -653,13 +664,13 @@ internal sealed class ManualLogForm : Form
     private void ResetMember()
     {
         _member = null;
-        _phone.Text = "";
-        _phone.Visible = true;
+        _memberSearch.Text = "";
+        _memberSearch.Visible = true;
         _lookupButton.Visible = true;
         _memberSummary.Visible = false;
         _changeMemberButton.Visible = false;
         UpdateSubmitEnabled();
-        _phone.Focus();
+        _memberSearch.Focus();
         SetStatus("준비");
     }
 
@@ -827,16 +838,98 @@ internal sealed class ManualLogForm : Form
         _statusLabel.ForeColor = error ? Color.FromArgb(190, 55, 55) : Muted;
     }
 
-    private void NormalizePhoneInput()
+    private AdminMember? ShowMemberSelectionDialog(List<AdminMember> members)
     {
-        if (_normalizingPhone) return;
-        var digits = Regex.Replace(_phone.Text, @"\D", "");
-        if (digits.Length > 11) digits = digits[..11];
-        if (_phone.Text == digits) return;
-        _normalizingPhone = true;
-        _phone.Text = digits;
-        _phone.SelectionStart = digits.Length;
-        _normalizingPhone = false;
+        using var dialog = new Form
+        {
+            Text = "회원 선택",
+            StartPosition = FormStartPosition.CenterParent,
+            Size = new Size(520, 360),
+            MinimizeBox = false,
+            MaximizeBox = false,
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            Font = Font,
+            BackColor = Color.White
+        };
+
+        var root = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 3,
+            Padding = new Padding(18)
+        };
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));
+        dialog.Controls.Add(root);
+
+        root.Controls.Add(new Label
+        {
+            Text = "동명이인이 있습니다. 이용자를 선택해 주세요.",
+            Dock = DockStyle.Fill,
+            ForeColor = Color.FromArgb(52, 48, 46),
+            Font = new Font("맑은 고딕", 10F, FontStyle.Bold),
+            TextAlign = ContentAlignment.MiddleLeft
+        }, 0, 0);
+
+        var list = new ListBox
+        {
+            Dock = DockStyle.Fill,
+            IntegralHeight = false
+        };
+        foreach (var member in members.OrderBy(item => item.Name).ThenBy(item => item.Phone))
+        {
+            list.Items.Add(new MemberListItem(member));
+        }
+        if (list.Items.Count > 0) list.SelectedIndex = 0;
+        root.Controls.Add(list, 0, 1);
+
+        var buttons = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.RightToLeft,
+            WrapContents = false
+        };
+        var selectButton = CreateDialogButton("선택", Color.FromArgb(74, 156, 68), DialogResult.OK);
+        var cancelButton = CreateDialogButton("취소", Color.FromArgb(117, 111, 108), DialogResult.Cancel);
+        buttons.Controls.Add(selectButton);
+        buttons.Controls.Add(cancelButton);
+        root.Controls.Add(buttons, 0, 2);
+
+        dialog.AcceptButton = selectButton;
+        dialog.CancelButton = cancelButton;
+        list.DoubleClick += (_, _) => dialog.DialogResult = DialogResult.OK;
+
+        return dialog.ShowDialog(this) == DialogResult.OK &&
+            list.SelectedItem is MemberListItem selected
+                ? selected.Member
+                : null;
+    }
+
+    private static Button CreateDialogButton(string text, Color color, DialogResult result)
+    {
+        var button = new Button
+        {
+            Text = text,
+            Width = 88,
+            Height = 32,
+            Margin = new Padding(8, 6, 0, 0),
+            DialogResult = result,
+            BackColor = color,
+            ForeColor = Color.White,
+            FlatStyle = FlatStyle.Flat
+        };
+        button.FlatAppearance.BorderSize = 0;
+        return button;
+    }
+
+    private sealed class MemberListItem(AdminMember member)
+    {
+        public AdminMember Member { get; } = member;
+
+        public override string ToString() =>
+            $"{Member.Name} · {Member.Gender} · 만 {Member.Age}세 · {FormatPhone(Member.Phone)}";
     }
 
     private string SelectedLogType() =>

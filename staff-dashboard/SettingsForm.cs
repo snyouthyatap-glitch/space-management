@@ -4,17 +4,25 @@ internal sealed class SettingsForm : Form
 {
     private readonly TextBox _urlTextBox = new();
     private readonly TextBox _passwordTextBox = new();
+    private readonly TextBox _naverIdTextBox = new();
+    private readonly TextBox _naverPasswordTextBox = new();
     private readonly NumericUpDown _pollSeconds = new();
 
     public string AppsScriptUrl => _urlTextBox.Text.Trim();
     public string Password => _passwordTextBox.Text;
+    public string NaverId => _naverIdTextBox.Text.Trim();
+    public string NaverPassword => _naverPasswordTextBox.Text;
     public int PollSeconds => (int)_pollSeconds.Value;
 
-    public SettingsForm(DashboardSettings settings, string currentPassword)
+    public SettingsForm(
+        DashboardSettings settings,
+        string currentPassword,
+        string currentNaverId,
+        string currentNaverPassword)
     {
         Text = "연결 설정";
         StartPosition = FormStartPosition.CenterParent;
-        ClientSize = new Size(560, 270);
+        ClientSize = new Size(560, 390);
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         MinimizeBox = false;
@@ -48,13 +56,34 @@ internal sealed class SettingsForm : Form
         _pollSeconds.Value = Math.Clamp(settings.PollSeconds, 15, 120);
         Controls.Add(_pollSeconds);
 
+        Controls.Add(CreateLabel("네이버 아이디", 30, 202));
+        _naverIdTextBox.SetBounds(30, 226, 235, 30);
+        _naverIdTextBox.Text = currentNaverId;
+        Controls.Add(_naverIdTextBox);
+
+        Controls.Add(CreateLabel("네이버 비밀번호", 295, 202));
+        _naverPasswordTextBox.SetBounds(295, 226, 235, 30);
+        _naverPasswordTextBox.UseSystemPasswordChar = true;
+        _naverPasswordTextBox.Text = currentNaverPassword;
+        Controls.Add(_naverPasswordTextBox);
+
+        var naverNotice = new Label
+        {
+            Text = "네이버 계정은 이 Windows 사용자 계정에서만 복호화되도록 저장됩니다. 추가 인증이 뜨면 직접 로그인해야 합니다.",
+            AutoSize = false,
+            Location = new Point(30, 264),
+            Size = new Size(500, 42),
+            ForeColor = Color.FromArgb(105, 100, 97)
+        };
+        Controls.Add(naverNotice);
+
         var cancelButton = new Button
         {
             Text = "취소",
             DialogResult = DialogResult.Cancel,
             FlatStyle = FlatStyle.Flat
         };
-        cancelButton.SetBounds(350, 215, 85, 34);
+        cancelButton.SetBounds(350, 335, 85, 34);
 
         var saveButton = new Button
         {
@@ -65,7 +94,7 @@ internal sealed class SettingsForm : Form
             FlatStyle = FlatStyle.Flat
         };
         saveButton.FlatAppearance.BorderSize = 0;
-        saveButton.SetBounds(445, 215, 85, 34);
+        saveButton.SetBounds(445, 335, 85, 34);
         saveButton.Click += (sender, eventArgs) =>
         {
             if (!Uri.TryCreate(AppsScriptUrl, UriKind.Absolute, out _) ||

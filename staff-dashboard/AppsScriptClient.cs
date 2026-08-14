@@ -110,21 +110,63 @@ internal sealed class AppsScriptClient
             response => response.Ok,
             response => response.Error);
 
+    public Task<ReservationStatusUpdate> CompleteReservationUsageAsync(
+        DashboardSettings settings,
+        string password,
+        CalendarEntry entry,
+        string memberId,
+        CancellationToken cancellationToken) =>
+        ExecuteAdminActionAsync<ReservationStatusUpdate>(
+            settings,
+            password,
+            "adminCompleteReservationUsage",
+            session => new
+            {
+                adminSession = session,
+                reservationId = StripKnownEntryPrefix(entry.Id),
+                source = entry.Source,
+                memberId,
+                date = entry.Date,
+                startTime = entry.StartTime,
+                endTime = entry.EndTime,
+                spaceType = entry.SpaceType,
+                placeName = entry.PlaceName,
+                purpose = entry.Purpose,
+                headcount = entry.Headcount,
+                companions = Array.Empty<ManualCompanion>()
+            },
+            cancellationToken,
+            response => response.Ok,
+            response => response.Error);
+
     public async Task<AdminMember> LookupMemberAsync(
         DashboardSettings settings,
         string password,
-        string phone,
+        string query,
+        CancellationToken cancellationToken)
+    {
+        var members = await LookupMembersAsync(settings, password, query, cancellationToken);
+        if (members.Count == 0) throw new InvalidOperationException("등록된 회원을 찾을 수 없습니다.");
+        if (members.Count > 1) throw new InvalidOperationException("동명이인이 있습니다. 회원을 선택해 주세요.");
+        return members[0];
+    }
+
+    public async Task<List<AdminMember>> LookupMembersAsync(
+        DashboardSettings settings,
+        string password,
+        string query,
         CancellationToken cancellationToken)
     {
         var result = await ExecuteAdminActionAsync<AdminMemberLookup>(
             settings,
             password,
             "adminLookupMember",
-            session => new { adminSession = session, phone },
+            session => new { adminSession = session, query, name = query },
             cancellationToken,
             response => response.Ok,
             response => response.Error);
-        return result.Member;
+        if (result.Members.Count > 0) return result.Members;
+        return string.IsNullOrWhiteSpace(result.Member.Id) ? [] : [result.Member];
     }
 
     public Task<ManualLogResult> SubmitManualLogAsync(
@@ -166,6 +208,16 @@ internal sealed class AppsScriptClient
             response => response.Error);
 
     public void ResetSession() => _sessionToken = "";
+
+    private static string StripKnownEntryPrefix(string id)
+    {
+        foreach (var prefix in new[] { "naver:", "naverSmartPlace:", "reservationRequest:", "webReservation:", "web:", "app:" })
+        {
+            if (id.StartsWith(prefix, StringComparison.Ordinal)) return id[prefix.Length..];
+        }
+
+        return id;
+    }
 
     private async Task<T> ExecuteAdminActionAsync<T>(
         DashboardSettings settings,

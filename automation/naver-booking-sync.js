@@ -63,6 +63,8 @@ function parseArgs(argv) {
     output: process.env.NAVER_BOOKING_OUTPUT || DEFAULT_OUTPUT_FILE,
     timeoutMs: Number(process.env.NAVER_BOOKING_TIMEOUT_MS || 30000),
     products: DEFAULT_PRODUCTS.slice(),
+    naverId: process.env.NAVER_BOOKING_ID || "",
+    naverPassword: process.env.NAVER_BOOKING_PASSWORD || "",
     keepOpen: false,
     detail: process.env.NAVER_BOOKING_DETAIL !== "0",
   };
@@ -132,6 +134,33 @@ async function setupLogin(page, timeoutMs) {
       resolve();
     });
   });
+}
+
+async function isNaverLoginPage(page) {
+  const url = page.url();
+  if (/nid\.naver\.com\/nidlogin/i.test(url)) return true;
+  return page.locator("#id, input[name='id'], input[name='pw'], #pw").first().isVisible().catch(() => false);
+}
+
+async function tryNaverCredentialLogin(page, config) {
+  if (!(await isNaverLoginPage(page))) return;
+  if (!config.naverId || !config.naverPassword) {
+    throw new Error("NAVER_LOGIN_REQUIRED: saved Naver credentials are missing.");
+  }
+
+  const idInput = page.locator("#id, input[name='id']").first();
+  const passwordInput = page.locator("#pw, input[name='pw']").first();
+  await idInput.waitFor({ state: "visible", timeout: config.timeoutMs });
+  await idInput.fill(config.naverId);
+  await passwordInput.fill(config.naverPassword);
+  await page.locator("#log\\.login, button[type='submit'], input[type='submit']").first().click({
+    timeout: config.timeoutMs,
+  });
+  await waitForPageReady(page, config.timeoutMs);
+
+  if (await isNaverLoginPage(page)) {
+    throw new Error("NAVER_LOGIN_REQUIRED: Naver login did not complete. Check credentials or complete additional verification manually.");
+  }
 }
 
 async function closeAnyDropdownOverlays(page) {
@@ -224,6 +253,17 @@ async function collectRows(page) {
       };
       const status = extract(/^(확정|신청|취소|완료|노쇼)/);
       const phoneMatches = [...source.matchAll(/01[0-9]-\d{3,4}-\d{4}/g)].map((m) => m[0]);
+      const bookerName = (() => {
+        if (!status) return null;
+        const firstPhone = phoneMatches[0] || "";
+        const beforePhone = firstPhone
+          ? source.replace(status, "").split(firstPhone)[0]
+          : source.replace(status, "");
+        return clean(beforePhone
+          .replace(/01[0-9]-?\d{3,4}-?\d{4}.*/g, "")
+          .replace(/\d{9,}.*/g, "")
+          .replace(/^(예약자|방문자)\s*[:：]?\s*/g, ""));
+      })();
       const useDateTime =
         extract(/(\d{2}\.\s*\d{1,2}\.\s*\d{1,2}\.\([^)]+\)\s*(?:오전|오후)\s*\d{1,2}:\d{2}~(?:오전|오후)?\s*\d{1,2}:\d{2})/) ||
         extract(/(\d{2}\.\s*\d{1,2}\.\s*\d{1,2}\.\([^)]+\)\s*(?:오전|오후)\s*\d{1,2}:\d{2}~\d{1,2}:\d{2})/);
@@ -240,7 +280,7 @@ async function collectRows(page) {
         detailPath: item.href,
         rawText: source,
         status,
-        bookerName: status ? clean(source.replace(status, "").split(phoneMatches[0] || "")[0]) : null,
+        bookerName,
         phone: phoneMatches[0] || null,
         altPhone: phoneMatches[1] || null,
         useDateTime,
@@ -369,6 +409,21 @@ function buildSummary(results) {
   );
 }
 
+function normalizeReservationStatus(value) {
+  const status = String(value || "").replace(/\s+/g, "");
+  if (status.includes("신청")) return "신청";
+  if (status.includes("확정")) return "확정";
+  if (status.includes("취소")) return "취소";
+  if (status.includes("완료")) return "완료";
+  if (status.includes("노쇼")) return "노쇼";
+  return status;
+}
+
+function filterRowsByQuickFilter(key, rows) {
+  if (key !== "pending_confirm") return rows;
+  return rows.filter((row) => normalizeReservationStatus(row.status) === "신청");
+}
+
 async function sync(config) {
   ensureDir(OUTPUT_DIR);
   ensureDir(STATE_DIR);
@@ -387,6 +442,13 @@ async function sync(config) {
 
     if (config.setupLogin) {
       await setupLogin(page, config.timeoutMs);
+    } else {
+      await tryNaverCredentialLogin(page, config);
+      if (!page.url().includes("booking-list-view")) {
+        await page.goto(config.baseUrl, { waitUntil: "domcontentloaded", timeout: config.timeoutMs });
+        await waitForPageReady(page, config.timeoutMs);
+        await tryNaverCredentialLogin(page, config);
+      }
     }
 
     await ensureProductSelection(page, config.products, config.timeoutMs);
@@ -403,6 +465,7 @@ async function sync(config) {
       if (config.detail) {
         rows = await enrichRowsWithDetails(context, config.baseUrl, rows, config.timeoutMs);
       }
+      rows = filterRowsByQuickFilter(filter.key, rows);
       results[filter.key] = rows;
     }
 

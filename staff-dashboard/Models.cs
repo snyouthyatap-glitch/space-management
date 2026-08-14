@@ -7,6 +7,8 @@ internal sealed class DashboardSettings
     public string AppsScriptUrl { get; set; } =
         "https://script.google.com/macros/s/AKfycbyYkhXruzoj25GmeWRqlKwz9kcLlHPk5BOWxsfHc_gcsEyVYpiXXlgkwIrtAWaGTizk/exec";
     public string ProtectedPassword { get; set; } = "";
+    public string ProtectedNaverId { get; set; } = "";
+    public string ProtectedNaverPassword { get; set; } = "";
     public int PollSeconds { get; set; } = 30;
 }
 
@@ -14,6 +16,16 @@ internal sealed class LocalState
 {
     public bool InitialSyncCompleted { get; set; }
     public List<StaffEvent> Events { get; set; } = [];
+    public List<CalendarNote> CalendarNotes { get; set; } = [];
+}
+
+internal sealed class CalendarNote
+{
+    public string Id { get; set; } = "";
+    public string Date { get; set; } = "";
+    public string Text { get; set; } = "";
+    public bool Done { get; set; }
+    public string CreatedAt { get; set; } = "";
 }
 
 internal sealed class StaffEvent
@@ -65,6 +77,9 @@ internal sealed class Reservation
     [JsonPropertyName("source")]
     public string Source { get; set; } = "";
 
+    [JsonPropertyName("memberId")]
+    public string MemberId { get; set; } = "";
+
     [JsonPropertyName("status")]
     public string Status { get; set; } = "";
 
@@ -107,6 +122,9 @@ internal sealed class CalendarEntry
     [JsonPropertyName("source")]
     public string Source { get; set; } = "";
 
+    [JsonPropertyName("memberId")]
+    public string MemberId { get; set; } = "";
+
     [JsonPropertyName("date")]
     public string Date { get; set; } = "";
 
@@ -141,6 +159,24 @@ internal sealed class CalendarEntry
     public bool Submitted { get; set; }
 }
 
+internal sealed class NaverBookingSnapshot
+{
+    public List<NaverBookingReservation> PendingConfirm { get; init; } = [];
+    public List<NaverBookingReservation> TodayUse { get; init; } = [];
+}
+
+internal sealed class NaverBookingReservation
+{
+    public string ReservationNo { get; init; } = "";
+    public string ProductName { get; init; } = "";
+    public string BookerName { get; init; } = "";
+    public string Status { get; init; } = "";
+    public string UseDateTime { get; init; } = "";
+    public string Purpose { get; init; } = "";
+    public int Headcount { get; init; } = 1;
+    public string RawText { get; init; } = "";
+}
+
 internal sealed class ReservationRequest
 {
     [JsonPropertyName("id")]
@@ -148,6 +184,9 @@ internal sealed class ReservationRequest
 
     [JsonPropertyName("requestId")]
     public string RequestId { get; set; } = "";
+
+    [JsonPropertyName("memberId")]
+    public string MemberId { get; set; } = "";
 
     [JsonPropertyName("status")]
     public string Status { get; set; } = "";
@@ -259,6 +298,9 @@ internal sealed class ReservationStatusUpdate
 
     [JsonPropertyName("cancelled")]
     public bool Cancelled { get; set; }
+
+    [JsonPropertyName("usageLogged")]
+    public bool UsageLogged { get; set; }
 }
 
 internal sealed class AdminMemberLookup
@@ -271,6 +313,9 @@ internal sealed class AdminMemberLookup
 
     [JsonPropertyName("member")]
     public AdminMember Member { get; set; } = new();
+
+    [JsonPropertyName("members")]
+    public List<AdminMember> Members { get; set; } = [];
 }
 
 internal sealed class AdminMember

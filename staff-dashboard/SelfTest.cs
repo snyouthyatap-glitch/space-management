@@ -18,6 +18,8 @@ internal static class SelfTest
         TestReservationRequestStatusUpdateAsync().GetAwaiter().GetResult();
         TestManualLogFlowAsync().GetAwaiter().GetResult();
         TestMonthlyPerformanceAsync().GetAwaiter().GetResult();
+        TestNaverBookingParserSeparatesReservationRows();
+        TestReservationMergeByRepresentativeDateAndTime();
         TestPerformanceWorkbook();
     }
 
@@ -213,6 +215,93 @@ internal static class SelfTest
             handler.MonthlyPerformanceCount != 1)
         {
             throw new InvalidOperationException("월간 실적 응답 처리 테스트에 실패했습니다.");
+        }
+    }
+
+    private static void TestNaverBookingParserSeparatesReservationRows()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "naver-booking-parser-test.json");
+        const string rawText =
+            "확정안정준010-2352-3615131865724526. 8. 14.(금) 오후 6:00~9:00청년 커넥트룸" +
+            "확정최소연010-6258-7033131486876926. 8. 14.(금) 오후 4:00~6:00AI 커리어존 (청취Room1)";
+        try
+        {
+            File.WriteAllText(path, $$"""
+            {
+              "results": {
+                "today_use": [{
+                  "reservationNo": "1318657245",
+                  "bookerName": "안정준",
+                  "productName": "청년 커넥트룸",
+                  "status": "확정",
+                  "rawText": "{{rawText}}"
+                }, {
+                  "reservationNo": "1314868769",
+                  "bookerName": "안정준",
+                  "productName": "청년 커넥트룸",
+                  "status": "확정",
+                  "rawText": "{{rawText}}"
+                }],
+                "pending_confirm": []
+              }
+            }
+            """);
+
+            var snapshot = NaverBookingParser.ReadSnapshot(path);
+            if (snapshot.TodayUse.Count != 2)
+                throw new InvalidOperationException("네이버 예약 파서 테스트에 실패했습니다: 예약 수가 다릅니다.");
+
+            var first = NaverBookingParser.ConvertTodayUseReservation(snapshot.TodayUse[0]);
+            var second = NaverBookingParser.ConvertTodayUseReservation(snapshot.TodayUse[1]);
+            if (first.Name != "안정준" || first.PlaceName != "커넥트룸" || first.StartTime != "18:00" ||
+                second.Name != "최소연" || second.PlaceName != "커리어존 Room1" || second.StartTime != "16:00")
+            {
+                throw new InvalidOperationException("네이버 예약번호별 파싱 회귀 테스트에 실패했습니다.");
+            }
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    private static void TestReservationMergeByRepresentativeDateAndTime()
+    {
+        var merged = ReservationService.MergeCalendarEntries(
+            [
+                new CalendarEntry
+                {
+                    Id = "naver:1",
+                    Source = "naverSmartPlace",
+                    Date = "2026-08-14",
+                    StartTime = "16:00",
+                    EndTime = "18:00",
+                    Name = "안정준",
+                    PlaceName = "커넥트룸",
+                    Status = "확정"
+                }
+            ],
+            [],
+            [
+                new CalendarEntry
+                {
+                    Id = "web:1",
+                    Source = "reservationRequest",
+                    Date = "2026-08-14",
+                    StartTime = "16:00",
+                    EndTime = "18:00",
+                    Name = "안정준",
+                    PlaceName = "커넥트룸",
+                    Status = "승인"
+                }
+            ]);
+
+        if (merged.Count != 1 ||
+            merged[0].Source != "reservationRequest" ||
+            merged[0].Name != "안정준" ||
+            merged[0].PlaceName != "커넥트룸")
+        {
+            throw new InvalidOperationException("동일 대표자·날짜·시간 예약 병합 테스트에 실패했습니다.");
         }
     }
 
