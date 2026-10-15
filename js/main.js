@@ -87,6 +87,11 @@ function getUrlParam(name) {
     return new URLSearchParams(window.location.search).get(name) || "";
 }
 
+function getDirectPage() {
+    const page = String(window.location.hash || "").replace(/^#/, "").toLowerCase();
+    return page === "signup" || page === "printer" ? page : "";
+}
+
 function isReservationDemoMode() {
     return isLocalPreview() && getUrlParam("demo") === "reservation";
 }
@@ -834,6 +839,9 @@ function enterFacility(member) {
     setCurrentMember(member, "facility");
     renderTodayReservations([]);
     showSection("facility");
+    if (getDirectPage() === "printer") {
+        window.requestAnimationFrame(showPrinterOnlyView);
+    }
     if (isReservationDemoMode()) {
         renderTodayReservations(createDemoReservations());
         showToast("예약 미리보기 모드입니다. 실제 시트에는 저장되지 않습니다.", "info");
@@ -2118,7 +2126,8 @@ function setupListeners() {
 }
 
 function init() {
-    if (!hasValidQrEntryToken()) {
+    const directPage = getDirectPage();
+    if (!hasValidQrEntryToken() && directPage !== "signup") {
         showEntryGate();
         return;
     }
@@ -2151,6 +2160,10 @@ function init() {
     setupStepper("connectCompanionCount", "connectCompanions");
     setupListeners();
     setupReservationSubmitClock();
+
+    if (directPage === "signup") {
+        openSignupPhoneStep();
+    }
 }
 
 try {
