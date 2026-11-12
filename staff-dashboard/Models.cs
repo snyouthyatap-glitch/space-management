@@ -16,6 +16,8 @@ internal sealed class LocalState
 {
     public bool InitialSyncCompleted { get; set; }
     public List<StaffEvent> Events { get; set; } = [];
+
+    // '내 일정' 기능은 제거했다. 예전에 저장한 일정이 상태 파일에서 지워지지 않도록 값만 보존한다.
     public List<CalendarNote> CalendarNotes { get; set; } = [];
 }
 
@@ -157,12 +159,28 @@ internal sealed class CalendarEntry
 
     [JsonPropertyName("submitted")]
     public bool Submitted { get; set; }
+
+    [JsonIgnore]
+    public bool CheckedIn { get; set; }
+}
+
+internal sealed class StaffCheckIn
+{
+    [JsonPropertyName("date")]
+    public string Date { get; set; } = "";
+
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = "";
+
+    [JsonPropertyName("memberId")]
+    public string MemberId { get; set; } = "";
 }
 
 internal sealed class NaverBookingSnapshot
 {
     public List<NaverBookingReservation> PendingConfirm { get; init; } = [];
     public List<NaverBookingReservation> TodayUse { get; init; } = [];
+    public List<NaverBookingReservation> TodayCancel { get; init; } = [];
 }
 
 internal sealed class NaverBookingReservation
@@ -170,11 +188,36 @@ internal sealed class NaverBookingReservation
     public string ReservationNo { get; init; } = "";
     public string ProductName { get; init; } = "";
     public string BookerName { get; init; } = "";
+    // 수집 스크립트가 고른 연락처(대리예약이면 방문자 연락처)
+    public string Phone { get; init; } = "";
+    // 네이버 목록에 '변경' 표시가 붙은 예약(날짜·시간 등이 바뀐 예약)
+    public bool Changed { get; init; }
     public string Status { get; init; } = "";
     public string UseDateTime { get; init; } = "";
     public string Purpose { get; init; } = "";
     public int Headcount { get; init; } = 1;
     public string RawText { get; init; } = "";
+}
+
+internal sealed class NaverReservationEnsureResult
+{
+    [JsonPropertyName("ok")]
+    public bool Ok { get; set; }
+
+    [JsonPropertyName("error")]
+    public string Error { get; set; } = "";
+
+    [JsonPropertyName("created")]
+    public bool Created { get; set; }
+
+    [JsonPropertyName("updated")]
+    public bool Updated { get; set; }
+
+    [JsonPropertyName("changedFields")]
+    public List<string> ChangedFields { get; set; } = [];
+
+    [JsonPropertyName("reservationId")]
+    public string ReservationId { get; set; } = "";
 }
 
 internal sealed class ReservationRequest
@@ -275,6 +318,9 @@ internal sealed class DashboardSnapshot
     [JsonPropertyName("calendarEntries")]
     public List<CalendarEntry> CalendarEntries { get; set; } = [];
 
+    [JsonPropertyName("checkIns")]
+    public List<StaffCheckIn> CheckIns { get; set; } = [];
+
     [JsonPropertyName("reservationRequests")]
     public List<ReservationRequest> ReservationRequests { get; set; } = [];
 
@@ -339,60 +385,7 @@ internal sealed class AdminMember
     public string Phone { get; set; } = "";
 }
 
-internal sealed class ManualLogRequest
-{
-    [JsonPropertyName("subjectType")]
-    public string SubjectType { get; set; } = "member";
-
-    [JsonPropertyName("memberId")]
-    public string MemberId { get; set; } = "";
-
-    [JsonPropertyName("guest")]
-    public ManualGuest? Guest { get; set; }
-
-    [JsonPropertyName("logType")]
-    public string LogType { get; set; } = "visit";
-
-    [JsonPropertyName("date")]
-    public string Date { get; set; } = "";
-
-    [JsonPropertyName("data")]
-    public ManualLogData Data { get; set; } = new();
-
-    [JsonPropertyName("requestId")]
-    public string RequestId { get; set; } = "";
-}
-
-internal sealed class ManualGuest
-{
-    [JsonPropertyName("token")]
-    public string Token { get; set; } = "";
-
-    [JsonPropertyName("gender")]
-    public string Gender { get; set; } = "";
-
-    [JsonPropertyName("age")]
-    public int Age { get; set; }
-}
-
-internal sealed class ManualLogData
-{
-    [JsonPropertyName("count")]
-    public int Count { get; set; }
-
-    [JsonPropertyName("startTime")]
-    public string StartTime { get; set; } = "";
-
-    [JsonPropertyName("endTime")]
-    public string EndTime { get; set; } = "";
-
-    [JsonPropertyName("purpose")]
-    public string Purpose { get; set; } = "";
-
-    [JsonPropertyName("companions")]
-    public List<ManualCompanion> Companions { get; set; } = [];
-}
-
+// 일지 대리 제출(adminCompleteReservationUsage)의 동반 이용자 정보
 internal sealed class ManualCompanion
 {
     [JsonPropertyName("gender")]
@@ -400,24 +393,6 @@ internal sealed class ManualCompanion
 
     [JsonPropertyName("age")]
     public int Age { get; set; }
-}
-
-internal sealed class ManualLogResult
-{
-    [JsonPropertyName("ok")]
-    public bool Ok { get; set; }
-
-    [JsonPropertyName("error")]
-    public string Error { get; set; } = "";
-
-    [JsonPropertyName("date")]
-    public string Date { get; set; } = "";
-
-    [JsonPropertyName("logCreated")]
-    public bool LogCreated { get; set; }
-
-    [JsonPropertyName("linkedReservation")]
-    public bool LinkedReservation { get; set; }
 }
 
 internal sealed class AdminChallenge

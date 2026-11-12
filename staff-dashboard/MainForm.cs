@@ -6,8 +6,6 @@ internal sealed class MainForm : Form
 {
     private const string SheetUrl =
         "https://docs.google.com/spreadsheets/d/1sPVvNPMl0KqQHDpCqNnM4RuOUw73DpgzK7IqcMDlVYs/edit?usp=sharing";
-    private const string AdminPageUrl =
-        "https://snyouthyatap-glitch.github.io/space-management/admin.html";
     private const string SmartPlaceUrl =
         "https://new.smartplace.naver.com/bizes/place/6800416?bookingBusinessId=1002115";
     private const string ChromePath = @"C:\Program Files\Google\Chrome\Application\chrome.exe";
@@ -39,15 +37,12 @@ internal sealed class MainForm : Form
     private readonly Label _unreadLabel = new();
     private readonly Label _reservationSummaryLabel = new();
     private readonly Label _reservationFilterSummaryLabel = new();
-    private readonly CheckedListBox _dayChecklist = new();
-    private readonly TextBox _dayScheduleInput = new();
-    private readonly Button _addScheduleButton = new();
-    private readonly Button _deleteScheduleButton = new();
-    private readonly Label _dayScheduleTitle = new();
     private readonly FlowLayoutPanel _reservationActionPanel = new();
     private readonly Button _requestApproveButton = new();
     private readonly Button _requestRejectButton = new();
+    private readonly Button _proxyUsageLogButton = new();
     private readonly Button _naverPendingButton = new();
+    private readonly Button _missingUsageLogButton = new();
     private readonly Button _moreActionsButton = new();
     private DashboardSettings _settings;
     private LocalState _state;
@@ -60,6 +55,7 @@ internal sealed class MainForm : Form
     private List<CalendarEntry> _calendarEntries = [];
     private readonly Dictionary<string, List<CalendarEntry>> _calendarCacheByMonth = new(StringComparer.Ordinal);
     private readonly Dictionary<string, DateTime> _calendarCacheUpdatedAt = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, List<StaffCheckIn>> _checkInsByMonth = new(StringComparer.Ordinal);
     private DateTime? _pendingCalendarMonthRefresh;
     private bool _refreshing;
     private bool _updatingReservationStatus;
@@ -67,7 +63,6 @@ internal sealed class MainForm : Form
     private bool _naverBookingSyncRunning;
     private bool _allowClose;
     private bool _trayNoticeShown;
-    private bool _renderingDayChecklist;
     private string _lastNaverPendingSignature = "";
     private string _lastNaverDialogSignature = "";
     private NaverBookingSnapshot _lastNaverBookingSnapshot = new();
@@ -102,9 +97,26 @@ internal sealed class MainForm : Form
 
         Shown += async (_, _) =>
         {
+            // 첫 버튼에 포커스 테두리가 생기지 않도록 예약 표에 포커스를 둔다.
+            ActiveControl = _reservationsGrid;
             if (_demoMode)
             {
                 LoadDemoData();
+                if (_previewPath.EndsWith("|naver", StringComparison.Ordinal))
+                {
+                    // 예약신청 창 미리보기 캡처: --preview=파일.png|naver
+                    using var naverDialog = BuildNaverBookingDialog(CreateDemoNaverSnapshot(), DateTime.Now);
+                    naverDialog.StartPosition = FormStartPosition.CenterScreen;
+                    naverDialog.Show(this);
+                    await Task.Delay(600);
+                    using var bitmap = new Bitmap(naverDialog.Width, naverDialog.Height);
+                    naverDialog.DrawToBitmap(bitmap, new Rectangle(0, 0, naverDialog.Width, naverDialog.Height));
+                    bitmap.Save(_previewPath[..^"|naver".Length]);
+                    naverDialog.Close();
+                    _allowClose = true;
+                    Close();
+                    return;
+                }
                 if (!string.IsNullOrWhiteSpace(_previewPath))
                 {
                     await Task.Delay(600);
@@ -222,24 +234,12 @@ internal sealed class MainForm : Form
             WrapContents = false,
             Padding = new Padding(0, 20, 0, 0)
         };
-        actions.Controls.Add(CreateActionButton("수동 일지", async (_, _) =>
-        {
-            _pollTimer.Stop();
-            try
-            {
-                using var dialog = new ManualLogForm(_client, _settings, _password);
-                dialog.ShowDialog(this);
-            }
-            finally
-            {
-                _pollTimer.Start();
-            }
-            await RefreshDashboardAsync();
-        }, Color.FromArgb(52, 87, 111)));
-        actions.Controls.Add(CreateActionButton("네이버", (_, _) => OpenChrome(SmartPlaceUrl), Color.FromArgb(44, 126, 75)));
+        actions.Controls.Add(CreateHeaderButton("네이버", (_, _) => OpenChrome(SmartPlaceUrl)));
         ConfigureNaverPendingButton();
         actions.Controls.Add(_naverPendingButton);
-        actions.Controls.Add(CreateActionButton("새로고침", async (_, _) => await RefreshAllAsync(), Color.FromArgb(70, 66, 64)));
+        ConfigureMissingUsageLogButton();
+        actions.Controls.Add(_missingUsageLogButton);
+        actions.Controls.Add(CreateHeaderButton("새로고침", async (_, _) => await RefreshAllAsync()));
         ConfigureMoreActionsButton();
         actions.Controls.Add(_moreActionsButton);
         panel.Controls.Add(titlePanel, 0, 0);
@@ -259,17 +259,99 @@ internal sealed class MainForm : Form
         return label;
     }
 
+    private void ConfigureMissingUsageLogButton()
+    {
+        _missingUsageLogButton.Text = "일지 미제출";
+        ApplyHeaderButtonStyle(_missingUsageLogButton);
+        _missingUsageLogButton.Click += (_, _) => ShowMissingUsageLogs();
+    }
+
+    private List<CalendarEntry> GetMissingUsageLogEntries() =>
+        _calendarEntries
+            .Where(item => ReservationService.GetUnifiedStatus(item) == ReservationService.MissingUsageLogStatus)
+            .OrderBy(item => item.Date, StringComparer.Ordinal)
+            .ThenBy(item => item.StartTime, StringComparer.Ordinal)
+            .ToList();
+
+    private void UpdateMissingUsageLogButton()
+    {
+        if (_missingUsageLogButton.IsDisposed) return;
+        var count = GetMissingUsageLogEntries().Count;
+        _missingUsageLogButton.Text = count > 0 ? $"일지 미제출 {count}" : "일지 미제출";
+        ApplyHeaderButtonStyle(_missingUsageLogButton, count > 0 ? MissingUsageLogColor : null);
+    }
+
+    private readonly HashSet<string> _overdueAlertedKeys = new(StringComparer.Ordinal);
+    private readonly System.Windows.Forms.Timer _overdueCheckTimer = new() { Interval = 60 * 1000 };
+    private bool _overdueBalloonShown;
+
+    // 오늘 예약 시작 30분이 지났는데 일지가 없으면 한 번씩 알린다(노쇼 처리·일지 대리 제출용).
+    private void CheckOverdueUsageLogs()
+    {
+        if (!string.IsNullOrWhiteSpace(_previewPath)) return; // 화면 캡처용 실행에서는 알리지 않는다.
+        var todayEntries = _visibleCalendarMonth.ToString("yyyy-MM") == DateTime.Today.ToString("yyyy-MM")
+            ? _calendarEntries
+            : _calendarCacheByMonth.GetValueOrDefault(DateTime.Today.ToString("yyyy-MM")) ?? [];
+        var fresh = ReservationService.FindOverdueUsageLogs(todayEntries, DateTime.Now)
+            .Where(entry => _overdueAlertedKeys.Add($"{entry.Date}|{entry.Id}"))
+            .ToList();
+        if (fresh.Count == 0) return;
+
+        string Describe(CalendarEntry entry) =>
+            $"{entry.StartTime} {entry.PlaceName} · {entry.Name} " +
+            (entry.CheckedIn ? "(출석함 → 일지 대리 제출)" : "(출석 기록 없음 → 노쇼 확인)");
+        var message = fresh.Count == 1
+            ? Describe(fresh[0])
+            : string.Join("\n", fresh.Take(3).Select(Describe)) +
+              (fresh.Count > 3 ? $"\n외 {fresh.Count - 3}건" : "");
+
+        _overdueBalloonShown = true;
+        System.Media.SystemSounds.Exclamation.Play();
+        _notifyIcon.ShowBalloonTip(
+            10000,
+            fresh.Count == 1
+                ? $"일지 미제출 · 시작 {ReservationService.OverdueUsageLogAlertMinutes}분 지남"
+                : $"일지 미제출 {fresh.Count}건 · 시작 {ReservationService.OverdueUsageLogAlertMinutes}분 지남",
+            message + "\n눌러서 확인",
+            ToolTipIcon.Warning);
+        _statusLabel.Text = $"시작 {ReservationService.OverdueUsageLogAlertMinutes}분이 지났는데 일지가 없는 예약 {fresh.Count}건 · 노쇼 처리 또는 일지 대리 제출이 필요합니다.";
+    }
+
+    private void ShowTodayOverdueReservations()
+    {
+        RestoreFromTray();
+        _selectedCalendarDate = DateTime.Today;
+        _visibleCalendarMonth = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+        _reservationStatusFilter.SelectedIndex = 0;
+        _ = SelectCalendarDateAsync(DateTime.Today);
+    }
+
+    private void ShowMissingUsageLogs()
+    {
+        var missing = GetMissingUsageLogEntries();
+        if (missing.Count == 0)
+        {
+            MessageBox.Show(
+                this,
+                "이번 달에 출석은 했지만 일지를 제출하지 않은 예약이 없습니다.",
+                "일지 미제출",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+            return;
+        }
+
+        var target = missing.FirstOrDefault(item => ReservationService.IsSameCalendarDate(item.Date, DateTime.Today))
+            ?? missing[^1];
+        if (DateTime.TryParse(target.Date, out var targetDate)) _selectedCalendarDate = targetDate.Date;
+        _reservationStatusFilter.SelectedItem = ReservationService.MissingUsageLogStatus;
+        RenderCalendarEntries();
+        _statusLabel.Text = $"일지 미제출 {missing.Count}건 · 예약을 선택하고 '일지 대리 제출'을 눌러 주세요.";
+    }
+
     private void ConfigureNaverPendingButton()
     {
         _naverPendingButton.Text = "예약신청";
-        _naverPendingButton.AutoSize = true;
-        _naverPendingButton.Height = 38;
-        _naverPendingButton.Padding = new Padding(12, 0, 12, 0);
-        _naverPendingButton.Margin = new Padding(6, 0, 0, 0);
-        _naverPendingButton.BackColor = Color.FromArgb(117, 111, 108);
-        _naverPendingButton.ForeColor = Color.White;
-        _naverPendingButton.FlatStyle = FlatStyle.Flat;
-        _naverPendingButton.FlatAppearance.BorderSize = 0;
+        ApplyHeaderButtonStyle(_naverPendingButton);
         _naverPendingButton.Click += (_, _) => ShowNaverBookingDialog();
         UpdateNaverPendingButton(0);
     }
@@ -377,9 +459,6 @@ internal sealed class MainForm : Form
         _reservationSummaryLabel.TextAlign = ContentAlignment.MiddleLeft;
         headerPanel.Controls.Add(_reservationSummaryLabel, 0, 1);
 
-        ConfigureReservationActions();
-        headerPanel.Controls.Add(_reservationActionPanel, 1, 0);
-        headerPanel.SetRowSpan(_reservationActionPanel, 2);
         shell.Controls.Add(headerPanel, 0, 0);
 
         var bodySplit = new SplitContainer
@@ -453,6 +532,7 @@ internal sealed class MainForm : Form
             "승인 완료",
             "이용중",
             "이용완료",
+            ReservationService.MissingUsageLogStatus,
             "노쇼",
             "취소"
         ]), 0, 0);
@@ -472,45 +552,32 @@ internal sealed class MainForm : Form
         calendarPanel.Controls.Add(_reservationFilterSummaryLabel, 0, 3);
         bodySplit.Panel1.Controls.Add(calendarPanel);
 
-        var detailPanel = new SplitContainer
-        {
-            Dock = DockStyle.Fill,
-            Padding = new Padding(12, 8, 12, 12),
-            BackColor = Color.White,
-            Orientation = Orientation.Horizontal,
-            SplitterWidth = 8,
-            Panel1MinSize = 180,
-            Panel2MinSize = 140
-        };
-        var detailSplitInitialized = false;
-        detailPanel.SizeChanged += (_, _) =>
-        {
-            if (detailSplitInitialized) return;
-            var availableHeight = detailPanel.Height - detailPanel.SplitterWidth;
-            if (availableHeight <= detailPanel.Panel1MinSize + detailPanel.Panel2MinSize) return;
-            detailPanel.SplitterDistance = Math.Max(220, availableHeight - 180);
-            detailSplitInitialized = true;
-        };
-
         var gridPanel = new Panel
         {
             Dock = DockStyle.Fill,
+            Padding = new Padding(12, 8, 12, 12),
             BackColor = Color.White
         };
         ConfigureGrid(_reservationsGrid);
         _reservationsGrid.Columns.Add("time", "시간");
         _reservationsGrid.Columns.Add("place", "장소");
         _reservationsGrid.Columns.Add("representative", "대표자");
-        _reservationsGrid.Columns.Add("headcount", "인원수");
+        _reservationsGrid.Columns.Add("headcount", "인원");
         _reservationsGrid.Columns.Add("status", "상태");
-        _reservationsGrid.Columns["time"]!.Width = 132;
-        _reservationsGrid.Columns["place"]!.Width = 150;
-        _reservationsGrid.Columns["representative"]!.Width = 118;
-        _reservationsGrid.Columns["headcount"]!.Width = 72;
-        _reservationsGrid.Columns["status"]!.Width = 96;
-        foreach (DataGridViewColumn column in _reservationsGrid.Columns)
+        // 표 너비에 맞춰 늘고 줄게 해서 '상태' 칸이 잘리거나 가로 스크롤이 생기지 않게 한다.
+        foreach (var (name, weight, minimumWidth) in new[]
+                 {
+                     ("time", 24F, 100),
+                     ("place", 30F, 112),
+                     ("representative", 20F, 72),
+                     ("headcount", 10F, 52),
+                     ("status", 22F, 112)
+                 })
         {
-            column.AutoSizeMode = DataGridViewAutoSizeColumnMode.None;
+            var column = _reservationsGrid.Columns[name]!;
+            column.AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
+            column.FillWeight = weight;
+            column.MinimumWidth = minimumWidth;
             column.Resizable = DataGridViewTriState.True;
         }
         _reservationsGrid.Columns["status"]!.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
@@ -518,7 +585,7 @@ internal sealed class MainForm : Form
         _reservationsGrid.RowTemplate.Height = 44;
         _reservationsGrid.AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.None;
         _reservationsGrid.DefaultCellStyle.Padding = new Padding(8, 0, 8, 0);
-        _reservationsGrid.ScrollBars = ScrollBars.Both;
+        _reservationsGrid.ScrollBars = ScrollBars.Vertical;
         _reservationsGrid.SelectionChanged += (_, _) => UpdateReservationActionButtons();
         _reservationsGrid.CellDoubleClick += (_, eventArgs) =>
         {
@@ -527,10 +594,10 @@ internal sealed class MainForm : Form
                 ShowReservationDetailDialog(entry);
         };
         ConfigureReservationContextMenu();
+        ConfigureReservationActions();
+        gridPanel.Controls.Add(_reservationActionPanel);
         gridPanel.Controls.Add(_reservationsGrid);
-        detailPanel.Panel1.Controls.Add(gridPanel);
-        detailPanel.Panel2.Controls.Add(BuildDaySchedulePanel());
-        bodySplit.Panel2.Controls.Add(detailPanel);
+        bodySplit.Panel2.Controls.Add(gridPanel);
         shell.Controls.Add(bodySplit, 0, 1);
         _reservationsGrid.BringToFront();
         return panel;
@@ -546,81 +613,6 @@ internal sealed class MainForm : Form
         button.ForeColor = Color.FromArgb(52, 48, 46);
         button.Font = new Font("맑은 고딕", 10F, FontStyle.Bold);
         button.Margin = new Padding(0, 2, 0, 2);
-    }
-
-    private Control BuildDaySchedulePanel()
-    {
-        var panel = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            BackColor = Color.FromArgb(250, 250, 249),
-            Padding = new Padding(12, 10, 12, 10),
-            ColumnCount = 1,
-            RowCount = 3
-        };
-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
-        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
-
-        _dayScheduleTitle.Dock = DockStyle.Fill;
-        _dayScheduleTitle.ForeColor = Color.FromArgb(52, 48, 46);
-        _dayScheduleTitle.Font = new Font("맑은 고딕", 10F, FontStyle.Bold);
-        _dayScheduleTitle.TextAlign = ContentAlignment.MiddleLeft;
-        panel.Controls.Add(_dayScheduleTitle, 0, 0);
-
-        _dayChecklist.Dock = DockStyle.Fill;
-        _dayChecklist.CheckOnClick = true;
-        _dayChecklist.BorderStyle = BorderStyle.FixedSingle;
-        _dayChecklist.BackColor = Color.White;
-        _dayChecklist.Font = new Font("맑은 고딕", 9F);
-        _dayChecklist.ItemCheck += (_, _) => BeginInvoke(new Action(SaveChecklistState));
-        _dayChecklist.SelectedIndexChanged += (_, _) =>
-            _deleteScheduleButton.Enabled = _dayChecklist.SelectedItem is CalendarNoteListItem;
-        panel.Controls.Add(_dayChecklist, 0, 1);
-
-        var inputRow = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            ColumnCount = 3,
-            RowCount = 1,
-            Padding = new Padding(0, 8, 0, 0)
-        };
-        inputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        inputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 64));
-        inputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 64));
-
-        _dayScheduleInput.Dock = DockStyle.Fill;
-        _dayScheduleInput.PlaceholderText = "체크리스트 또는 일정 입력";
-        _dayScheduleInput.KeyDown += (_, eventArgs) =>
-        {
-            if (eventArgs.KeyCode != Keys.Enter) return;
-            AddSelectedDateSchedule();
-            eventArgs.Handled = true;
-            eventArgs.SuppressKeyPress = true;
-        };
-
-        ConfigureScheduleButton(_addScheduleButton, "추가", Color.FromArgb(74, 156, 68));
-        _addScheduleButton.Click += (_, _) => AddSelectedDateSchedule();
-        ConfigureScheduleButton(_deleteScheduleButton, "삭제", Color.FromArgb(120, 115, 112));
-        _deleteScheduleButton.Click += (_, _) => DeleteSelectedDateSchedule();
-
-        inputRow.Controls.Add(_dayScheduleInput, 0, 0);
-        inputRow.Controls.Add(_addScheduleButton, 1, 0);
-        inputRow.Controls.Add(_deleteScheduleButton, 2, 0);
-        panel.Controls.Add(inputRow, 0, 2);
-        return panel;
-    }
-
-    private static void ConfigureScheduleButton(Button button, string text, Color color)
-    {
-        button.Text = text;
-        button.Dock = DockStyle.Fill;
-        button.Margin = new Padding(8, 0, 0, 0);
-        button.BackColor = color;
-        button.ForeColor = Color.White;
-        button.FlatStyle = FlatStyle.Flat;
-        button.FlatAppearance.BorderSize = 0;
-        button.Font = new Font("맑은 고딕", 8.5F, FontStyle.Bold);
     }
 
     private void ConfigureMonthGrid()
@@ -639,6 +631,28 @@ internal sealed class MainForm : Form
         _monthGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
         for (var row = 1; row < 7; row++)
             _monthGrid.RowStyles.Add(new RowStyle(SizeType.Percent, 100F / 6F));
+        _monthGrid.SizeChanged += (_, _) =>
+        {
+            var lines = ComputeCalendarPreviewLines();
+            if (lines == _calendarPreviewLines) return;
+            _calendarPreviewLines = lines;
+            RenderMonthGrid();
+        };
+    }
+
+    private const int CalendarDayLabelHeight = 18;
+    private const int CalendarPreviewLineHeight = 14;
+    private const int CalendarCellVerticalPadding = 5;
+    private int _calendarPreviewLines = 2;
+
+    // 날짜 칸 높이에 실제로 들어가는 미리보기 줄 수(날짜 줄 제외)
+    private int ComputeCalendarPreviewLines()
+    {
+        var gridHeight = _monthGrid.ClientSize.Height - _monthGrid.Padding.Vertical - 28;
+        if (gridHeight <= 0) return _calendarPreviewLines;
+        var cellHeight = gridHeight / 6 - 1;
+        var available = cellHeight - CalendarCellVerticalPadding - CalendarDayLabelHeight;
+        return Math.Clamp(available / CalendarPreviewLineHeight, 0, 4);
     }
 
     private async Task ShiftCalendarMonthAsync(int delta)
@@ -716,6 +730,7 @@ internal sealed class MainForm : Form
     {
         if (_monthGrid.ColumnCount == 0) return;
 
+        _calendarPreviewLines = ComputeCalendarPreviewLines();
         _monthGrid.SuspendLayout();
         _monthGrid.Controls.Clear();
         _calendarMonthLabel.Text = _visibleCalendarMonth.ToString("yyyy년 M월");
@@ -747,7 +762,7 @@ internal sealed class MainForm : Form
             var previewItems = BuildCalendarPreviewItems(date);
             var isCurrentMonth = date.Month == _visibleCalendarMonth.Month;
             var isSelected = date.Date == _selectedCalendarDate.Date;
-            var hasCounts = counts.Pending > 0 || counts.Reserved > 0 || counts.NoteCount > 0;
+            var hasCounts = counts.Pending > 0 || counts.Reserved > 0;
 
             var cell = CreateCalendarDateCell(
                 date,
@@ -776,7 +791,7 @@ internal sealed class MainForm : Form
         {
             Dock = DockStyle.Fill,
             Margin = new Padding(0, 0, 1, 1),
-            Padding = new Padding(7, 5, 6, 4),
+            Padding = new Padding(7, 3, 6, 2),
             BackColor = isSelected
                 ? Color.FromArgb(232, 245, 230)
                 : hasCounts
@@ -806,7 +821,7 @@ internal sealed class MainForm : Form
         {
             Text = BuildCalendarHeaderText(date, counts),
             Width = 140,
-            Height = 17,
+            Height = CalendarDayLabelHeight - 1,
             AutoSize = false,
             ForeColor = isCurrentMonth ? Color.FromArgb(52, 48, 46) : Color.FromArgb(173, 168, 164),
             Font = new Font("맑은 고딕", 8.5F, hasCounts ? FontStyle.Bold : FontStyle.Regular),
@@ -821,16 +836,23 @@ internal sealed class MainForm : Form
             content.Controls.Add(CreateCalendarCountLabel($"신청 {counts.Pending}", Color.FromArgb(154, 91, 25), date));
         if (false && counts.Reserved > 0)
             content.Controls.Add(CreateCalendarCountLabel($"예약 {counts.Reserved}", Color.FromArgb(48, 120, 56), date));
-        if (false && counts.NoteCount > 0 && counts.Pending + counts.Reserved == 0)
-            content.Controls.Add(CreateCalendarCountLabel($"체크 {counts.NoteCount}", Color.FromArgb(52, 87, 111), date));
 
-        var maxPreviewLines = counts.Pending + counts.Reserved + counts.NoteCount > 1 ? 2 : 3;
-        foreach (var item in previewItems.Take(maxPreviewLines))
-            content.Controls.Add(CreateCalendarPreviewLabel(item, date));
-        if (previewItems.Count > maxPreviewLines)
-            content.Controls.Add(CreateCalendarPreviewLabel(
-                new CalendarPreviewItem($"외 {previewItems.Count - maxPreviewLines}건", Color.FromArgb(120, 115, 112)),
-                date));
+        // 칸에 들어가는 줄 수만큼만 보여 준다. 넘치면 마지막 줄을 '외 N건'으로 쓰고,
+        // 한 줄밖에 없으면 첫 예약만 보여 준다(건수는 날짜 줄에 이미 있다).
+        var maxPreviewLines = _calendarPreviewLines;
+        if (maxPreviewLines > 0 && previewItems.Count > 0)
+        {
+            var overflow = previewItems.Count > maxPreviewLines && maxPreviewLines > 1;
+            var shownCount = overflow
+                ? maxPreviewLines - 1
+                : Math.Min(previewItems.Count, maxPreviewLines);
+            foreach (var item in previewItems.Take(shownCount))
+                content.Controls.Add(CreateCalendarPreviewLabel(item, date));
+            if (overflow)
+                content.Controls.Add(CreateCalendarPreviewLabel(
+                    new CalendarPreviewItem($"외 {previewItems.Count - shownCount}건", Color.FromArgb(120, 115, 112)),
+                    date));
+        }
 
         cell.Controls.Add(content);
 
@@ -841,7 +863,6 @@ internal sealed class MainForm : Form
     {
         if (counts.Pending > 0) return $"{date.Day}  신청 {counts.Pending}";
         if (counts.Reserved > 0) return $"{date.Day}  예약 {counts.Reserved}";
-        if (counts.NoteCount > 0) return $"{date.Day}  체크 {counts.NoteCount}";
         return date.Day.ToString();
     }
 
@@ -869,7 +890,7 @@ internal sealed class MainForm : Form
         {
             Text = item.Text,
             Width = 140,
-            Height = 15,
+            Height = CalendarPreviewLineHeight,
             AutoSize = false,
             ForeColor = item.Color,
             Font = new Font("맑은 고딕", 7.5F),
@@ -891,32 +912,27 @@ internal sealed class MainForm : Form
         => CalendarEntryPresenter.CountReservationsForDate(
             date,
             _calendarEntries,
-            _state.CalendarNotes,
             ApplyReservationFilters);
 
     private List<CalendarPreviewItem> BuildCalendarPreviewItems(DateTime date)
         => CalendarEntryPresenter.BuildPreviewItems(
             date,
             _calendarEntries,
-            _state.CalendarNotes,
             ApplyReservationFilters);
-
-    private List<CalendarNote> GetCalendarNotesForDate(DateTime date) =>
-        _state.CalendarNotes
-            .Where(note => ReservationService.IsSameCalendarDate(note.Date, date))
-            .OrderBy(note => note.CreatedAt, StringComparer.Ordinal)
-            .ToList();
 
     private void ConfigureReservationActions()
     {
+        // 선택한 예약에 대한 버튼은 표 바로 아래에 둔다(예전에는 오른쪽 위에 있어 잘렸다).
         _reservationActionPanel.Dock = DockStyle.Bottom;
-        _reservationActionPanel.Height = 40;
+        _reservationActionPanel.Height = 50;
+        _reservationActionPanel.Padding = new Padding(0, 10, 0, 0);
         _reservationActionPanel.FlowDirection = FlowDirection.LeftToRight;
         _reservationActionPanel.WrapContents = false;
-        _reservationActionPanel.Anchor = AnchorStyles.Top | AnchorStyles.Right;
 
         ConfigureReservationActionButton(_requestApproveButton, "\uC2B9\uC778", Color.FromArgb(74, 156, 68));
         ConfigureReservationActionButton(_requestRejectButton, "\uBC18\uB824", Color.FromArgb(233, 63, 111));
+        ConfigureReservationActionButton(_proxyUsageLogButton, "이용완료", Color.FromArgb(196, 84, 20));
+        _proxyUsageLogButton.Text = "일지 대리 제출";
         UpdateReservationActionButtons();
     }
 
@@ -924,9 +940,14 @@ internal sealed class MainForm : Form
     {
         button.Text = status;
         button.AutoSize = true;
-        button.Height = 32;
+        button.MinimumSize = new Size(72, 40);
+        button.Height = 40;
         button.Padding = new Padding(10, 0, 10, 0);
         button.Margin = new Padding(0, 0, 8, 0);
+        button.Cursor = Cursors.Hand;
+        // 지금 누를 수 없는 버튼은 회색으로 보여 준다.
+        button.EnabledChanged += (_, _) =>
+            button.BackColor = button.Enabled ? color : Color.FromArgb(226, 223, 220);
         button.BackColor = color;
         button.ForeColor = Color.White;
         button.FlatStyle = FlatStyle.Flat;
@@ -965,70 +986,6 @@ internal sealed class MainForm : Form
         block.Controls.Add(label, 0, 0);
         block.Controls.Add(comboBox, 0, 1);
         return block;
-    }
-
-    private void RenderDaySchedule()
-    {
-        if (_dayChecklist.IsDisposed) return;
-        _renderingDayChecklist = true;
-        try
-        {
-            _dayScheduleTitle.Text = $"{_selectedCalendarDate:M월 d일} 체크리스트 · 일정";
-            _dayChecklist.Items.Clear();
-            foreach (var note in GetCalendarNotesForDate(_selectedCalendarDate))
-            {
-                var item = new CalendarNoteListItem(note);
-                var index = _dayChecklist.Items.Add(item);
-                _dayChecklist.SetItemChecked(index, note.Done);
-            }
-            _deleteScheduleButton.Enabled = _dayChecklist.SelectedItem is CalendarNoteListItem;
-        }
-        finally
-        {
-            _renderingDayChecklist = false;
-        }
-    }
-
-    private void AddSelectedDateSchedule()
-    {
-        var text = _dayScheduleInput.Text.Trim();
-        if (string.IsNullOrWhiteSpace(text)) return;
-        _state.CalendarNotes.Add(new CalendarNote
-        {
-            Id = Guid.NewGuid().ToString("N"),
-            Date = _selectedCalendarDate.ToString("yyyy-MM-dd"),
-            Text = text,
-            CreatedAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")
-        });
-        _dayScheduleInput.Clear();
-        _storage.SaveState(_state);
-        RenderCalendarEntries();
-    }
-
-    private void DeleteSelectedDateSchedule()
-    {
-        if (_dayChecklist.SelectedItem is not CalendarNoteListItem selected) return;
-        _state.CalendarNotes.RemoveAll(note => note.Id == selected.Note.Id);
-        _storage.SaveState(_state);
-        RenderCalendarEntries();
-    }
-
-    private void SaveChecklistState()
-    {
-        if (_renderingDayChecklist) return;
-        foreach (var item in _dayChecklist.Items.OfType<CalendarNoteListItem>())
-        {
-            item.Note.Done = _dayChecklist.CheckedItems.Contains(item);
-        }
-        _storage.SaveState(_state);
-        RenderMonthGrid();
-    }
-
-    private sealed class CalendarNoteListItem(CalendarNote note)
-    {
-        public CalendarNote Note { get; } = note;
-
-        public override string ToString() => Note.Text;
     }
 
     private void ConfigureReservationContextMenu()
@@ -1190,20 +1147,11 @@ internal sealed class MainForm : Form
     private void ConfigureMoreActionsButton()
     {
         _moreActionsButton.Text = "설정";
-        _moreActionsButton.AutoSize = true;
-        _moreActionsButton.Height = 38;
-        _moreActionsButton.Padding = new Padding(12, 0, 12, 0);
-        _moreActionsButton.Margin = new Padding(6, 0, 0, 0);
-        _moreActionsButton.BackColor = Color.FromArgb(117, 111, 108);
-        _moreActionsButton.ForeColor = Color.White;
-        _moreActionsButton.FlatStyle = FlatStyle.Flat;
-        _moreActionsButton.Cursor = Cursors.Hand;
-        _moreActionsButton.FlatAppearance.BorderSize = 0;
+        ApplyHeaderButtonStyle(_moreActionsButton);
 
         var menu = new ContextMenuStrip();
         menu.Items.Add("알림 이력", null, (_, _) => ShowEventHistoryDialog());
         menu.Items.Add("실적 다운로드", null, async (_, _) => await DownloadMonthlyPerformanceAsync());
-        menu.Items.Add("관리자 페이지", null, (_, _) => OpenChrome(AdminPageUrl));
         menu.Items.Add("시트 열기", null, (_, _) => OpenChrome(SheetUrl));
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("연결 설정", null, async (_, _) =>
@@ -1384,6 +1332,7 @@ internal sealed class MainForm : Form
                 cancellation.Token);
             MergeEvents(snapshot.Events);
             RenderSummary(snapshot.Summary);
+            _checkInsByMonth[requestedMonth] = snapshot.CheckIns ?? [];
             var smartPlaceEntries = _calendarEntries.Where(IsSmartPlaceNaverEntry).ToList();
             var mergedEntries = ReservationService.MergeCalendarEntries(
                 snapshot.CalendarEntries.Where(item => !IsSheetNaverEntry(item)),
@@ -1540,6 +1489,11 @@ internal sealed class MainForm : Form
 
     private void RenderCalendarEntries()
     {
+        ReservationService.ApplyCheckIns(
+            _calendarEntries,
+            _checkInsByMonth.TryGetValue(_visibleCalendarMonth.ToString("yyyy-MM"), out var checkIns) ? checkIns : []);
+        UpdateMissingUsageLogButton();
+        CheckOverdueUsageLogs();
         var selectedDate = _selectedCalendarDate.ToString("yyyy-MM-dd");
         _reservationsTitle.Text = selectedDate == DateTime.Today.ToString("yyyy-MM-dd")
             ? "오늘 운영 목록"
@@ -1553,7 +1507,7 @@ internal sealed class MainForm : Form
             .ToDictionary(group => group.Key, group => group.Count());
         _reservationSummaryLabel.Text = dayItems.Count == 0
             ? "선택한 날짜의 예약이 없습니다."
-            : string.Join(" · ", new[] { "승인 대기", "승인 완료", "이용중", "이용완료", "노쇼", "취소" }
+            : string.Join(" · ", new[] { "승인 대기", "승인 완료", "이용중", "이용완료", ReservationService.MissingUsageLogStatus, "노쇼", "취소" }
                 .Where(status => statusCounts.ContainsKey(status))
                 .Select(status => $"{status} {statusCounts[status]}건"));
 
@@ -1561,8 +1515,6 @@ internal sealed class MainForm : Form
         _reservationFilterSummaryLabel.Text = dayItems.Count == selectedItems.Count
             ? $"전체 {dayItems.Count}건 표시 중"
             : $"전체 {dayItems.Count}건 중 {selectedItems.Count}건 표시";
-
-        RenderDaySchedule();
 
         _reservationsGrid.Rows.Clear();
         if (dayItems.Count > 0 && selectedItems.Count == 0)
@@ -1623,6 +1575,12 @@ internal sealed class MainForm : Form
                 IsAllowedStatusForEntry(selectedEntry, button.Item2) &&
                 !StatusMatches(selectedEntry, button.Item2);
         }
+
+        _proxyUsageLogButton.Enabled = canChangeRequestStatus &&
+            selectedEntry != null &&
+            !selectedEntry.Submitted &&
+            !selectedEntry.Cancelled &&
+            IsAllowedStatusForEntry(selectedEntry, "이용완료");
     }
 
     private static List<CalendarEntry> ConvertTodayReservations(IEnumerable<Reservation> reservations) =>
@@ -1755,12 +1713,117 @@ internal sealed class MainForm : Form
             memberId = member.Id;
         }
 
+        var companions = new List<ManualCompanion>();
+        var companionCount = Math.Max(0, entry.Headcount - 1);
+        if (companionCount > 0 && !IsReservationRequestSource(entry.Source))
+        {
+            companions = ShowCompanionDialog(entry, companionCount)
+                ?? throw new InvalidOperationException("동반 이용자 입력을 취소했습니다.");
+        }
+
         return await _client.CompleteReservationUsageAsync(
             _settings,
             _password,
             entry,
             memberId,
+            companions,
             cancellationToken);
+    }
+
+    private List<ManualCompanion>? ShowCompanionDialog(CalendarEntry entry, int companionCount)
+    {
+        using var dialog = new Form
+        {
+            Text = "동반 이용자 정보",
+            StartPosition = FormStartPosition.CenterParent,
+            Size = new Size(420, Math.Min(580, 214 + companionCount * 40)),
+            MinimizeBox = false,
+            MaximizeBox = false,
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            Font = Font,
+            BackColor = Color.White
+        };
+
+        var root = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 3,
+            Padding = new Padding(16)
+        };
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+        root.Controls.Add(new Label
+        {
+            AutoSize = true,
+            MaximumSize = new Size(370, 0),
+            Margin = new Padding(0, 0, 0, 10),
+            Text = $"{entry.Name} · {entry.PlaceName} {entry.StartTime}~{entry.EndTime}\n" +
+                   $"예약 인원 {entry.Headcount}명 · 동반 이용자 {companionCount}명의 성별과 만 나이를 입력해 주세요."
+        }, 0, 0);
+
+        var rows = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 3,
+            AutoScroll = true
+        };
+        rows.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 90));
+        rows.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110));
+        rows.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110));
+        var inputs = new List<(ComboBox Gender, NumericUpDown Age)>();
+        for (var index = 0; index < companionCount; index++)
+        {
+            var gender = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 100 };
+            gender.Items.AddRange(["남성", "여성"]);
+            var age = new NumericUpDown { Minimum = 1, Maximum = 100, Value = 25, Width = 100 };
+            rows.Controls.Add(new Label { Text = $"동반 {index + 1}", AutoSize = true, Margin = new Padding(0, 7, 0, 0) }, 0, index);
+            rows.Controls.Add(gender, 1, index);
+            rows.Controls.Add(age, 2, index);
+            inputs.Add((gender, age));
+        }
+        root.Controls.Add(rows, 0, 1);
+
+        var buttons = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            AutoSize = true,
+            FlowDirection = FlowDirection.RightToLeft
+        };
+        // 기본 크기(약 23px)는 누르기 어려워 다른 창과 같은 40px 버튼을 쓴다.
+        var ok = CreateCompactDialogButton("제출", MissingUsageLogColor, DialogResult.OK);
+        var cancel = CreateCompactDialogButton("취소", Color.FromArgb(117, 111, 108), DialogResult.Cancel);
+        buttons.Controls.Add(ok);
+        buttons.Controls.Add(cancel);
+        root.Controls.Add(buttons, 0, 2);
+        dialog.Controls.Add(root);
+        dialog.AcceptButton = ok;
+        dialog.CancelButton = cancel;
+
+        while (dialog.ShowDialog(this) == DialogResult.OK)
+        {
+            if (inputs.All(input => input.Gender.SelectedItem is string))
+            {
+                return inputs
+                    .Select(input => new ManualCompanion
+                    {
+                        Gender = (string)input.Gender.SelectedItem!,
+                        Age = (int)input.Age.Value
+                    })
+                    .ToList();
+            }
+
+            MessageBox.Show(
+                dialog,
+                "동반 이용자의 성별을 모두 선택해 주세요.",
+                "동반 이용자 정보",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+        }
+
+        return null;
     }
 
     private AdminMember? ShowMemberSelectionDialog(List<AdminMember> members, string reservationName)
@@ -1786,7 +1849,7 @@ internal sealed class MainForm : Form
         };
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
         dialog.Controls.Add(root);
 
         root.Controls.Add(new Label
@@ -1834,8 +1897,8 @@ internal sealed class MainForm : Form
         {
             Text = text,
             Width = 88,
-            Height = 32,
-            Margin = new Padding(8, 6, 0, 0),
+            Height = 40,
+            Margin = new Padding(8, 4, 0, 0),
             DialogResult = result,
             BackColor = color,
             ForeColor = Color.White,
@@ -1881,7 +1944,7 @@ internal sealed class MainForm : Form
                 ("승인 완료로 변경", "승인"),
                 ("반려로 변경", "반려"),
                 ("취소로 변경", "취소"),
-                ("이용완료로 변경", "이용완료")
+                ("이용완료로 변경 (일지 대리 제출)", "이용완료")
             ];
         }
 
@@ -1890,7 +1953,7 @@ internal sealed class MainForm : Form
             return
             [
                 ("승인 완료로 변경", "확정"),
-                ("이용완료로 변경", "이용완료"),
+                ("이용완료로 변경 (일지 대리 제출)", "이용완료"),
                 ("노쇼로 변경", "노쇼"),
                 ("취소로 변경", "취소")
             ];
@@ -1915,6 +1978,7 @@ internal sealed class MainForm : Form
             "승인 대기" => Color.FromArgb(154, 91, 25),
             "이용중" => Color.FromArgb(36, 88, 122),
             "이용완료" => Color.FromArgb(48, 120, 56),
+            ReservationService.MissingUsageLogStatus => Color.FromArgb(196, 84, 20),
             "노쇼" => Color.FromArgb(168, 48, 48),
             "취소" => Color.FromArgb(120, 115, 112),
             _ => Color.FromArgb(52, 48, 46)
@@ -1925,6 +1989,7 @@ internal sealed class MainForm : Form
             "승인 완료" => Color.FromArgb(246, 246, 244),
             "이용중" => Color.FromArgb(236, 244, 249),
             "이용완료" => Color.FromArgb(238, 247, 237),
+            ReservationService.MissingUsageLogStatus => Color.FromArgb(255, 241, 230),
             "노쇼" => Color.FromArgb(255, 239, 239),
             "취소" => Color.FromArgb(241, 240, 238),
             _ => Color.White
@@ -1983,7 +2048,13 @@ internal sealed class MainForm : Form
 
     private bool ShowSettings()
     {
-        using var dialog = new SettingsForm(_settings, _password, _naverId, _naverPassword);
+        using var dialog = new SettingsForm(
+            _settings,
+            _password,
+            _naverId,
+            _naverPassword,
+            LaunchNaverLoginBrowserAsync,
+            () => _storage.ReadDiagnosticLog());
         if (dialog.ShowDialog(this) != DialogResult.OK) return false;
         _password = dialog.Password;
         _naverId = dialog.NaverId;
@@ -2071,6 +2142,7 @@ internal sealed class MainForm : Form
         {
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(90));
             var result = await RunNaverBookingSyncAsync(repoRoot, _naverId, _naverPassword, timeout.Token);
+            LogNaverRun("네이버 예약 확인", result.ExitCode, result.OutputText, result.ErrorText);
             if (result.ExitCode != 0)
             {
                 var message = FirstMeaningfulLine(result.ErrorText, result.OutputText);
@@ -2087,7 +2159,10 @@ internal sealed class MainForm : Form
             var outputPath = Path.Combine(repoRoot, "outputs", "naver-booking-sync.json");
             var naverSnapshot = NaverBookingParser.ReadSnapshot(outputPath);
             _lastNaverBookingSnapshot = naverSnapshot;
-            var displayedTodayUseCount = MergeNaverTodayUseReservations(naverSnapshot.TodayUse);
+            _naverBookingCheckedAt = DateTime.Now;
+            var displayedTodayUseCount = MergeNaverTodayUseReservations(naverSnapshot);
+            var sheetChanges = await SyncNaverReservationsToSheetAsync(naverSnapshot);
+            var sheetText = sheetChanges > 0 ? $" · 시트 반영 {sheetChanges}" : "";
             var pending = naverSnapshot.PendingConfirm;
             UpdateNaverPendingButton(pending.Count);
             var checkedAt = DateTime.Now.ToString("HH:mm");
@@ -2096,13 +2171,13 @@ internal sealed class MainForm : Form
                 var todayUseText = naverSnapshot.TodayUse.Count > 0
                     ? $" · 오늘이용 {displayedTodayUseCount}"
                     : "";
-                _naverBookingStatusLabel.Text = $"네이버 신청 없음{todayUseText} · {checkedAt}";
+                _naverBookingStatusLabel.Text = $"네이버 신청 없음{todayUseText}{sheetText} · {checkedAt}";
                 _lastNaverPendingSignature = "";
                 return;
             }
 
             _naverBookingStatusLabel.Text =
-                $"네이버 신청 {pending.Count} · 오늘이용 {displayedTodayUseCount} · {checkedAt}";
+                $"네이버 신청 {pending.Count} · 오늘이용 {displayedTodayUseCount}{sheetText} · {checkedAt}";
             var signature = string.Join("|", pending.Select(item => item.ReservationNo).Order(StringComparer.Ordinal));
             if (!string.Equals(signature, _lastNaverPendingSignature, StringComparison.Ordinal))
             {
@@ -2122,10 +2197,12 @@ internal sealed class MainForm : Form
         catch (OperationCanceledException)
         {
             _naverBookingStatusLabel.Text = "네이버 예약 확인 시간 초과";
+            LogNaverRun("네이버 예약 확인", -1, "", "90초 안에 끝나지 않아 중단했습니다.");
         }
         catch (Exception exception)
         {
             _naverBookingStatusLabel.Text = "네이버 예약 확인 오류 · " + exception.Message;
+            LogNaverRun("네이버 예약 확인", -1, "", exception.ToString());
         }
         finally
         {
@@ -2133,16 +2210,116 @@ internal sealed class MainForm : Form
         }
     }
 
+    // 이미 서버에 맞춘 '예약번호|상태'. 같은 예약을 5분마다 다시 보내지 않게 한다.
+    private readonly HashSet<string> _naverSheetSyncedKeys = new(StringComparer.Ordinal);
+
+    // 오늘 확정 예약은 시트에 없으면 추가하고, 오늘 취소된 예약은 시트에서 '취소'로 바꾼다.
+    // 반환값: 실제로 시트가 바뀐 건수
+    private async Task<int> SyncNaverReservationsToSheetAsync(NaverBookingSnapshot snapshot)
+    {
+        if (_demoMode || string.IsNullOrWhiteSpace(_password)) return 0;
+        var changed = 0;
+        foreach (var item in NaverBookingParser.BuildSheetSyncItems(snapshot))
+        {
+            if (_naverSheetSyncedKeys.Contains(item.Key)) continue;
+            try
+            {
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                var result = await _client.EnsureNaverReservationAsync(_settings, _password, item, timeout.Token);
+                _naverSheetSyncedKeys.Add(item.Key);
+                if (!result.Created && !result.Updated) continue;
+                changed++;
+                var action = result.Created
+                    ? "추가"
+                    : item.Status == "취소"
+                        ? "취소로 변경"
+                        : "변경 반영(" + string.Join(", ", result.ChangedFields.Select(DescribeNaverSheetField)) + ")";
+                _storage.AppendDiagnosticLog(
+                    $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] 네이버 예약 시트 반영 · {item.Reservation.ReservationNo} {action}" +
+                    $" → {item.Entry.Date} {item.Entry.StartTime}~{item.Entry.EndTime} {item.Entry.PlaceName}");
+            }
+            catch (Exception exception)
+            {
+                // 다음 확인 때 다시 시도한다.
+                LogNaverRun($"네이버 예약 시트 반영 · {item.Reservation.ReservationNo}", -1, "", exception.Message);
+            }
+        }
+        if (changed > 0) _ = RefreshDashboardAsync();
+        return changed;
+    }
+
+    private static string DescribeNaverSheetField(string field) => field switch
+    {
+        "usageDate" => "날짜",
+        "startTime" => "시작",
+        "endTime" => "종료",
+        "spaceType" or "placeName" => "공간",
+        "headcount" => "인원",
+        "purpose" => "목적",
+        "bookerName" => "예약자",
+        "maskedPhone" => "연락처",
+        "status" or "confirmedAt" => "상태",
+        _ => field
+    };
+
+    // 성공은 한 줄로, 실패는 출력 전체를 남긴다.
+    private void LogNaverRun(string title, int exitCode, string outputText, string errorText)
+    {
+        var header = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {title} · " + (exitCode == 0 ? "성공" : $"실패 (종료 코드 {exitCode})");
+        if (exitCode == 0)
+        {
+            _storage.AppendDiagnosticLog(header);
+            return;
+        }
+        _storage.AppendDiagnosticLog(
+            header + "\r\n" +
+            "[출력]\r\n" + (string.IsNullOrWhiteSpace(outputText) ? "(없음)" : outputText.Trim()) + "\r\n" +
+            "[오류]\r\n" + (string.IsNullOrWhiteSpace(errorText) ? "(없음)" : errorText.Trim()));
+    }
+
+    private static string GetNaverAutomationProfileDir(string repoRoot) =>
+        Path.Combine(repoRoot, "automation", ".naver-booking-state", "chrome-profile");
+
+    // 수집 스크립트가 쓰는 크롬 프로필로 실제 크롬을 열어, 직원이 직접 네이버에 로그인해 두게 한다.
+    private Task<string?> LaunchNaverLoginBrowserAsync()
+    {
+        if (_naverBookingSyncRunning)
+            return Task.FromResult<string?>("지금 네이버 예약을 확인하는 중입니다. 잠시 뒤 다시 눌러 주세요.");
+
+        var repoRoot = FindRepositoryRoot();
+        if (string.IsNullOrWhiteSpace(repoRoot))
+            return Task.FromResult<string?>("프로그램 폴더(SPACE_MANAGEMENT_REPO)를 찾지 못했습니다.");
+        if (!File.Exists(ChromePath))
+            return Task.FromResult<string?>("크롬이 설치된 위치를 찾지 못했습니다: " + ChromePath);
+
+        try
+        {
+            var profileDir = GetNaverAutomationProfileDir(repoRoot);
+            Directory.CreateDirectory(profileDir);
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = ChromePath,
+                Arguments = $"--new-window --user-data-dir=\"{profileDir}\" \"{SmartPlaceUrl}\"",
+                UseShellExecute = true
+            });
+            _naverBookingStatusLabel.Text = "네이버 로그인 창을 열었습니다";
+            _storage.AppendDiagnosticLog(
+                $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] 네이버 로그인 설정 · 로그인용 크롬 창 열림\r\n프로필: {profileDir}");
+            return Task.FromResult<string?>(null);
+        }
+        catch (Exception exception)
+        {
+            _naverBookingStatusLabel.Text = "네이버 로그인 창을 열지 못했습니다";
+            LogNaverRun("네이버 로그인 설정", -1, "", exception.ToString());
+            return Task.FromResult<string?>(exception.Message);
+        }
+    }
+
     private void UpdateNaverPendingButton(int pendingCount)
     {
         if (_naverPendingButton.IsDisposed) return;
         _naverPendingButton.Text = pendingCount > 0 ? $"예약신청 {pendingCount}" : "예약신청";
-        _naverPendingButton.BackColor = pendingCount > 0
-            ? Color.FromArgb(214, 108, 31)
-            : Color.FromArgb(117, 111, 108);
-        _naverPendingButton.Font = new Font(
-            _naverPendingButton.Font,
-            pendingCount > 0 ? FontStyle.Bold : FontStyle.Regular);
+        ApplyHeaderButtonStyle(_naverPendingButton, pendingCount > 0 ? Color.FromArgb(214, 108, 31) : null);
     }
 
     private void ShowNaverBookingDialog()
@@ -2159,14 +2336,32 @@ internal sealed class MainForm : Form
             }
         }
 
-        using var dialog = new Form
+        using var dialog = BuildNaverBookingDialog(snapshot, _naverBookingCheckedAt);
+        dialog.ShowDialog(this);
+    }
+
+    private DateTime? _naverBookingCheckedAt;
+    private static readonly System.Globalization.CultureInfo KoreanCulture = new("ko-KR");
+
+    private Form BuildNaverBookingDialog(NaverBookingSnapshot snapshot, DateTime? checkedAt)
+    {
+        var pending = snapshot.PendingConfirm
+            .Select(item => (Item: item, Entry: NaverBookingParser.ConvertTodayUseReservation(item)))
+            .OrderBy(row => row.Entry.Date, StringComparer.Ordinal)
+            .ThenBy(row => row.Entry.StartTime, StringComparer.Ordinal)
+            .ToList();
+        var todayCancelCount = snapshot.TodayCancel.Count;
+
+        var dialog = new Form
         {
-            Text = "네이버 예약 신청 확인",
+            Text = "네이버 예약 신청",
             StartPosition = FormStartPosition.CenterParent,
-            Size = new Size(780, 520),
-            MinimumSize = new Size(680, 420),
+            Size = new Size(860, 540),
+            MinimumSize = new Size(720, 420),
             Font = Font,
-            BackColor = Color.White
+            BackColor = Color.White,
+            MinimizeBox = false,
+            ShowInTaskbar = false
         };
 
         var root = new TableLayoutPanel
@@ -2174,86 +2369,152 @@ internal sealed class MainForm : Form
             Dock = DockStyle.Fill,
             ColumnCount = 1,
             RowCount = 3,
-            Padding = new Padding(18)
+            Padding = new Padding(22, 18, 22, 16),
+            BackColor = Color.White
         };
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 70));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 58));
         dialog.Controls.Add(root);
 
-        root.Controls.Add(new Label
+        // 머리말: 건수를 크게, 할 일과 마지막 확인 시각을 작게
+        var header = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Margin = new Padding(0) };
+        header.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
+        header.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        header.Controls.Add(new Label
         {
-            Text = $"예약 신청 {snapshot.PendingConfirm.Count}건",
+            Text = pending.Count > 0 ? $"승인 대기 {pending.Count}건" : "승인 대기 없음",
             Dock = DockStyle.Fill,
-            Font = new Font("맑은 고딕", 14F, FontStyle.Bold),
-            ForeColor = Color.FromArgb(52, 48, 46),
+            Font = new Font("맑은 고딕", 15F, FontStyle.Bold),
+            ForeColor = pending.Count > 0 ? Color.FromArgb(178, 86, 18) : Color.FromArgb(52, 48, 46),
+            TextAlign = ContentAlignment.MiddleLeft,
+            Margin = new Padding(0)
+        }, 0, 0);
+        var subtitleParts = new List<string>();
+        if (pending.Count > 0) subtitleParts.Add("승인·거절은 네이버 스마트플레이스에서 처리해 주세요");
+        if (todayCancelCount > 0) subtitleParts.Add($"오늘 취소 {todayCancelCount}건");
+        subtitleParts.Add(checkedAt is { } at ? $"마지막 확인 {at:HH:mm}" : "아직 네이버를 확인하지 않았습니다");
+        header.Controls.Add(new Label
+        {
+            Text = string.Join(" · ", subtitleParts),
+            Dock = DockStyle.Fill,
+            ForeColor = Color.FromArgb(105, 100, 97),
+            TextAlign = ContentAlignment.TopLeft,
+            Margin = new Padding(1, 2, 0, 0)
+        }, 0, 1);
+        root.Controls.Add(header, 0, 0);
+
+        Control body;
+        if (pending.Count == 0)
+        {
+            body = new Label
+            {
+                Text = "승인을 기다리는 네이버 예약 신청이 없습니다.\n새 신청이 들어오면 상단 '예약신청' 버튼이 주황색으로 바뀝니다.",
+                Dock = DockStyle.Fill,
+                TextAlign = ContentAlignment.MiddleCenter,
+                ForeColor = Color.FromArgb(120, 115, 112),
+                BackColor = Color.FromArgb(250, 250, 249),
+                BorderStyle = BorderStyle.FixedSingle
+            };
+        }
+        else
+        {
+            var grid = new DataGridView();
+            ConfigureGrid(grid);
+            grid.ScrollBars = ScrollBars.Vertical;
+            grid.RowTemplate.Height = 44;
+            grid.DefaultCellStyle.Padding = new Padding(6, 0, 6, 0);
+            foreach (var (name, title, weight, minimumWidth) in new[]
+                     {
+                         ("date", "이용일", 18F, 104),
+                         ("time", "시간", 16F, 96),
+                         ("place", "공간", 18F, 100),
+                         ("name", "예약자", 14F, 72),
+                         ("headcount", "인원", 8F, 48),
+                         ("purpose", "이용 목적", 26F, 110)
+                     })
+            {
+                var column = new DataGridViewTextBoxColumn
+                {
+                    Name = name,
+                    HeaderText = title,
+                    AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+                    FillWeight = weight,
+                    MinimumWidth = minimumWidth,
+                    SortMode = DataGridViewColumnSortMode.NotSortable
+                };
+                grid.Columns.Add(column);
+            }
+            grid.Columns["headcount"]!.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
+            grid.Columns["headcount"]!.HeaderCell.Style.Alignment = DataGridViewContentAlignment.MiddleCenter;
+
+            foreach (var (item, entry) in pending)
+            {
+                var dateText = DateTime.TryParse(entry.Date, out var date)
+                    ? date.ToString("M월 d일 (ddd)", KoreanCulture)
+                    : FirstNonEmpty(entry.Date, "-");
+                var timeText = string.IsNullOrWhiteSpace(entry.StartTime)
+                    ? FirstNonEmpty(item.UseDateTime, "-")
+                    : $"{entry.StartTime}~{entry.EndTime}";
+                var rowIndex = grid.Rows.Add(
+                    dateText,
+                    timeText,
+                    FirstNonEmpty(entry.PlaceName, "-"),
+                    FirstNonEmpty(entry.Name, "-"),
+                    $"{Math.Max(1, item.Headcount)}명",
+                    FirstNonEmpty(item.Purpose, "-"));
+                grid.Rows[rowIndex].Cells["date"].ToolTipText = $"예약번호 {item.ReservationNo}";
+                if (DateTime.TryParse(entry.Date, out var rowDate) && rowDate.Date == DateTime.Today)
+                    grid.Rows[rowIndex].DefaultCellStyle.Font = new Font(grid.DefaultCellStyle.Font!, FontStyle.Bold);
+            }
+            grid.ShowCellToolTips = true;
+            grid.CellDoubleClick += (_, eventArgs) =>
+            {
+                if (eventArgs.RowIndex >= 0) OpenChrome(SmartPlaceUrl);
+            };
+            // 진한 검은 테두리 대신 옅은 1px 테두리로 표 영역만 구분한다.
+            var frame = new Panel
+            {
+                Dock = DockStyle.Fill,
+                Padding = new Padding(1),
+                BackColor = Color.FromArgb(222, 218, 214),
+                Margin = new Padding(0)
+            };
+            frame.Controls.Add(grid);
+            body = frame;
+        }
+        root.Controls.Add(body, 0, 1);
+
+        // 하단: 왼쪽에 도움말, 오른쪽에 버튼(주 동작이 맨 오른쪽)
+        var footer = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = new Padding(0, 12, 0, 0) };
+        footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        footer.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        footer.Controls.Add(new Label
+        {
+            Text = pending.Count > 0 ? "오늘 이용 예약은 굵게 표시 · 행을 두 번 누르면 네이버가 열립니다" : "",
+            Dock = DockStyle.Fill,
+            ForeColor = Color.FromArgb(140, 135, 132),
             TextAlign = ContentAlignment.MiddleLeft
         }, 0, 0);
-
-        var grid = new DataGridView
-        {
-            Dock = DockStyle.Fill,
-            AllowUserToAddRows = false,
-            AllowUserToDeleteRows = false,
-            ReadOnly = true,
-            RowHeadersVisible = false,
-            SelectionMode = DataGridViewSelectionMode.FullRowSelect,
-            AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
-            BackgroundColor = Color.White,
-            BorderStyle = BorderStyle.FixedSingle
-        };
-        grid.Columns.Add("type", "구분");
-        grid.Columns.Add("status", "상태");
-        grid.Columns.Add("time", "이용시간");
-        grid.Columns.Add("name", "예약자");
-        grid.Columns.Add("product", "상품");
-        grid.Columns.Add("number", "예약번호");
-        grid.Columns["type"]!.Width = 90;
-        grid.Columns["status"]!.Width = 90;
-        grid.Columns["time"]!.FillWeight = 140;
-        grid.Columns["name"]!.Width = 110;
-        grid.Columns["product"]!.FillWeight = 120;
-        grid.Columns["number"]!.Width = 130;
-        AddNaverBookingRows(grid, "예약 신청", snapshot.PendingConfirm);
-        if (grid.Rows.Count == 0)
-        {
-            grid.Rows.Add("확인 결과", "-", "-", "-", "승인 대기 중인 네이버 예약 신청이 없습니다.", "-");
-        }
-        root.Controls.Add(grid, 0, 1);
-
         var buttons = new FlowLayoutPanel
         {
-            Dock = DockStyle.Fill,
-            FlowDirection = FlowDirection.RightToLeft,
-            WrapContents = false
+            AutoSize = true,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false,
+            Margin = new Padding(0)
         };
-        var closeButton = CreateCompactDialogButton("닫기", Color.FromArgb(117, 111, 108), DialogResult.OK);
-        var openButton = CreateCompactDialogButton("네이버 열기", Color.FromArgb(44, 126, 75), DialogResult.None);
-        openButton.Width = 112;
-        openButton.Click += (_, _) => OpenChrome(SmartPlaceUrl);
+        var closeButton = CreateHeaderButton("닫기", (_, _) => dialog.Close());
+        var openButton = CreateHeaderButton(
+            pending.Count > 0 ? "네이버에서 승인하기" : "네이버 열기",
+            (_, _) => OpenChrome(SmartPlaceUrl));
+        if (pending.Count > 0) ApplyHeaderButtonStyle(openButton, Color.FromArgb(44, 126, 75));
         buttons.Controls.Add(closeButton);
         buttons.Controls.Add(openButton);
-        root.Controls.Add(buttons, 0, 2);
-        dialog.AcceptButton = closeButton;
+        footer.Controls.Add(buttons, 1, 0);
+        root.Controls.Add(footer, 0, 2);
+        dialog.CancelButton = closeButton;
 
-        dialog.ShowDialog(this);
-    }
-
-    private static void AddNaverBookingRows(
-        DataGridView grid,
-        string type,
-        IEnumerable<NaverBookingReservation> reservations)
-    {
-        foreach (var item in reservations)
-        {
-            grid.Rows.Add(
-                type,
-                FirstNonEmpty(item.Status, "-"),
-                FirstNonEmpty(item.UseDateTime, "-"),
-                FirstNonEmpty(item.BookerName, "-"),
-                FirstNonEmpty(NaverBookingParser.ShortProductName(item.ProductName), "-"),
-                FirstNonEmpty(item.ReservationNo, "-"));
-        }
+        return dialog;
     }
 
     private static async Task<(int ExitCode, string OutputText, string ErrorText)> RunNaverBookingSyncAsync(
@@ -2284,18 +2545,16 @@ internal sealed class MainForm : Form
         return (process.ExitCode, await outputTask, await errorTask);
     }
 
-    private int MergeNaverTodayUseReservations(List<NaverBookingReservation> reservations)
+    // 반환값: 화면에 반영한 '오늘이용' 건수(취소 건 제외)
+    private int MergeNaverTodayUseReservations(NaverBookingSnapshot snapshot)
     {
-        var entries = reservations
-            .Select(NaverBookingParser.ConvertTodayUseReservation)
-            .Where(item => !string.IsNullOrWhiteSpace(item.Id))
-            .ToList();
+        var entries = NaverBookingParser.BuildSmartPlaceEntries(snapshot);
 
         var withoutPreviousSmartPlace = _calendarEntries.Where(item => !IsSmartPlaceNaverEntry(item));
         _calendarEntries = ReservationService.MergeCalendarEntries(withoutPreviousSmartPlace, entries, []);
         CacheVisibleCalendarEntries();
         RenderCalendarEntries();
-        return entries.Count;
+        return entries.Count(item => !item.Cancelled);
     }
 
     private void MergeLatestNaverBookingOutput()
@@ -2306,10 +2565,7 @@ internal sealed class MainForm : Form
         try
         {
             var snapshot = NaverBookingParser.ReadSnapshot(outputPath);
-            var entries = snapshot.TodayUse
-                .Select(NaverBookingParser.ConvertTodayUseReservation)
-                .Where(item => !string.IsNullOrWhiteSpace(item.Id))
-                .ToList();
+            var entries = NaverBookingParser.BuildSmartPlaceEntries(snapshot);
             if (entries.Count == 0) return;
             var withoutPreviousSmartPlace = _calendarEntries.Where(item => !IsSmartPlaceNaverEntry(item));
             _calendarEntries = ReservationService.MergeCalendarEntries(withoutPreviousSmartPlace, entries, []);
@@ -2324,7 +2580,11 @@ internal sealed class MainForm : Form
     private static string FirstMeaningfulLine(params string[] values) =>
         values.SelectMany(value => (value ?? "").Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
             .Select(line => line.Trim())
-            .FirstOrDefault(line => !string.IsNullOrWhiteSpace(line) && !line.StartsWith(">", StringComparison.Ordinal)) ?? "";
+            .FirstOrDefault(line =>
+                !string.IsNullOrWhiteSpace(line) &&
+                !line.StartsWith(">", StringComparison.Ordinal) &&
+                !line.StartsWith("npm notice", StringComparison.OrdinalIgnoreCase) &&
+                !line.StartsWith("npm warn", StringComparison.OrdinalIgnoreCase)) ?? "";
 
     private static string FindRepositoryRoot()
     {
@@ -2366,6 +2626,17 @@ internal sealed class MainForm : Form
         _notifyIcon.Visible = true;
         _notifyIcon.ContextMenuStrip = menu;
         _notifyIcon.DoubleClick += (_, _) => RestoreFromTray();
+        _notifyIcon.BalloonTipClicked += (_, _) =>
+        {
+            if (!_overdueBalloonShown) return;
+            _overdueBalloonShown = false;
+            ShowTodayOverdueReservations();
+        };
+        _notifyIcon.BalloonTipClosed += (_, _) => _overdueBalloonShown = false;
+
+        // 서버 새로고침이 없어도 시간이 지나 30분을 넘기는 예약을 놓치지 않도록 1분마다 확인한다.
+        _overdueCheckTimer.Tick += (_, _) => CheckOverdueUsageLogs();
+        _overdueCheckTimer.Start();
     }
 
     private void RestoreFromTray()
@@ -2408,6 +2679,29 @@ internal sealed class MainForm : Form
         }
     }
 
+    private static NaverBookingSnapshot CreateDemoNaverSnapshot()
+    {
+        string Use(int dayOffset, string time)
+        {
+            var date = DateTime.Today.AddDays(dayOffset);
+            return $"{date:yy}. {date.Month}. {date.Day}.({date.ToString("ddd", KoreanCulture)}) {time}";
+        }
+
+        return new NaverBookingSnapshot
+        {
+            PendingConfirm =
+            [
+                new NaverBookingReservation { ReservationNo = "1400000001", Status = "신청", BookerName = "김신청", ProductName = "청년 커넥트룸", UseDateTime = Use(0, "오후 4:00~6:00"), Headcount = 4, Purpose = "스터디 모임" },
+                new NaverBookingReservation { ReservationNo = "1400000002", Status = "신청", BookerName = "이봄", ProductName = "AI 커리어존 (청취Room1)", UseDateTime = Use(1, "오전 10:00~11:00"), Headcount = 1, Purpose = "온라인 면접" },
+                new NaverBookingReservation { ReservationNo = "1400000003", Status = "신청", BookerName = "박청년", ProductName = "AI 커리어존 (청취Room2)", UseDateTime = Use(3, "오후 2:00~4:00"), Headcount = 2, Purpose = "자기소개서 첨삭" }
+            ],
+            TodayCancel =
+            [
+                new NaverBookingReservation { ReservationNo = "1400000009", Status = "취소", BookerName = "최취소", ProductName = "청년 커넥트룸", UseDateTime = Use(0, "오후 7:00~8:00") }
+            ]
+        };
+    }
+
     private void LoadDemoData()
     {
         _state = new LocalState
@@ -2419,12 +2713,6 @@ internal sealed class MainForm : Form
                 new StaffEvent { Id = "restricted:1", Category = "restricted", CategoryLabel = "이용 제한", Name = "최회원", Date = "2026-07-28", Purpose = "만 40세 · 시설 이용 가능 연령 초과 · 끝자리 0926", Headcount = 1, OccurredAt = "2026-07-28 15:38:20", IsRead = false },
                 new StaffEvent { Id = "connect:1", Category = "connect", CategoryLabel = "커넥트룸", Name = "이청년", Date = "2026-07-28", StartTime = "15:30", EndTime = "17:30", Purpose = "팀 프로젝트 회의", Headcount = 4, OccurredAt = "2026-07-28 15:31:04", IsRead = false },
                 new StaffEvent { Id = "visit:1", Category = "visit", CategoryLabel = "방문", Name = "박이봄", Date = "2026-07-28", OccurredAt = "2026-07-28 14:55:21", IsRead = true }
-            ],
-            CalendarNotes =
-            [
-                new CalendarNote { Id = "demo-note-1", Date = "2026-07-28", Text = "커넥트룸 마이크 확인", CreatedAt = "2026-07-28 09:00:00" },
-                new CalendarNote { Id = "demo-note-2", Date = "2026-07-28", Text = "예약자 안내 문자 확인", Done = true, CreatedAt = "2026-07-28 09:10:00" },
-                new CalendarNote { Id = "demo-note-3", Date = "2026-07-30", Text = "청소 체크", CreatedAt = "2026-07-30 09:00:00" }
             ]
         };
         RenderSummary(new DashboardSummary
@@ -2432,19 +2720,30 @@ internal sealed class MainForm : Form
             VisitorStats = new VisitorStats { Daily = 18, Weekly = 84, Monthly = 326 },
             ActiveMemberCount = 1248
         });
-        _selectedCalendarDate = new DateTime(2026, 7, 28);
-        _visibleCalendarMonth = new DateTime(2026, 7, 1);
-        _loadedCalendarMonth = "2026-07";
+        // 오늘 날짜를 기준으로 만든다. 지금보다 이른 시간대에 '일지 미제출'·'노쇼'·'이용완료'가 보이게 한다.
+        var today = DateTime.Today;
+        var month = today.ToString("yyyy-MM");
+        string Day(int offset) => today.AddDays(offset).ToString("yyyy-MM-dd");
+        string Hour(int offsetFromNow) =>
+            $"{Math.Clamp(DateTime.Now.Hour + offsetFromNow, 0, 22):00}:00";
+        _selectedCalendarDate = today;
+        _visibleCalendarMonth = new DateTime(today.Year, today.Month, 1);
+        _loadedCalendarMonth = month;
         _calendarEntries =
         [
-            new CalendarEntry { Id = "naver:1", Source = "naver", Date = "2026-07-28", StartTime = "14:00", EndTime = "15:00", PlaceName = "커리어존 Room1", Name = "김청년", Status = "확정" },
-            new CalendarEntry { Id = "usage:1", Source = "usage", Date = "2026-07-28", StartTime = "16:00", EndTime = "18:00", PlaceName = "커넥트룸", Name = "이이봄", Status = "이용완료", Submitted = true },
-            new CalendarEntry { Id = "naver:3", Source = "naver", Date = "2026-07-28", StartTime = "19:00", EndTime = "20:00", PlaceName = "커리어존 Room2", Name = "최청년", Status = "취소", Cancelled = true },
-            new CalendarEntry { Id = "naver:4", Source = "naver", Date = "2026-07-30", StartTime = "13:00", EndTime = "14:00", PlaceName = "커넥트룸", Name = "정이봄", Status = "확정" }
+            new CalendarEntry { Id = "smart:1", Source = "naverSmartPlace", Date = Day(0), StartTime = Hour(-4), EndTime = Hour(-3), PlaceName = "커리어존 Room1", Name = "김청년", Headcount = 2, Status = "확정" },
+            new CalendarEntry { Id = "smart:2", Source = "naverSmartPlace", Date = Day(0), StartTime = Hour(-3), EndTime = Hour(-2), PlaceName = "커리어존 Room2", Name = "박노쇼", Status = "확정" },
+            new CalendarEntry { Id = "usage:1", Source = "usage", Date = Day(0), StartTime = Hour(-2), EndTime = Hour(0), PlaceName = "커넥트룸", Name = "이이봄", Headcount = 4, Status = "이용완료", Submitted = true },
+            new CalendarEntry { Id = "web:1", Source = "reservationRequest", Date = Day(0), StartTime = Hour(1), EndTime = Hour(2), PlaceName = "커넥트룸", Name = "정신청", Headcount = 3, Status = "신청" },
+            new CalendarEntry { Id = "smart:3", Source = "naverSmartPlace", Date = Day(0), StartTime = Hour(2), EndTime = Hour(3), PlaceName = "커리어존 Room2", Name = "최청년", Status = "취소", Cancelled = true },
+            new CalendarEntry { Id = "smart:4", Source = "naverSmartPlace", Date = Day(2), StartTime = "13:00", EndTime = "14:00", PlaceName = "커넥트룸", Name = "정이봄", Status = "확정" },
+            new CalendarEntry { Id = "smart:5", Source = "naverSmartPlace", Date = Day(2), StartTime = "15:00", EndTime = "16:00", PlaceName = "커리어존 Room1", Name = "한봄", Status = "확정" },
+            new CalendarEntry { Id = "smart:6", Source = "naverSmartPlace", Date = Day(2), StartTime = "17:00", EndTime = "18:00", PlaceName = "커리어존 Room2", Name = "윤청년", Status = "확정" }
         ];
+        _checkInsByMonth[month] = [new StaffCheckIn { Date = Day(0), Name = "김청년", MemberId = "demo-member-1" }];
         RenderCalendarEntries();
         RenderEvents();
-        _statusLabel.Text = "미리보기 데이터 · 마지막 확인 2026-07-28 16:10:00";
+        _statusLabel.Text = $"미리보기 데이터 · 마지막 확인 {DateTime.Now:yyyy-MM-dd HH:mm:ss}";
     }
 
     private void CapturePreview(string path)
@@ -2471,24 +2770,44 @@ internal sealed class MainForm : Form
         AutoSize = true
     };
 
-    private static Button CreateActionButton(string text, EventHandler click, Color color)
+    private static readonly Color MissingUsageLogColor = Color.FromArgb(196, 84, 20);
+    private static readonly Font HeaderButtonFont = new("맑은 고딕", 9.5F);
+    private static readonly Font HeaderButtonBoldFont = new("맑은 고딕", 9.5F, FontStyle.Bold);
+
+    private static Button CreateHeaderButton(string text, EventHandler click)
     {
-        var button = new Button
-        {
-            Text = text,
-            AutoSize = true,
-            Height = 34,
-            Padding = new Padding(11, 0, 11, 0),
-            Margin = new Padding(6, 0, 0, 0),
-            BackColor = color,
-            ForeColor = Color.White,
-            FlatStyle = FlatStyle.Flat,
-            Cursor = Cursors.Hand
-        };
-        button.FlatAppearance.BorderSize = 0;
-        button.FlatAppearance.MouseOverBackColor = ControlPaint.Light(color, 0.15F);
+        var button = new Button { Text = text };
+        ApplyHeaderButtonStyle(button);
         button.Click += click;
         return button;
+    }
+
+    // 상단 버튼은 모두 같은 모양으로 두고, 처리할 일이 있을 때만 accent 색을 채운다.
+    private static void ApplyHeaderButtonStyle(Button button, Color? accent = null)
+    {
+        button.AutoSize = true;
+        button.MinimumSize = new Size(76, 40);
+        button.Height = 40;
+        button.Padding = new Padding(12, 0, 12, 0);
+        button.Margin = new Padding(6, 0, 0, 0);
+        button.FlatStyle = FlatStyle.Flat;
+        button.Cursor = Cursors.Hand;
+        if (accent is { } color)
+        {
+            button.BackColor = color;
+            button.ForeColor = Color.White;
+            button.Font = HeaderButtonBoldFont;
+            button.FlatAppearance.BorderSize = 0;
+            button.FlatAppearance.MouseOverBackColor = ControlPaint.Light(color, 0.15F);
+            return;
+        }
+
+        button.BackColor = Color.White;
+        button.ForeColor = Color.FromArgb(52, 48, 46);
+        button.Font = HeaderButtonFont;
+        button.FlatAppearance.BorderSize = 1;
+        button.FlatAppearance.BorderColor = Color.FromArgb(214, 210, 206);
+        button.FlatAppearance.MouseOverBackColor = Color.FromArgb(245, 245, 243);
     }
 
     private static Button CreateSmallButton(string text, EventHandler click)
@@ -2526,6 +2845,8 @@ internal sealed class MainForm : Form
         grid.ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.Single;
         grid.EnableHeadersVisualStyles = false;
         grid.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(245, 245, 243);
+        grid.ColumnHeadersDefaultCellStyle.SelectionBackColor = Color.FromArgb(245, 245, 243);
+        grid.ColumnHeadersDefaultCellStyle.SelectionForeColor = Color.FromArgb(70, 66, 64);
         grid.ColumnHeadersDefaultCellStyle.ForeColor = Color.FromArgb(70, 66, 64);
         grid.ColumnHeadersDefaultCellStyle.Font = new Font("맑은 고딕", 9F, FontStyle.Bold);
         grid.DefaultCellStyle.Font = new Font("맑은 고딕", 9.5F);

@@ -110,11 +110,42 @@ internal sealed class AppsScriptClient
             response => response.Ok,
             response => response.Error);
 
+    // 네이버 화면에서 읽은 오늘 예약을 서버 '네이버 예약' 시트에 맞춘다(없으면 추가, 취소면 취소로 변경).
+    public Task<NaverReservationEnsureResult> EnsureNaverReservationAsync(
+        DashboardSettings settings,
+        string password,
+        NaverSheetSyncItem item,
+        CancellationToken cancellationToken) =>
+        ExecuteAdminActionAsync<NaverReservationEnsureResult>(
+            settings,
+            password,
+            "adminEnsureNaverReservation",
+            session => new
+            {
+                adminSession = session,
+                reservationId = item.Reservation.ReservationNo,
+                status = item.Status,
+                bookerName = item.Entry.Name,
+                maskedPhone = item.Reservation.Phone,
+                usageDate = item.Entry.Date,
+                startTime = item.Entry.StartTime,
+                endTime = item.Entry.EndTime,
+                placeName = item.Entry.PlaceName,
+                spaceType = item.Entry.SpaceType,
+                headcount = item.Entry.Headcount,
+                purpose = item.Reservation.Purpose,
+                rawUsageText = item.Reservation.UseDateTime
+            },
+            cancellationToken,
+            response => response.Ok,
+            response => response.Error);
+
     public Task<ReservationStatusUpdate> CompleteReservationUsageAsync(
         DashboardSettings settings,
         string password,
         CalendarEntry entry,
         string memberId,
+        IReadOnlyList<ManualCompanion> companions,
         CancellationToken cancellationToken) =>
         ExecuteAdminActionAsync<ReservationStatusUpdate>(
             settings,
@@ -133,7 +164,7 @@ internal sealed class AppsScriptClient
                 placeName = entry.PlaceName,
                 purpose = entry.Purpose,
                 headcount = entry.Headcount,
-                companions = Array.Empty<ManualCompanion>()
+                companions
             },
             cancellationToken,
             response => response.Ok,
@@ -168,30 +199,6 @@ internal sealed class AppsScriptClient
         if (result.Members.Count > 0) return result.Members;
         return string.IsNullOrWhiteSpace(result.Member.Id) ? [] : [result.Member];
     }
-
-    public Task<ManualLogResult> SubmitManualLogAsync(
-        DashboardSettings settings,
-        string password,
-        ManualLogRequest request,
-        CancellationToken cancellationToken) =>
-        ExecuteAdminActionAsync<ManualLogResult>(
-            settings,
-            password,
-            "adminSubmitManualLog",
-            session => new
-            {
-                adminSession = session,
-                subjectType = request.SubjectType,
-                memberId = request.MemberId,
-                guest = request.Guest,
-                logType = request.LogType,
-                date = request.Date,
-                data = request.Data,
-                requestId = request.RequestId
-            },
-            cancellationToken,
-            response => response.Ok,
-            response => response.Error);
 
     public Task<MonthlyPerformanceReport> GetMonthlyPerformanceAsync(
         DashboardSettings settings,

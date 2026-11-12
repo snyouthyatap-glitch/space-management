@@ -27,6 +27,42 @@ internal sealed class AppStorage
 
     public void SaveState(LocalState state) => Save(StatePath, state);
 
+    // 네이버 확인·로그인 기록. 프로그램을 다시 켜도 '오류 로그 보기'에서 볼 수 있게 파일로 남긴다.
+    private const int MaxDiagnosticLogBytes = 256 * 1024;
+    private string DiagnosticLogPath => Path.Combine(_directory, "naver-sync.log");
+
+    public void AppendDiagnosticLog(string entry)
+    {
+        try
+        {
+            Directory.CreateDirectory(_directory);
+            File.AppendAllText(DiagnosticLogPath, entry.TrimEnd() + Environment.NewLine + Environment.NewLine, Encoding.UTF8);
+            var info = new FileInfo(DiagnosticLogPath);
+            if (info.Length <= MaxDiagnosticLogBytes) return;
+            // 너무 커지면 뒤쪽(최근) 절반만 남긴다.
+            var text = File.ReadAllText(DiagnosticLogPath, Encoding.UTF8);
+            File.WriteAllText(DiagnosticLogPath, text[(text.Length / 2)..], Encoding.UTF8);
+        }
+        catch
+        {
+            // 기록 실패가 프로그램 동작을 막지 않게 한다.
+        }
+    }
+
+    public string ReadDiagnosticLog(int maxChars = 60_000)
+    {
+        try
+        {
+            if (!File.Exists(DiagnosticLogPath)) return "";
+            var text = File.ReadAllText(DiagnosticLogPath, Encoding.UTF8);
+            return text.Length <= maxChars ? text : "…(앞부분 생략)\r\n" + text[^maxChars..];
+        }
+        catch (Exception exception)
+        {
+            return "기록 파일을 읽지 못했습니다: " + exception.Message;
+        }
+    }
+
     public string ProtectPassword(string password)
     {
         if (string.IsNullOrEmpty(password)) return "";
