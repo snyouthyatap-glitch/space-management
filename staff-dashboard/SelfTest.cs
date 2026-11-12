@@ -16,11 +16,79 @@ internal static class SelfTest
         TestSessionExpiryRecoveryAsync().GetAwaiter().GetResult();
         TestReservationStatusUpdateAsync().GetAwaiter().GetResult();
         TestReservationRequestStatusUpdateAsync().GetAwaiter().GetResult();
-        TestManualLogFlowAsync().GetAwaiter().GetResult();
+        TestMemberLookupAsync().GetAwaiter().GetResult();
         TestMonthlyPerformanceAsync().GetAwaiter().GetResult();
         TestNaverBookingParserSeparatesReservationRows();
+        TestNaverBookerNameCleanup();
+        TestNaverProxyBookingRow();
+        TestNaverTodayCancelRows();
+        TestNaverSheetSyncItems();
+        TestNaverChangedRowAnd24HourTime();
+        TestNaverOtherProductsAreIgnored();
         TestReservationMergeByRepresentativeDateAndTime();
+        TestMissingUsageLogStatus();
+        TestOverdueUsageLogAlert();
         TestPerformanceWorkbook();
+    }
+
+    private static void TestOverdueUsageLogAlert()
+    {
+        var now = new DateTime(2026, 11, 12, 14, 0, 0);
+        const string today = "2026-11-12";
+        CalendarEntry Entry(string id, string start, string status = "확정", bool submitted = false,
+            bool cancelled = false, string source = "naverSmartPlace", string date = today) =>
+            new() { Id = id, Source = source, Date = date, StartTime = start, EndTime = "23:00", Name = id, Status = status, Submitted = submitted, Cancelled = cancelled };
+
+        var overdue = ReservationService.FindOverdueUsageLogs(
+            [
+                Entry("exactly-30", "13:30"),
+                Entry("29-minutes", "13:31"),
+                Entry("submitted", "10:00", submitted: true),
+                Entry("usage-log", "10:00", source: "usage"),
+                Entry("cancelled", "10:00", cancelled: true),
+                Entry("marked-noshow", "10:00", status: "노쇼"),
+                Entry("yesterday", "10:00", date: "2026-11-11"),
+                Entry("web-request", "11:00", status: "승인", source: "reservationRequest")
+            ],
+            now);
+
+        var ids = string.Join(",", overdue.Select(item => item.Id));
+        if (ids != "web-request,exactly-30")
+            throw new InvalidOperationException($"일지 미제출 30분 알림 대상 판별 테스트 실패: {ids}");
+    }
+
+    private static void TestMissingUsageLogStatus()
+    {
+        var date = DateTime.Today.AddDays(-1).ToString("yyyy-MM-dd");
+        var checkedIn = new CalendarEntry
+        {
+            Id = "smart:1", Source = "naverSmartPlace", Date = date,
+            StartTime = "10:00", EndTime = "11:00", Name = "김 봄", Status = "확정"
+        };
+        var absent = new CalendarEntry
+        {
+            Id = "smart:2", Source = "naverSmartPlace", Date = date,
+            StartTime = "12:00", EndTime = "13:00", Name = "이청년", Status = "확정"
+        };
+        var webEntry = new CalendarEntry
+        {
+            Id = "web:1", Source = "reservationRequest", MemberId = "member-web", Date = date,
+            StartTime = "14:00", EndTime = "15:00", Name = "박이봄", Status = "승인"
+        };
+        ReservationService.ApplyCheckIns(
+            [checkedIn, absent, webEntry],
+            [
+                new StaffCheckIn { Date = date, Name = "김봄", MemberId = "member-1" },
+                new StaffCheckIn { Date = date, Name = "박이봄", MemberId = "member-web" }
+            ]);
+
+        if (ReservationService.GetUnifiedStatus(checkedIn) != ReservationService.MissingUsageLogStatus ||
+            checkedIn.MemberId != "member-1" ||
+            ReservationService.GetUnifiedStatus(absent) != "노쇼" ||
+            ReservationService.GetUnifiedStatus(webEntry) != ReservationService.MissingUsageLogStatus)
+        {
+            throw new InvalidOperationException("일지 미제출 상태 판별 테스트에 실패했습니다.");
+        }
     }
 
     private static void TestWindowsPasswordProtection()
@@ -149,7 +217,7 @@ internal static class SelfTest
         }
     }
 
-    private static async Task TestManualLogFlowAsync()
+    private static async Task TestMemberLookupAsync()
     {
         var handler = new FakeAppsScriptHandler();
         using var httpClient = new HttpClient(handler);
@@ -160,41 +228,9 @@ internal static class SelfTest
             FakeAppsScriptHandler.Password,
             "01012345678",
             CancellationToken.None);
-        var result = await client.SubmitManualLogAsync(
-            settings,
-            FakeAppsScriptHandler.Password,
-            new ManualLogRequest
-            {
-                SubjectType = "guest",
-                Guest = new ManualGuest
-                {
-                    Token = "guest-test-token",
-                    Gender = "여성",
-                    Age = 24
-                },
-                LogType = "connectRoom",
-                Date = "2026-07-28",
-                Data = new ManualLogData
-                {
-                    StartTime = "16:00",
-                    EndTime = "17:00",
-                    Purpose = "테스트",
-                    Companions = [new ManualCompanion { Gender = "남성", Age = 25 }]
-                },
-                RequestId = "manual-test-request"
-            },
-            CancellationToken.None);
 
-        if (member.Id != "member-1" ||
-            !result.Ok ||
-            !result.LogCreated ||
-            handler.MemberLookupCount != 1 ||
-            handler.ManualLogCount != 1 ||
-            handler.LastManualLogType != "connectRoom" ||
-            handler.LastManualCompanionCount != 1)
-        {
-            throw new InvalidOperationException("관리자 수동 일지 흐름 테스트에 실패했습니다.");
-        }
+        if (member.Id != "member-1" || handler.MemberLookupCount != 1)
+            throw new InvalidOperationException("관리자 회원 조회 테스트에 실패했습니다.");
     }
 
     private static async Task TestMonthlyPerformanceAsync()
@@ -263,6 +299,218 @@ internal static class SelfTest
         {
             if (File.Exists(path)) File.Delete(path);
         }
+    }
+
+    // automation/naver-booker.test.js의 NAME_CASES와 같은 사례다.
+    private static void TestNaverBookerNameCleanup()
+    {
+        (string Input, string Expected)[] cases =
+        [
+            ("한예시", "한예시"),
+            ("김예약 [대리예약] 방문자: 이방문", "이방문"),
+            ("김예약[대리예약]방문자:이방문", "이방문"),
+            ("김예약대리예약방문자 이방문", "이방문"),
+            ("김예약대리예약방문자: 이방문", "이방문"),
+            ("이방문(010-1234-5678)", "이방문"),
+            ("김예약대리예약", "김예약"),
+            ("최관리 [관리자등록]", "최관리"),
+            ("최관리관리자등록", "최관리"),
+            ("예약자: 홍길동", "홍길동"),
+            ("방문자：김봄", "김봄"),
+            ("홍길동!!", "홍길동"),
+            ("김 봄 010-1234-5678", "김 봄"),
+            ("John Smith", "John Smith"),
+            ("[관리자등록]", ""),
+            ("", "")
+        ];
+        foreach (var (input, expected) in cases)
+        {
+            var actual = NaverBookingParser.NormalizeBookerName(input);
+            if (actual != expected)
+                throw new InvalidOperationException($"네이버 예약자명 정리 테스트 실패: '{input}' → '{actual}' (기대값 '{expected}')");
+        }
+    }
+
+    // 실제 화면 형태: '변경' 표시, '26.11.11.수', 24시간제 '17:30~19:30'
+    private static void TestNaverChangedRowAnd24HourTime()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "naver-booking-changed-test.json");
+        try
+        {
+            File.WriteAllText(path, """
+            {
+              "results": {
+                "today_use": [{
+                  "reservationNo": "1400000496", "status": "완료",
+                  "rawText": "완료정변경010-0000-12341400000496변경26.11.11.수17:30~19:30AI 커리어존 (청취Room1)1-0원26.11.8.일00:30"
+                }, {
+                  "reservationNo": "1400000141", "status": "확정",
+                  "rawText": "확정김예약대리예약방문자: 이방문010-1111-2222010-3333-4444140000014113:30~15:30AI 커리어존 (청취Room1)1-0원"
+                }],
+                "pending_confirm": [],
+                "today_cancel": []
+              }
+            }
+            """);
+            var snapshot = NaverBookingParser.ReadSnapshot(path);
+            var changed = NaverBookingParser.ConvertTodayUseReservation(snapshot.TodayUse[0]);
+            var today = NaverBookingParser.ConvertTodayUseReservation(snapshot.TodayUse[1]);
+            if (!snapshot.TodayUse[0].Changed || snapshot.TodayUse[1].Changed ||
+                changed.Date != "2026-11-11" || changed.StartTime != "17:30" || changed.EndTime != "19:30" ||
+                changed.Name != "정변경" || changed.PlaceName != "커리어존 Room1" ||
+                today.StartTime != "13:30" || today.EndTime != "15:30" || today.Name != "이방문")
+            {
+                throw new InvalidOperationException(
+                    $"네이버 변경·24시간제 파싱 테스트 실패: {changed.Date} {changed.StartTime}~{changed.EndTime} {changed.Name} / {today.StartTime}~{today.EndTime} {today.Name}");
+            }
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    // 실제 목록에는 [동아리실] 같은 다른 상품도 섞여 나온다(2026-11-12 화면 캡처 형태, 이름·번호는 가짜).
+    private static void TestNaverOtherProductsAreIgnored()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "naver-booking-other-product-test.json");
+        try
+        {
+            File.WriteAllText(path, """
+            {
+              "results": {
+                "today_use": [{
+                  "reservationNo": "1400000452", "status": "완료", "productName": "[동아리실] 3층 회의실",
+                  "rawText": "완료김예약대리예약방문자: 이방문010-1111-2222010-3333-4444140000045226.11.11.수16:00~16:30[동아리실] 3층 회의실1-0원26.11.10.화16:47"
+                }, {
+                  "reservationNo": "1400000496", "status": "완료",
+                  "rawText": "완료정변경010-0000-12341400000496변경26.11.11.수17:30~19:30AI 커리어존 (청취Room1)1-0원26.11.8.일00:30"
+                }],
+                "pending_confirm": [{
+                  "reservationNo": "1400000999", "status": "신청", "productName": "[동아리실] 3층 회의실",
+                  "rawText": "신청홍길동010-5555-6666140000099926.11.20.금10:00~12:00[동아리실] 3층 회의실1-0원"
+                }],
+                "today_cancel": []
+              }
+            }
+            """);
+            var snapshot = NaverBookingParser.ReadSnapshot(path);
+            var entries = NaverBookingParser.BuildSmartPlaceEntries(snapshot);
+            var syncItems = NaverBookingParser.BuildSheetSyncItems(snapshot);
+            if (entries.Count != 1 || entries[0].Name != "정변경" ||
+                syncItems.Count != 1 || snapshot.PendingConfirm.Count != 0)
+            {
+                throw new InvalidOperationException(
+                    $"다른 상품 제외 테스트 실패: entries={entries.Count}, sync={syncItems.Count}, pending={snapshot.PendingConfirm.Count}");
+            }
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    private static void TestNaverSheetSyncItems()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "naver-booking-sheet-sync-test.json");
+        try
+        {
+            File.WriteAllText(path, """
+            {
+              "results": {
+                "today_use": [{
+                  "reservationNo": "3000000001", "bookerName": "김확정", "status": "확정", "phone": "010-1111-2222",
+                  "productName": "청년 커넥트룸", "useDateTime": "26. 11. 12.(목) 오후 2:00~3:00", "headcount": "3"
+                }, {
+                  "reservationNo": "3000000002", "bookerName": "이신청", "status": "신청",
+                  "productName": "청년 커넥트룸", "useDateTime": "26. 11. 12.(목) 오후 4:00~5:00"
+                }, {
+                  "reservationNo": "3000000003", "bookerName": "시간없음", "status": "확정",
+                  "productName": "청년 커넥트룸", "useDateTime": ""
+                }],
+                "pending_confirm": [],
+                "today_cancel": [{
+                  "reservationNo": "3000000004", "bookerName": "박취소", "status": "취소",
+                  "productName": "AI 커리어존 (청취Room2)", "useDateTime": "26. 11. 13.(금) 오전 10:00~11:00"
+                }]
+              }
+            }
+            """);
+            var items = NaverBookingParser.BuildSheetSyncItems(NaverBookingParser.ReadSnapshot(path));
+            var summary = string.Join(",", items.Select(item => $"{item.Reservation.ReservationNo}|{item.Status}"));
+            var confirmed = items.FirstOrDefault(item => item.Status == "확정");
+            if (summary != "3000000001|확정,3000000004|취소" ||
+                confirmed is null || confirmed.Reservation.Phone != "010-1111-2222" ||
+                confirmed.Entry.SpaceType != "connectRoom" || confirmed.Entry.Headcount != 3 ||
+                items[1].Entry.Date != "2026-11-13" || items[1].Entry.SpaceType != "careerRoom2")
+            {
+                throw new InvalidOperationException($"네이버 예약 시트 반영 대상 테스트 실패: {summary}");
+            }
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    private static void TestNaverTodayCancelRows()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "naver-booking-cancel-test.json");
+        try
+        {
+            // 김봄: 취소 후 같은 시간에 다시 예약(새 예약번호) → 새 예약은 '확정'으로 남아야 한다.
+            // 이취소: 취소만 있음 → '취소'로 보여야 한다.
+            File.WriteAllText(path, """
+            {
+              "results": {
+                "today_use": [{
+                  "reservationNo": "2000000002", "bookerName": "김봄", "status": "확정",
+                  "productName": "청년 커넥트룸", "useDateTime": "26. 11. 12.(목) 오후 2:00~3:00"
+                }],
+                "pending_confirm": [],
+                "today_cancel": [{
+                  "reservationNo": "2000000001", "bookerName": "김봄", "status": "취소",
+                  "productName": "청년 커넥트룸", "useDateTime": "26. 11. 12.(목) 오후 2:00~3:00"
+                }, {
+                  "reservationNo": "2000000003", "bookerName": "이취소", "status": "취소",
+                  "productName": "AI 커리어존 (청취Room1)", "useDateTime": "26. 11. 12.(목) 오후 4:00~5:00"
+                }]
+              }
+            }
+            """);
+            var entries = NaverBookingParser.BuildSmartPlaceEntries(NaverBookingParser.ReadSnapshot(path));
+            var merged = ReservationService.MergeCalendarEntries([], entries, []);
+            var kim = merged.SingleOrDefault(item => item.Name == "김봄");
+            var lee = merged.SingleOrDefault(item => item.Name == "이취소");
+            if (merged.Count != 2 ||
+                kim is null || kim.Cancelled || kim.Id != "naverSmartPlace:2000000002" ||
+                lee is null || !lee.Cancelled || ReservationService.GetUnifiedStatus(lee) != "취소" ||
+                lee.StartTime != "16:00" || lee.Date != "2026-11-12")
+            {
+                throw new InvalidOperationException("네이버 오늘취소 표시 테스트에 실패했습니다.");
+            }
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    private static void TestNaverProxyBookingRow()
+    {
+        var parsed = NaverBookingParser.ParseReservationText(new NaverBookingReservation
+        {
+            ReservationNo = "1318657245",
+            // 실제 목록 화면 형태(2026-11-10 수집본, 번호는 가짜)
+            RawText = "확정김예약대리예약방문자: 이방문010-1111-2222010-3333-4444131865724526. 8. 14.(금) 오후 6:00~9:00청년 커넥트룸"
+        });
+        var entry = NaverBookingParser.ConvertTodayUseReservation(new NaverBookingReservation
+        {
+            ReservationNo = "1318657245",
+            RawText = "확정김예약[대리예약]방문자: 이방문010-1111-2222010-3333-4444131865724526. 8. 14.(금) 오후 6:00~9:00청년 커넥트룸"
+        });
+        if (parsed.Status != "확정" || entry.Name != "이방문" || entry.PlaceName != "커넥트룸" || entry.StartTime != "18:00")
+            throw new InvalidOperationException($"네이버 대리예약 행 파싱 테스트 실패: '{entry.Name}' {entry.PlaceName} {entry.StartTime}");
     }
 
     private static void TestReservationMergeByRepresentativeDateAndTime()
@@ -419,10 +667,7 @@ internal static class SelfTest
         public int StatusUpdateCount { get; private set; }
         public int ReservationRequestStatusUpdateCount { get; private set; }
         public int MemberLookupCount { get; private set; }
-        public int ManualLogCount { get; private set; }
         public int MonthlyPerformanceCount { get; private set; }
-        public string LastManualLogType { get; private set; } = "";
-        public int LastManualCompanionCount { get; private set; }
 
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
@@ -530,16 +775,6 @@ internal static class SelfTest
                     }
                   }
                   """;
-            }
-            else if (action == "adminSubmitManualLog")
-            {
-                ManualLogCount++;
-                LastManualLogType = payload.GetProperty("logType").GetString() ?? "";
-                LastManualCompanionCount = payload
-                    .GetProperty("data")
-                    .GetProperty("companions")
-                    .GetArrayLength();
-                json = """{"ok":true,"date":"2026-07-28","logCreated":true,"linkedReservation":false}""";
             }
             else if (action == "adminMonthlyPerformance")
             {

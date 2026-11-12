@@ -607,7 +607,7 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.2s ease;
+    transition: background-color 0.2s ease, transform 0.15s ease-out;
 }
 
 .stepper-btn:hover {
@@ -616,7 +616,7 @@ body {
 }
 
 .stepper-btn:active {
-    transform: scale(0.92);
+    transform: scale(0.96);
 }
 
 .stepper-input {
@@ -1207,7 +1207,8 @@ button:disabled {
     --surface-muted: #fbfaf8;
     --border-color: #e6dfda;
     --shadow: 0 16px 44px rgba(48, 43, 41, 0.09);
-    --transition: all 0.2s ease;
+    /* transition: all 대신 실제로 바뀌는 속성만 지정한다 */
+    --transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, transform 0.15s ease-out;
 }
 
 body {
@@ -1446,9 +1447,68 @@ body::after {
 
 .facility-quick-actions {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 8px;
     margin: 12px 0 10px;
+}
+
+/* 출석만 하면 라운지 이용이 끝난다는 안내 */
+.lounge-notice {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+    padding: 14px 16px;
+    border: 1px solid #cfe2cb;
+    border-radius: 8px;
+    background: var(--brand-green-light, #eaf5e7);
+    color: var(--brand-green-dark, #347c33);
+    word-break: keep-all;
+}
+
+.lounge-notice > .icon {
+    flex: none;
+    width: 1.6rem;
+    height: 1.6rem;
+}
+
+.lounge-notice strong {
+    display: block;
+    font-size: 1.15rem;
+    font-weight: 900;
+}
+
+.lounge-notice span {
+    font-size: 0.95rem;
+}
+
+.reservation-notice {
+    flex-wrap: wrap;
+    border-color: #f2cfb4;
+    background: #fff1e6;
+    color: #a4460f;
+}
+
+.reservation-notice > div {
+    flex: 1;
+    min-width: 0;
+}
+
+.reservation-notice .btn-chip {
+    flex: 1 1 100%;
+    min-height: 44px;
+    border-color: #e9a877;
+    background: #ffffff;
+    color: #a4460f;
+    font-weight: 900;
+}
+
+.lounge-notice-pulse {
+    animation: lounge-notice-pulse 0.9s ease 2;
+}
+
+@keyframes lounge-notice-pulse {
+    50% { box-shadow: 0 0 0 6px rgba(74, 153, 67, 0.25); }
 }
 
 .facility-quick-actions .btn-chip {
@@ -2281,7 +2341,7 @@ textarea {
     .facility-quick-actions {
         width: 100%;
         display: grid;
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
     }
 
     .facility-quick-actions .btn-chip {
@@ -2320,6 +2380,66 @@ textarea {
     .companion-item {
         grid-template-columns: 1fr;
     }
+}
+
+/* ---- 화면 다듬기: make-interfaces-feel-better 점검 반영 (2026-11-12) ---- */
+
+/* 글자 렌더링(macOS)과 한국어 줄바꿈: 단어 중간에서 끊기지 않게 */
+html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+    word-break: keep-all;
+    overflow-wrap: break-word;
+}
+
+h1,
+h2,
+h3,
+h4 {
+    text-wrap: balance;
+}
+
+p,
+.section-description,
+.helper-text,
+.alert,
+.toast-item {
+    text-wrap: pretty;
+}
+
+/* 바뀌는 숫자(시간·건수·날짜)는 자리 폭을 고정해 흔들리지 않게 */
+.reservation-time,
+.reservation-count,
+.calendar-day,
+.booking-time-grid button,
+#todayLabel {
+    font-variant-numeric: tabular-nums;
+}
+
+/* 누를 때 살짝 작아지는 피드백. 터치 화면에서 hover 들림 효과는 없앤다 */
+.btn:hover,
+.btn-primary:hover {
+    transform: none;
+}
+
+.btn-chip {
+    transition-property: transform, background-color, border-color, color;
+    transition-duration: 0.15s;
+    transition-timing-function: ease-out;
+}
+
+.btn:active:not(:disabled),
+.btn-chip:active:not(:disabled) {
+    transform: scale(0.96);
+}
+
+/* 글자만 있는 버튼('뒤로', '번호 변경')도 손가락으로 누르기 쉬운 크기로 */
+.btn-text-action {
+    min-height: 44px;
+    padding: 0 14px;
 }
 
 @media (prefers-reduced-motion: reduce) {

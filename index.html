@@ -81,12 +81,19 @@
             <span class="eyebrow">MEMBER CHECK</span>
             <h2><span id="memberConfirmName">회원</span>님이 맞나요?</h2>
             <p id="memberConfirmInfo" class="section-description"></p>
-            <div class="stack-actions">
+            <div id="memberConfirmActions" class="stack-actions">
                 <button type="button" id="memberConfirmBtn" class="btn btn-primary">
                     <span class="btn-text">네, 맞아요</span>
                     <div class="spinner"></div>
                 </button>
                 <button type="button" id="memberRejectBtn" class="btn btn-outline">제가 아니에요</button>
+            </div>
+            <div id="memberRejectChoice" class="hidden">
+                <p class="section-description">처음 오셨다면 전체 휴대폰 번호로 회원가입을 해 주세요.</p>
+                <div class="stack-actions">
+                    <button type="button" id="memberRejectSignupBtn" class="btn btn-primary">회원가입</button>
+                    <button type="button" id="memberRejectHomeBtn" class="btn btn-outline">처음 화면으로</button>
+                </div>
             </div>
         </div>
 
@@ -188,6 +195,21 @@
 
         <div id="facilitySection" class="hidden">
             <div id="facilitySummaryCard" class="card card-premium">
+                <div id="loungeNotice" class="lounge-notice" role="status">
+                    <span class="icon icon-circle-check" aria-hidden="true"></span>
+                    <div>
+                        <strong>라운지 이용 체크 완료</strong>
+                        <span>따로 기록할 필요 없이 바로 이용하세요.</span>
+                    </div>
+                </div>
+                <div id="reservationNotice" class="lounge-notice reservation-notice hidden" role="status">
+                    <span class="icon icon-calendar-day" aria-hidden="true"></span>
+                    <div>
+                        <strong>오늘 예약이 있어요</strong>
+                        <span>일지를 제출해야 이용이 기록돼요.</span>
+                    </div>
+                    <button type="button" id="reservationNoticeBtn" class="btn-chip">일지 제출</button>
+                </div>
                 <div class="dashboard-header">
                     <div>
                         <h2 id="facilityWelcome">시설 이용 안내</h2>
@@ -196,12 +218,12 @@
                 </div>
 
                 <div class="facility-quick-actions" aria-label="빠른 이동">
+                    <button type="button" id="quickLoungeBtn" class="btn-chip">라운지 이용</button>
                     <button type="button" id="quickBookingBtn" class="btn-chip">공간 예약</button>
                     <button type="button" id="quickPrinterBtn" class="btn-chip">프린터 이용</button>
                 </div>
 
                 <div class="status-strip">
-                    <div class="status-pill success"><span class="icon icon-circle-check" aria-hidden="true"></span> 오늘 방문이 기록되었습니다.</div>
                     <div class="status-pill neutral"><span class="icon icon-calendar-day" aria-hidden="true"></span> <span id="todayLabel"></span></div>
                 </div>
             </div>

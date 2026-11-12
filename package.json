@@ -4,6 +4,8 @@
   "private": true,
   "description": "Youth Spring Yatap space management tools and booking automation.",
   "scripts": {
+    "test": "node --test automation/*.test.js",
+    "test:login": "node automation/naver-login.test.cjs",
     "naver:help": "node automation/naver-booking-sync.js --help",
     "naver:setup-login": "node automation/naver-booking-sync.js --setup-login",
     "naver:sync": "node automation/naver-booking-sync.js",

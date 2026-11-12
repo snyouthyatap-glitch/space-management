@@ -6,8 +6,6 @@ const PENDING_PRINTER_SUBMISSION_KEY = "space-management-pending-printer-submiss
 const SCRIPT_REQUEST_TIMEOUT_MS = 25000;
 const FACILITY_MIN_AGE = 19;
 const FACILITY_MAX_AGE = 39;
-const LOCAL_PREVIEW_ENTRY_TOKEN = "ybom-qr-2026";
-const RESERVATION_SUBMIT_UNLOCK_MINUTES = 20;
 const BOOKING_SLOT_START_HOUR = 9;
 const BOOKING_SLOT_END_HOUR = 21;
 const BOOKING_SLOT_MINUTES = 30;
@@ -37,6 +35,7 @@ const state = {
     verifiedSignupPhone: "",
     todayReservations: [],
     selectedReservationId: "",
+    autoSelectedReservationId: "",
     pendingPrinterSubmission: null,
     booking: {
         activeSpace: "",
@@ -111,7 +110,7 @@ function hasValidQrEntryToken() {
 }
 
 function getEntryToken() {
-    return getSessionValue(QR_ENTRY_SESSION_KEY) || inMemoryEntryToken || (isLocalPreview() ? LOCAL_PREVIEW_ENTRY_TOKEN : "");
+    return getSessionValue(QR_ENTRY_SESSION_KEY) || inMemoryEntryToken;
 }
 
 function getSessionValue(key) {
@@ -233,13 +232,7 @@ function reservationSubmitStatus(reservation) {
     if (!Number.isFinite(start) || start <= 0) {
         return { canSubmit: false, message: "예약 시간을 확인한 뒤 일지를 제출할 수 있습니다.", state: "invalid-time" };
     }
-    if (now.minutes < start - RESERVATION_SUBMIT_UNLOCK_MINUTES) {
-        return {
-            canSubmit: false,
-            message: "이용 시작 20분 전부터 일지를 제출할 수 있습니다.",
-            state: "too-early"
-        };
-    }
+    // 예약 당일이면 시간과 관계없이 제출할 수 있다(2026-11-12 운영 정책).
     return { canSubmit: true, message: "지금 일지를 제출할 수 있습니다.", state: "ready" };
 }
 
@@ -678,7 +671,23 @@ function showMemberConfirmation(member, source = "facility-qr") {
     const info = document.getElementById("memberConfirmInfo");
     if (name) name.textContent = maskMemberName(member.name);
     if (info) info.textContent = `연락처 끝자리 ${member.phoneLastDigits || "-"}`;
+    setMemberRejectChoiceVisible(false);
     showSection("memberConfirm");
+}
+
+function setMemberRejectChoiceVisible(visible) {
+    document.getElementById("memberConfirmActions")?.classList.toggle("hidden", visible);
+    document.getElementById("memberRejectChoice")?.classList.toggle("hidden", !visible);
+}
+
+function showLoungeNotice() {
+    showMainFacilityView();
+    const notice = document.getElementById("loungeNotice");
+    if (!notice) return;
+    notice.classList.remove("hidden", "lounge-notice-pulse");
+    void notice.offsetWidth;
+    notice.classList.add("lounge-notice-pulse");
+    showToast("라운지는 지금처럼 출석만 하면 이용 기록이 끝나요. 따로 제출할 것이 없어요.", "success");
 }
 
 async function confirmCandidateMember() {
@@ -724,6 +733,7 @@ function resetToChoice() {
     state.verifiedSignupPhone = "";
     state.todayReservations = [];
     state.selectedReservationId = "";
+    state.autoSelectedReservationId = "";
     state.booking.activeSpace = "";
     state.booking.activePlaceId = "";
     state.booking.visibleMonth = todayString().slice(0, 7);
@@ -931,6 +941,20 @@ function renderTodayReservations(reservations) {
         state.selectedReservationId = "";
     }
 
+    // 제출할 예약이 1건뿐이면 처음 한 번 자동으로 선택한다. 사용자가 선택을 풀면 다시 고르지 않는다.
+    const pendingReservations = state.todayReservations.filter(
+        (reservation) => !reservation.submitted && reservationSubmitStatus(reservation).canSubmit
+    );
+    if (
+        !state.selectedReservationId &&
+        pendingReservations.length === 1 &&
+        state.autoSelectedReservationId !== pendingReservations[0].id
+    ) {
+        state.selectedReservationId = pendingReservations[0].id;
+        state.autoSelectedReservationId = pendingReservations[0].id;
+    }
+    updateReservationNotice(pendingReservations.length);
+
     section.classList.toggle("hidden", state.todayReservations.length === 0);
     list.replaceChildren();
     if (count) count.textContent = `${state.todayReservations.length}건`;
@@ -988,6 +1012,19 @@ function renderTodayReservations(reservations) {
 
     renderReservationCompanions();
     updateReservationSubmitState();
+}
+
+// 제출할 예약이 있으면 '라운지는 기록할 필요 없음' 안내 대신 일지 제출 안내를 띄운다.
+function updateReservationNotice(pendingCount) {
+    document.getElementById("reservationNotice")?.classList.toggle("hidden", pendingCount === 0);
+    document.getElementById("loungeNotice")?.classList.toggle("hidden", pendingCount > 0);
+}
+
+function scrollToReservationSubmit() {
+    showMainFacilityView();
+    window.setTimeout(() => {
+        document.getElementById("todayReservations")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 150);
 }
 
 function reservationCompanionsComplete() {
@@ -1888,6 +1925,8 @@ function setupListeners() {
         }
     });
 
+    document.getElementById("quickLoungeBtn")?.addEventListener("click", showLoungeNotice);
+    document.getElementById("reservationNoticeBtn")?.addEventListener("click", scrollToReservationSubmit);
     document.getElementById("quickBookingBtn")?.addEventListener("click", showSpaceBookingOnlyView);
     document.getElementById("quickPrinterBtn")?.addEventListener("click", showPrinterOnlyView);
     document.getElementById("printerMainBackBtn")?.addEventListener("click", showMainFacilityView);
@@ -1940,6 +1979,15 @@ function setupListeners() {
     });
 
     document.getElementById("memberRejectBtn")?.addEventListener("click", () => {
+        state.candidateMember = null;
+        setMemberRejectChoiceVisible(true);
+    });
+    document.getElementById("memberRejectSignupBtn")?.addEventListener("click", () => {
+        state.candidateMember = null;
+        // 뒷 4자리가 같은 기존 회원이 있으므로 전체 번호로 가입 여부부터 확인한다.
+        openSignupPhoneStep("", false);
+    });
+    document.getElementById("memberRejectHomeBtn")?.addEventListener("click", () => {
         state.candidateMember = null;
         resetToChoice();
     });

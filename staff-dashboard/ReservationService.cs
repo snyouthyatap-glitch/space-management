@@ -20,6 +20,47 @@ internal static class ReservationService
             .ToList();
     }
 
+    public const string MissingUsageLogStatus = "일지 미제출";
+
+    public static void ApplyCheckIns(IEnumerable<CalendarEntry> entries, IReadOnlyCollection<StaffCheckIn> checkIns)
+    {
+        var byDateAndName = checkIns
+            .Where(item => !string.IsNullOrWhiteSpace(item.Date) && !string.IsNullOrWhiteSpace(item.Name))
+            .GroupBy(item => $"{item.Date}|{NormalizeNameKey(item.Name)}", StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.ToList(), StringComparer.Ordinal);
+        var memberDates = checkIns
+            .Where(item => !string.IsNullOrWhiteSpace(item.MemberId))
+            .Select(item => $"{item.Date}|{item.MemberId}")
+            .ToHashSet(StringComparer.Ordinal);
+
+        foreach (var entry in entries)
+        {
+            if (entry.Source == "usage") continue;
+            if (!string.IsNullOrWhiteSpace(entry.MemberId))
+            {
+                entry.CheckedIn = memberDates.Contains($"{entry.Date}|{entry.MemberId}");
+                continue;
+            }
+
+            if (!byDateAndName.TryGetValue($"{entry.Date}|{NormalizeNameKey(entry.Name)}", out var matches))
+            {
+                entry.CheckedIn = false;
+                continue;
+            }
+
+            entry.CheckedIn = true;
+            var memberIds = matches
+                .Select(item => item.MemberId)
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+            if (memberIds.Count == 1) entry.MemberId = memberIds[0];
+        }
+    }
+
+    private static string NormalizeNameKey(string? value) =>
+        Regex.Replace(value ?? "", @"\s+", "").Trim().ToLowerInvariant();
+
     public static string GetUnifiedStatus(CalendarEntry entry)
     {
         if (entry.Cancelled || entry.Status is "취소" or "반려") return "취소";
@@ -38,9 +79,30 @@ internal static class ReservationService
             return "승인 완료";
         }
 
-        if (start.HasValue && now >= start.Value.AddMinutes(10)) return "노쇼";
+        if (start.HasValue && now >= start.Value.AddMinutes(10))
+            return entry.CheckedIn ? MissingUsageLogStatus : "노쇼";
         if (entry.Status == "신청") return "승인 대기";
         return "승인 완료";
+    }
+
+    public const int OverdueUsageLogAlertMinutes = 30;
+
+    // 오늘 예약 중 시작 시각에서 30분이 지났는데 일지가 없는 예약.
+    // 직원이 노쇼 처리하거나 일지를 대리 제출해야 하는 대상이다.
+    public static List<CalendarEntry> FindOverdueUsageLogs(IEnumerable<CalendarEntry> entries, DateTime now)
+    {
+        return entries
+            .Where(entry =>
+                entry.Source != "usage" &&
+                !entry.Submitted &&
+                !entry.Cancelled &&
+                entry.Status is not ("취소" or "반려" or "노쇼" or "이용완료" or "일지제출완료") &&
+                IsSameCalendarDate(entry.Date, now))
+            .Where(entry =>
+                ParseReservationDateTime(entry.Date, entry.StartTime) is { } start &&
+                now >= start.AddMinutes(OverdueUsageLogAlertMinutes))
+            .OrderBy(entry => entry.StartTime, StringComparer.Ordinal)
+            .ToList();
     }
 
     public static bool IsSameCalendarDate(string value, DateTime date)
@@ -98,6 +160,7 @@ internal static class ReservationService
         {
             Id = primary.Id,
             Source = primary.Source,
+            MemberId = FirstNonEmpty(entries.Select(item => item.MemberId).Prepend(primary.MemberId).ToArray()),
             Date = primary.Date,
             StartTime = primary.StartTime,
             EndTime = primary.EndTime,
@@ -108,7 +171,8 @@ internal static class ReservationService
             Headcount = Math.Max(1, entries.Max(item => item.Headcount)),
             Status = primary.Status,
             Cancelled = entries.Any(item => item.Cancelled || item.Status is "취소" or "반려"),
-            Submitted = entries.Any(item => item.Submitted || item.Source == "usage" || item.Status == "일지제출완료")
+            Submitted = entries.Any(item => item.Submitted || item.Source == "usage" || item.Status == "일지제출완료"),
+            CheckedIn = entries.Any(item => item.CheckedIn)
         };
     }
 
