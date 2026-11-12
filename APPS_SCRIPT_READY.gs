@@ -539,11 +539,66 @@ function handleAdminUpdateReservationRequestStatus_(payload) {
   });
 }
 
-function handleAdminMonthlyPerformance_(payload) {
+// 실적 기간: month(YYYY-MM) 하나 또는 startDate~endDate(YYYY-MM-DD, 최대 366일)
+const PERFORMANCE_MAX_RANGE_DAYS = 366;
+
+function resolvePerformanceRange_(payload) {
   const monthKey = str_(payload && payload.month);
-  if (!isValidMonthKey_(monthKey)) {
-    throw new Error('실적을 조회할 월을 YYYY-MM 형식으로 입력해 주세요.');
+  if (monthKey) {
+    if (!isValidMonthKey_(monthKey)) {
+      throw new Error('실적을 조회할 월을 YYYY-MM 형식으로 입력해 주세요.');
+    }
+    const parts = monthKey.split('-').map(Number);
+    const lastDay = new Date(parts[0], parts[1], 0).getDate();
+    return { month: monthKey, startDate: monthKey + '-01', endDate: monthKey + '-' + pad2_(lastDay) };
   }
+
+  const startDate = str_(payload && payload.startDate);
+  const endDate = str_(payload && payload.endDate);
+  if (!isPerformanceDateKey_(startDate) || !isPerformanceDateKey_(endDate)) {
+    throw new Error('실적 기간을 YYYY-MM-DD 형식으로 입력해 주세요.');
+  }
+  if (startDate > endDate) throw new Error('실적 기간의 시작일이 종료일보다 늦습니다.');
+  if (performanceDayCount_(startDate, endDate) > PERFORMANCE_MAX_RANGE_DAYS) {
+    throw new Error('실적 기간은 최대 ' + PERFORMANCE_MAX_RANGE_DAYS + '일까지 조회할 수 있습니다.');
+  }
+  return { month: '', startDate: startDate, endDate: endDate };
+}
+
+function isPerformanceDateKey_(value) {
+  const match = str_(value).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return false;
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  return date.getUTCFullYear() === Number(match[1]) &&
+    date.getUTCMonth() === Number(match[2]) - 1 &&
+    date.getUTCDate() === Number(match[3]);
+}
+
+function performanceDayCount_(startDate, endDate) {
+  const toUtc = function(value) {
+    const parts = value.split('-').map(Number);
+    return Date.UTC(parts[0], parts[1] - 1, parts[2]);
+  };
+  return Math.round((toUtc(endDate) - toUtc(startDate)) / 86400000) + 1;
+}
+
+function performanceDatesInRange_(startDate, endDate) {
+  const parts = startDate.split('-').map(Number);
+  const dates = [];
+  const count = performanceDayCount_(startDate, endDate);
+  for (let offset = 0; offset < count; offset += 1) {
+    const date = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2] + offset));
+    dates.push(date.getUTCFullYear() + '-' + pad2_(date.getUTCMonth() + 1) + '-' + pad2_(date.getUTCDate()));
+  }
+  return dates;
+}
+
+function handleAdminMonthlyPerformance_(payload) {
+  const range = resolvePerformanceRange_(payload);
+  const inRange = function(date) {
+    const day = normalizeSheetDate_(date);
+    return day >= range.startDate && day <= range.endDate;
+  };
 
   const categories = {
     visit: createPerformanceCategory_('visit', '방문자', false),
@@ -553,30 +608,10 @@ function handleAdminMonthlyPerformance_(payload) {
   };
   const totalUniqueKeys = {};
   const memberBirthDates = getPerformanceMemberBirthDates_();
-  const visitRows = getRowsAsObjectsForMonth_(
-    SHEET_NAMES.VISIT_LOGS,
-    HEADERS.visitLogs,
-    'date',
-    monthKey
-  );
-  const printerRows = getRowsAsObjectsForMonth_(
-    SHEET_NAMES.PRINTER_LOGS,
-    HEADERS.printerLogs,
-    'date',
-    monthKey
-  );
-  const connectRows = getRowsAsObjectsForMonth_(
-    SHEET_NAMES.CONNECT_LOGS,
-    HEADERS.roomLogs,
-    'date',
-    monthKey
-  );
-  const careerRows = getRowsAsObjectsForMonth_(
-    SHEET_NAMES.CAREER_LOGS,
-    HEADERS.roomLogs,
-    'date',
-    monthKey
-  );
+  const visitRows = getRowsAsObjectsWhere_(SHEET_NAMES.VISIT_LOGS, HEADERS.visitLogs, 'date', inRange);
+  const printerRows = getRowsAsObjectsWhere_(SHEET_NAMES.PRINTER_LOGS, HEADERS.printerLogs, 'date', inRange);
+  const connectRows = getRowsAsObjectsWhere_(SHEET_NAMES.CONNECT_LOGS, HEADERS.roomLogs, 'date', inRange);
+  const careerRows = getRowsAsObjectsWhere_(SHEET_NAMES.CAREER_LOGS, HEADERS.roomLogs, 'date', inRange);
 
   visitRows.forEach(function(row) {
     addPerformancePerson_(
@@ -625,11 +660,13 @@ function handleAdminMonthlyPerformance_(payload) {
 
   const daily = {};
   order.forEach(function(key) {
-    daily[key] = buildPerformanceDailyRows_(categories[key], monthKey);
+    daily[key] = buildPerformanceDailyRows_(categories[key], range.startDate, range.endDate);
   });
   return {
     ok: true,
-    month: monthKey,
+    month: range.month,
+    startDate: range.startDate,
+    endDate: range.endDate,
     generatedAt: nowText_(),
     summary: summary,
     totalUsers: totalUsers,
@@ -641,7 +678,7 @@ function handleAdminMonthlyPerformance_(payload) {
       career: buildPerformanceRoomSimplifiedRows_(careerRows, true),
       connect: buildPerformanceRoomSimplifiedRows_(connectRows, false)
     },
-    uniqueBasis: '회원 ID 월간 중복 제거, 식별 불가 비회원 및 동반자는 기록별 인원'
+    uniqueBasis: '회원 ID 기간 내 중복 제거, 식별 불가 비회원 및 동반자는 기록별 인원'
   };
 }
 
@@ -858,19 +895,23 @@ function performanceBucket_(gender, age) {
   return prefix + '40Plus';
 }
 
-function buildPerformanceDailyRows_(category, monthKey) {
-  const parts = monthKey.split('-').map(Number);
-  const lastDay = new Date(parts[0], parts[1], 0).getDate();
+function buildPerformanceDailyRows_(category, startDate, endDate) {
   const rows = [];
-  for (let day = 1; day <= lastDay; day += 1) {
-    const date = monthKey + '-' + pad2_(day);
+  performanceDatesInRange_(startDate, endDate).forEach(function(date) {
     const counts = category.daily[date] || createPerformanceCounts_();
     if (counts.total > 0) rows.push(Object.assign({ date: date }, counts));
-  }
+  });
   return rows;
 }
 
 function getRowsAsObjectsForMonth_(sheetName, headers, dateHeader, monthKey) {
+  return getRowsAsObjectsWhere_(sheetName, headers, dateHeader, function(date) {
+    return normalizeSheetDate_(date).slice(0, 7) === monthKey;
+  });
+}
+
+// 날짜 열 값이 matchesDate를 만족하는 행만 읽는다(연속 행은 한 번에 읽음).
+function getRowsAsObjectsWhere_(sheetName, headers, dateHeader, matchesDate) {
   const sheet = getOrCreateSheet_(sheetName, headers);
   if (sheet.getLastRow() < 2) return [];
   const dateColumn = headers.indexOf(dateHeader) + 1;
@@ -881,7 +922,7 @@ function getRowsAsObjectsForMonth_(sheetName, headers, dateHeader, monthKey) {
     .getValues();
   const rowNumbers = [];
   dateValues.forEach(function(row, index) {
-    if (normalizeSheetDate_(row[0]).slice(0, 7) === monthKey) {
+    if (matchesDate(row[0])) {
       rowNumbers.push(index + 2);
     }
   });

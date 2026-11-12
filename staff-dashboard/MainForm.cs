@@ -2077,27 +2077,30 @@ internal sealed class MainForm : Form
 
         using var saveDialog = new SaveFileDialog
         {
-            Title = "월간 실적 저장",
+            Title = "실적 저장",
             Filter = "Excel 통합 문서 (*.xlsx)|*.xlsx",
             DefaultExt = "xlsx",
             AddExtension = true,
-            FileName = $"청년이봄_{monthDialog.SelectedMonth}_월간실적.xlsx"
+            FileName = monthDialog.IsMonthMode
+                ? $"청년이봄_{monthDialog.SelectedMonth}_월간실적.xlsx"
+                : $"청년이봄_{monthDialog.StartDate}_{monthDialog.EndDate}_실적.xlsx"
         };
         if (saveDialog.ShowDialog(this) != DialogResult.OK) return;
 
+        var periodName = monthDialog.PeriodName;
         _pollTimer.Stop();
-        _statusLabel.Text = $"{monthDialog.SelectedMonth} 실적을 정리하고 있습니다...";
+        _statusLabel.Text = $"{periodName} 실적을 정리하고 있습니다...";
         Cursor = Cursors.WaitCursor;
         try
         {
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(90));
-            var report = await _client.GetMonthlyPerformanceAsync(
-                _settings,
-                _password,
-                monthDialog.SelectedMonth,
-                timeout.Token);
+            // 긴 기간은 서버 집계가 오래 걸려 시간을 넉넉히 둔다.
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(monthDialog.IsMonthMode ? 90 : 240));
+            var report = monthDialog.IsMonthMode
+                ? await _client.GetMonthlyPerformanceAsync(_settings, _password, monthDialog.SelectedMonth, timeout.Token)
+                : await _client.GetPerformanceForRangeAsync(
+                    _settings, _password, monthDialog.StartDate, monthDialog.EndDate, timeout.Token);
             PerformanceWorkbookWriter.Write(saveDialog.FileName, report);
-            _statusLabel.Text = $"{monthDialog.SelectedMonth} 실적 저장 완료";
+            _statusLabel.Text = $"{periodName} 실적 저장 완료";
             MessageBox.Show(this, "실적 파일을 저장했습니다.\n\n" + saveDialog.FileName,
                 "실적 다운로드 완료", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }

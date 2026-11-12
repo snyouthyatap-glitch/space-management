@@ -430,6 +430,19 @@ internal sealed class MonthlyPerformanceReport
     [JsonPropertyName("month")]
     public string Month { get; set; } = "";
 
+    [JsonPropertyName("startDate")]
+    public string StartDate { get; set; } = "";
+
+    [JsonPropertyName("endDate")]
+    public string EndDate { get; set; } = "";
+
+    // 엑셀 제목에 쓰는 기간 이름. 예) "2026-11 월간", "2026-09-01 ~ 2026-11-12"
+    [JsonIgnore]
+    public string PeriodTitle =>
+        !string.IsNullOrWhiteSpace(Month) ? $"{Month} 월간"
+        : !string.IsNullOrWhiteSpace(StartDate) ? $"{StartDate} ~ {EndDate}"
+        : "";
+
     [JsonPropertyName("generatedAt")]
     public string GeneratedAt { get; set; } = "";
 

@@ -41,7 +41,7 @@ internal static class PerformanceWorkbookWriter
     {
         var summaryRows = new List<List<CellValue>>
         {
-            new() { Text($"청년이봄 {report.Month} 월간 실적", 1) },
+            new() { Text($"청년이봄 {report.PeriodTitle} 실적", 1) },
             new() { Text("생성 시각"), Text(report.GeneratedAt) },
             new(),
             new() { Text("구분", 2), Text("실인원", 2), Text("연인원", 2) }
@@ -59,13 +59,20 @@ internal static class PerformanceWorkbookWriter
         });
         summaryRows.Add(new());
         summaryRows.Add(new() { Text("총 이용자"), Number(report.TotalUsers), Text("4개 부문 연인원 합계") });
-        summaryRows.Add(new() { Text("총 실인원"), Number(report.TotalUniqueUsers), Text("해당 월 전체 부문 중복 제거") });
+        summaryRows.Add(new() { Text("총 실인원"), Number(report.TotalUniqueUsers), Text("해당 기간 전체 부문 중복 제거") });
         summaryRows.Add(new());
         summaryRows.Add(new() { Text("실인원 기준"), Text(report.UniqueBasis) });
+        if (!string.IsNullOrWhiteSpace(report.StartDate))
+            summaryRows.Add(new() { Text("집계 기간"), Text($"{report.StartDate} ~ {report.EndDate}") });
 
+        var summaryName = string.IsNullOrWhiteSpace(report.Month) && !string.IsNullOrWhiteSpace(report.StartDate)
+            ? "기간 요약"
+            : "월간 요약";
         return new()
         {
-            new SheetData("월간 요약", summaryRows, new double[] { 20, 16, 28 }),
+            new SheetData(summaryName, summaryRows, new double[] { 20, 16, 28 }),
+            BuildDailySheet("전체 일별 현황", MergeDailyRows(
+                report.Daily.Visit, report.Daily.Connect, report.Daily.Career, report.Daily.Printer)),
             BuildDailySheet("방문자", report.Daily.Visit),
             BuildDailySheet("커넥트룸", report.Daily.Connect),
             BuildDailySheet("커리어존", report.Daily.Career),
@@ -76,6 +83,33 @@ internal static class PerformanceWorkbookWriter
             BuildRoomSimplifiedSheet("커넥트룸 간소화", report.Simplified.Connect, false)
         };
     }
+
+    // 전체 연인원 일별 현황: 방문자·커넥트룸·커리어존·프린터 일별 표를 날짜별로 더한다.
+    // 그래서 이 시트의 합계는 요약의 '총 이용자(4개 부문 연인원 합계)'와 같다.
+    public static List<PerformanceDailyRow> MergeDailyRows(params List<PerformanceDailyRow>[] groups) =>
+        groups
+            .SelectMany(rows => rows)
+            .GroupBy(row => row.Date, StringComparer.Ordinal)
+            .OrderBy(group => group.Key, StringComparer.Ordinal)
+            .Select(group => new PerformanceDailyRow
+            {
+                Date = group.Key,
+                MaleUnder19 = group.Sum(row => row.MaleUnder19),
+                FemaleUnder19 = group.Sum(row => row.FemaleUnder19),
+                Male20To24 = group.Sum(row => row.Male20To24),
+                Female20To24 = group.Sum(row => row.Female20To24),
+                Male25To29 = group.Sum(row => row.Male25To29),
+                Female25To29 = group.Sum(row => row.Female25To29),
+                Male30To34 = group.Sum(row => row.Male30To34),
+                Female30To34 = group.Sum(row => row.Female30To34),
+                Male35To39 = group.Sum(row => row.Male35To39),
+                Female35To39 = group.Sum(row => row.Female35To39),
+                Male40Plus = group.Sum(row => row.Male40Plus),
+                Female40Plus = group.Sum(row => row.Female40Plus),
+                Unknown = group.Sum(row => row.Unknown),
+                Total = group.Sum(row => row.Total)
+            })
+            .ToList();
 
     private static SheetData BuildVisitSimplifiedSheet(List<PerformanceVisitSimplifiedRow> rows)
     {
