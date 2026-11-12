@@ -28,6 +28,8 @@ internal static class SelfTest
         TestReservationMergeByRepresentativeDateAndTime();
         TestMissingUsageLogStatus();
         TestOverdueUsageLogAlert();
+        TestMergeDailyRows();
+        TestPerformanceRangeRequestAsync().GetAwaiter().GetResult();
         TestPerformanceWorkbook();
     }
 
@@ -553,6 +555,44 @@ internal static class SelfTest
         }
     }
 
+    private static void TestMergeDailyRows()
+    {
+        var merged = PerformanceWorkbookWriter.MergeDailyRows(
+            [
+                new() { Date = "2026-07-02", Male20To24 = 1, Total = 1 },
+                new() { Date = "2026-07-01", Female25To29 = 2, Total = 2 }
+            ],
+            [new() { Date = "2026-07-01", Female25To29 = 1, Unknown = 1, Total = 2 }],
+            [],
+            [new() { Date = "2026-07-03", Male40Plus = 1, Total = 1 }]);
+        if (merged.Count != 3 ||
+            merged[0].Date != "2026-07-01" || merged[0].Female25To29 != 3 || merged[0].Unknown != 1 || merged[0].Total != 4 ||
+            merged[1].Date != "2026-07-02" || merged[1].Total != 1 ||
+            merged[2].Date != "2026-07-03" || merged[2].Male40Plus != 1)
+        {
+            throw new InvalidOperationException("전체 일별 현황 합산 테스트에 실패했습니다.");
+        }
+    }
+
+    private static async Task TestPerformanceRangeRequestAsync()
+    {
+        var handler = new FakeAppsScriptHandler();
+        using var httpClient = new HttpClient(handler);
+        var client = new AppsScriptClient(httpClient);
+        var report = await client.GetPerformanceForRangeAsync(
+            new DashboardSettings { AppsScriptUrl = "https://example.test/exec" },
+            FakeAppsScriptHandler.Password,
+            "2026-06-15",
+            "2026-07-14",
+            CancellationToken.None);
+        if (!report.Ok || handler.LastPerformanceStartDate != "2026-06-15" ||
+            handler.LastPerformanceEndDate != "2026-07-14" ||
+            report.PeriodTitle != "2026-06-15 ~ 2026-07-14")
+        {
+            throw new InvalidOperationException("기간 지정 실적 요청 테스트에 실패했습니다.");
+        }
+    }
+
     private static void TestPerformanceWorkbook()
     {
         var path = Path.Combine(Path.GetTempPath(), "youth-spring-performance-test.xlsx");
@@ -572,11 +612,24 @@ internal static class SelfTest
                 ?? throw new InvalidOperationException("엑셀 통합 문서 정보가 없습니다.");
             using var reader = new StreamReader(workbookEntry.Open());
             var workbookXml = reader.ReadToEnd();
-            var careerSimplifiedEntry = archive.GetEntry("xl/worksheets/sheet8.xml")
+            var careerSimplifiedEntry = archive.GetEntry("xl/worksheets/sheet9.xml")
                 ?? throw new InvalidOperationException("커리어존 간소화 시트가 없습니다.");
             using var careerReader = new StreamReader(careerSimplifiedEntry.Open());
             var careerXml = careerReader.ReadToEnd();
-            if (worksheetCount != 9 || !workbookXml.Contains("월간 요약", StringComparison.Ordinal) ||
+            var totalDailyEntry = archive.GetEntry("xl/worksheets/sheet2.xml")
+                ?? throw new InvalidOperationException("전체 일별 현황 시트가 없습니다.");
+            using var totalReader = new StreamReader(totalDailyEntry.Open());
+            var totalXml = totalReader.ReadToEnd();
+            // 4개 부문 2026-07-01 합계: 방문자 1 + 커넥트룸 2 + 커리어존 1 + 프린터 1 = 5
+            if (!workbookXml.Contains("전체 일별 현황", StringComparison.Ordinal) ||
+                workbookXml.IndexOf("전체 일별 현황", StringComparison.Ordinal) >
+                workbookXml.IndexOf("\"방문자\"", StringComparison.Ordinal) ||
+                !totalXml.Contains("2026-07-01", StringComparison.Ordinal) ||
+                !totalXml.Contains("<v>5</v>", StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("전체 일별 현황 시트 테스트에 실패했습니다.");
+            }
+            if (worksheetCount != 10 || !workbookXml.Contains("월간 요약", StringComparison.Ordinal) ||
                 !workbookXml.Contains("커넥트룸", StringComparison.Ordinal) ||
                 !workbookXml.Contains("커리어존 간소화", StringComparison.Ordinal) ||
                 !careerXml.Contains("사용공간", StringComparison.Ordinal) ||
@@ -668,6 +721,8 @@ internal static class SelfTest
         public int ReservationRequestStatusUpdateCount { get; private set; }
         public int MemberLookupCount { get; private set; }
         public int MonthlyPerformanceCount { get; private set; }
+        public string LastPerformanceStartDate { get; private set; } = "";
+        public string LastPerformanceEndDate { get; private set; } = "";
 
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
@@ -779,7 +834,16 @@ internal static class SelfTest
             else if (action == "adminMonthlyPerformance")
             {
                 MonthlyPerformanceCount++;
-                json = JsonSerializer.Serialize(CreatePerformanceReport());
+                var report = CreatePerformanceReport();
+                if (payload.TryGetProperty("startDate", out var startDate))
+                {
+                    LastPerformanceStartDate = startDate.GetString() ?? "";
+                    LastPerformanceEndDate = payload.GetProperty("endDate").GetString() ?? "";
+                    report.Month = "";
+                    report.StartDate = LastPerformanceStartDate;
+                    report.EndDate = LastPerformanceEndDate;
+                }
+                json = JsonSerializer.Serialize(report);
             }
             else
             {

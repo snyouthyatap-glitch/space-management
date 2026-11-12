@@ -214,6 +214,22 @@ internal sealed class AppsScriptClient
             response => response.Ok,
             response => response.Error);
 
+    // 기간 지정 실적(시작일~종료일, YYYY-MM-DD)
+    public Task<MonthlyPerformanceReport> GetPerformanceForRangeAsync(
+        DashboardSettings settings,
+        string password,
+        string startDate,
+        string endDate,
+        CancellationToken cancellationToken) =>
+        ExecuteAdminActionAsync<MonthlyPerformanceReport>(
+            settings,
+            password,
+            "adminMonthlyPerformance",
+            session => new { adminSession = session, startDate, endDate },
+            cancellationToken,
+            response => response.Ok,
+            response => response.Error);
+
     public void ResetSession() => _sessionToken = "";
 
     private static string StripKnownEntryPrefix(string id)

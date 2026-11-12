@@ -114,6 +114,33 @@ test("서버 diffNaverReservationDetails_: 바뀐 값만 고친다", () => {
   assert.equal(confirmed.status, "확정");
 });
 
+test("서버 실적 기간: 월별·기간 지정·최대 366일", () => {
+  const api = loadAppsScriptFunctions(
+    [
+      "str_", "pad2_", "isValidMonthKey_", "isPerformanceDateKey_", "performanceDayCount_",
+      "performanceDatesInRange_", "resolvePerformanceRange_",
+    ],
+    "{ resolvePerformanceRange_, performanceDatesInRange_ }"
+  );
+  const source = fs.readFileSync(path.join(__dirname, "..", "APPS_SCRIPT_READY.gs"), "utf8");
+  assert.match(source, /const PERFORMANCE_MAX_RANGE_DAYS = 366;/);
+  globalThis.PERFORMANCE_MAX_RANGE_DAYS = 366;
+
+  assert.deepEqual(api.resolvePerformanceRange_({ month: "2026-02" }), {
+    month: "2026-02", startDate: "2026-02-01", endDate: "2026-02-28",
+  });
+  assert.deepEqual(api.resolvePerformanceRange_({ startDate: "2026-09-29", endDate: "2026-10-02" }), {
+    month: "", startDate: "2026-09-29", endDate: "2026-10-02",
+  });
+  assert.deepEqual(api.performanceDatesInRange_("2026-12-30", "2027-01-02"), [
+    "2026-12-30", "2026-12-31", "2027-01-01", "2027-01-02",
+  ]);
+  assert.throws(() => api.resolvePerformanceRange_({ startDate: "2026-10-02", endDate: "2026-09-29" }), /늦습니다/);
+  assert.throws(() => api.resolvePerformanceRange_({ startDate: "2025-01-01", endDate: "2026-01-02" }), /최대 366일/);
+  assert.throws(() => api.resolvePerformanceRange_({ startDate: "2026-02-30", endDate: "2026-03-01" }), /YYYY-MM-DD/);
+  delete globalThis.PERFORMANCE_MAX_RANGE_DAYS;
+});
+
 test("대리예약은 방문자 이름과 아래쪽 연락처를 쓴다", () => {
   assert.deepEqual(
     resolveNaverBooker("김예약 [대리예약] 방문자: 이방문", ["010-1111-2222", "010-3333-4444"]),
