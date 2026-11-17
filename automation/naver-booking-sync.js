@@ -51,17 +51,73 @@ const DEFAULT_PRODUCTS = [
   "AI 커리어존 (청취Room2)",
   "청년 커넥트룸",
 ];
-const QUICK_FILTERS = [
-  { label: "오늘이용", key: "today_use" },
-  { label: "확정대기", key: "pending_confirm" },
-  { label: "오늘취소", key: "today_cancel" },
-];
+// 이용일 기준 한 달(오늘부터 30일) 목록을 한 번 읽고, 오늘이용·오늘취소는 거기서 골라낸다.
+// 확정대기는 날짜와 상관없이 모아 보여 주는 빠른 필터로 따로 읽는다.
+const UPCOMING_DAYS = 30;
+const QUICK_FILTERS = [{ label: "확정대기", key: "pending_confirm" }];
+// 상세 화면은 새 예약·바뀐 예약만 연다(한 번 실행에 최대 개수). 나머지는 지난 결과를 다시 쓴다.
+const DETAIL_FETCH_LIMIT = 12;
 
 const REPO_ROOT = path.resolve(__dirname, "..");
 const OUTPUT_DIR = path.join(REPO_ROOT, "outputs");
 const STATE_DIR = path.join(__dirname, ".naver-booking-state");
-const USER_DATA_DIR = path.join(STATE_DIR, "chrome-profile");
+const USER_DATA_DIR = process.env.NAVER_BOOKING_PROFILE_DIR || path.join(STATE_DIR, "chrome-profile");
 const DEFAULT_OUTPUT_FILE = path.join(OUTPUT_DIR, "naver-booking-sync.json");
+const DETAIL_CACHE_FILE = process.env.NAVER_DETAIL_CACHE_FILE || path.join(OUTPUT_DIR, "naver-detail-cache.json");
+
+function seoulDate(offsetDays = 0) {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul" }).format(
+    new Date(Date.now() + offsetDays * 86400000)
+  );
+}
+
+// '26.11.18.수 13:00~16:00', '2026. 11. 17.(화) 오후 4:00~…' → '2026-11-18'
+function rowUseDate(row) {
+  const match = String(row.useDateTime || "").match(/(\d{2,4})\.\s*(\d{1,2})\.\s*(\d{1,2})\./);
+  if (!match) return "";
+  const year = match[1].length === 2 ? 2000 + Number(match[1]) : Number(match[1]);
+  return `${year}-${String(match[2]).padStart(2, "0")}-${String(match[3]).padStart(2, "0")}`;
+}
+
+function monthListUrl(baseUrl, startDate, endDate) {
+  const url = new URL(baseUrl);
+  url.searchParams.set("dateDropdownType", "MONTH");
+  url.searchParams.set("startDateTime", startDate);
+  url.searchParams.set("endDateTime", endDate);
+  url.searchParams.set("dateFilter", "USEDATE");
+  return url.toString();
+}
+
+// 목록 결과로 오늘이용·오늘취소를 만든다(예전 빠른 필터와 같은 모양).
+function splitUpcomingRows(rows, today) {
+  const status = (row) => normalizeReservationStatus(row.status);
+  const todayRows = rows.filter((row) => rowUseDate(row) === today);
+  return {
+    today_use: todayRows
+      .filter((row) => ["확정", "완료", "노쇼"].includes(status(row)))
+      .map((row) => ({ ...row, filterType: "today_use", filterLabel: "오늘이용" })),
+    today_cancel: todayRows
+      .filter((row) => status(row) === "취소")
+      .map((row) => ({ ...row, filterType: "today_cancel", filterLabel: "오늘취소" })),
+  };
+}
+
+function loadDetailCache() {
+  try {
+    return JSON.parse(fs.readFileSync(DETAIL_CACHE_FILE, "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+function saveDetailCache(cache) {
+  // 40일 넘게 다시 보이지 않은 예약은 지운다.
+  const cutoff = Date.now() - 40 * 86400000;
+  const kept = Object.fromEntries(
+    Object.entries(cache).filter(([, item]) => Date.parse(item.seenAt || 0) >= cutoff)
+  );
+  fs.writeFileSync(DETAIL_CACHE_FILE, JSON.stringify(kept), "utf8");
+}
 
 function parseArgs(argv) {
   const out = {
@@ -282,11 +338,22 @@ async function collectRows(page) {
       const match = href.match(/bookings\/(\d+)/);
       if (!match) continue;
       const reservationNo = match[1];
-      const row =
-        anchor.closest("tr") ||
-        anchor.closest("[class*='row']") ||
-        anchor.closest("li") ||
-        anchor.parentElement;
+      // 예약 한 건만 담은 가장 큰 요소를 행으로 쓴다.
+      // (class에 'row'가 든 목록 전체를 행으로 잡으면 앞 예약의 연락처가 섞인다)
+      const holdsOtherReservation = (node) =>
+        Array.from(node.querySelectorAll("a[href*='booking-list-view/bookings/']"))
+          .some((other) => !(other.getAttribute("href") || "").includes(`bookings/${reservationNo}`));
+      // 행 글자는 상태(확정·신청 등)로 시작한다. 예약이 한 건뿐일 때 목록 머리글이나 화면 전체를 잡지 않게 한다.
+      const startsWithStatus = (node) => /^(확정|신청|취소|완료|노쇼)/.test(clean(node.textContent));
+      let row = anchor.closest("tr");
+      if (!row || holdsOtherReservation(row)) {
+        row = anchor;
+        let node = anchor.parentElement;
+        while (node && node !== document.body && !holdsOtherReservation(node)) {
+          if (startsWithStatus(node)) row = node;
+          node = node.parentElement;
+        }
+      }
       if (!row) continue;
       const text = clean(row.textContent);
       if (!text || text.length < 10) continue;
@@ -374,6 +441,23 @@ function detailFieldValue(fields, labelPattern) {
   return field ? field.value || "" : "";
 }
 
+// 같은 이름표가 여러 번 잡혀도(목록 머리글 등) 실제 번호가 든 값을 고른다.
+function detailFieldPhone(fields, labelPattern) {
+  for (const field of fields || []) {
+    if (!labelPattern.test(field.label || "")) continue;
+    const phone = findPhones(field.value)[0];
+    if (phone) return phone;
+  }
+  return "";
+}
+
+function detailDateTime(value) {
+  const match = String(value || "").match(
+    /^\d{2,4}\.\s*\d{1,2}\.\s*\d{1,2}\.\s*(?:\([^)]*\))?\s*(?:오전|오후)?\s*\d{1,2}:\d{2}/
+  );
+  return match ? match[0].trim() : String(value || "").trim();
+}
+
 function parseHeadcount(value) {
   const match = String(value || "").match(/\d+/);
   return match ? Number(match[0]) : null;
@@ -386,19 +470,24 @@ function parseDetailFields(fields, row = {}) {
   const visitorName = cleanNaverBookerName(rawVisitor);
   const visitorPhone =
     findPhones(rawVisitor)[0] ||
-    findPhones(detailFieldValue(fields, /^방문자\s*(전화번호|연락처)$/))[0] ||
+    detailFieldPhone(fields, /^방문자\s*(전화번호|연락처)$/) ||
     "";
-  const proxy = row.proxyBooking || isNaverProxyBooking(rawBooker) || Boolean(visitorName);
+  // 대리예약 여부는 이 예약의 상세 화면으로 판단한다. 목록 행 값은 상세에 예약자가 없을 때만 쓴다.
+  const proxy = rawBooker
+    ? isNaverProxyBooking(rawBooker) || Boolean(visitorName)
+    : Boolean(row.proxyBooking) || Boolean(visitorName);
   const bookerName = visitorName || cleanNaverBookerName(rawBooker);
   // 대리예약 상세의 '전화번호'는 예약자 번호일 수 있으므로, 방문자 번호가 없으면 목록 값을 유지한다.
-  const phone = visitorPhone || (proxy ? "" : detailFieldValue(fields, /^전화번호$/));
-  const reservationNo = detailFieldValue(fields, /^예약번호$/);
+  const phone = visitorPhone || (proxy ? "" : detailFieldPhone(fields, /^전화번호$/));
+  // 바뀐 예약은 상세 화면 예약번호 옆에 "변경"이 붙어 있어 숫자만 쓴다.
+  const reservationNo = (detailFieldValue(fields, /^예약번호$/).match(/\d{6,}/) || [""])[0];
   const productName = detailFieldValue(fields, /^상품$/);
   const useDateTime = detailFieldValue(fields, /^이용일시$/);
   const purpose = detailFieldValue(fields, /^이용 목적$/);
   const headcount = parseHeadcount(detailFieldValue(fields, /^이용 인원/));
-  const requestedAt = detailFieldValue(fields, /^신청$/);
-  const confirmedAt = detailFieldValue(fields, /^확정$/);
+  // '확정' 값 뒤에는 처리한 곳(파트너센터·운영자)이 붙어 있어 날짜·시각만 남긴다.
+  const requestedAt = detailDateTime(detailFieldValue(fields, /^신청$/));
+  const confirmedAt = detailDateTime(detailFieldValue(fields, /^확정$/));
 
   return {
     ...(bookerName ? { bookerName } : {}),
@@ -439,7 +528,9 @@ async function collectDetail(page) {
   });
 }
 
-async function enrichRowsWithDetails(context, baseUrl, rows, timeoutMs) {
+// 상세 화면 결과는 예약번호별로 저장해 두고, 목록 줄이 그대로면 다시 열지 않는다.
+// cache: { [예약번호]: { signature, parsed, seenAt } }, budget: { remaining }
+async function enrichRowsWithDetails(context, baseUrl, rows, timeoutMs, cache = {}, budget = { remaining: Infinity }) {
   const enriched = [];
   for (const row of rows) {
     const url = detailUrl(baseUrl, row.detailPath);
@@ -448,6 +539,20 @@ async function enrichRowsWithDetails(context, baseUrl, rows, timeoutMs) {
       continue;
     }
 
+    const signature = String(row.rawText || "");
+    const cached = cache[row.reservationNo];
+    if (cached && cached.signature === signature) {
+      cached.seenAt = new Date().toISOString();
+      enriched.push({ ...row, ...cached.parsed, detailUrl: url, detailCollectedAt: cached.collectedAt, detailCached: true });
+      continue;
+    }
+    if (budget.remaining <= 0) {
+      // 이번에는 상세를 열지 못했다. 지난 상세 결과가 있으면 쓰고, 다음 실행에서 다시 연다.
+      enriched.push({ ...row, ...(cached ? cached.parsed : {}), detailUrl: url, detailPending: true });
+      continue;
+    }
+    budget.remaining -= 1;
+
     const detailPage = await context.newPage();
     detailPage.setDefaultTimeout(timeoutMs);
     try {
@@ -455,13 +560,14 @@ async function enrichRowsWithDetails(context, baseUrl, rows, timeoutMs) {
       await waitForPageReady(detailPage, timeoutMs);
       const detail = await collectDetail(detailPage);
       const parsedDetail = parseDetailFields(detail.detailFields, row);
+      const collectedAt = new Date().toISOString();
+      cache[row.reservationNo] = { signature, parsed: parsedDetail, collectedAt, seenAt: collectedAt };
+      saveDetailCache(cache); // 중간에 시간이 끝나도 다음 실행에서 다시 열지 않게 바로 저장한다.
       enriched.push({
         ...row,
         ...parsedDetail,
         detailUrl: url,
-        detailText: detail.detailText,
-        detailFields: detail.detailFields,
-        detailCollectedAt: new Date().toISOString(),
+        detailCollectedAt: collectedAt,
       });
     } catch (error) {
       enriched.push({
@@ -526,25 +632,44 @@ async function sync(config) {
       }
     }
 
+    // 이용일 기준 오늘부터 30일 목록(모든 상태)을 연다.
+    const today = seoulDate();
+    await page.goto(monthListUrl(config.baseUrl, today, seoulDate(UPCOMING_DAYS - 1)), {
+      waitUntil: "domcontentloaded",
+      timeout: config.timeoutMs,
+    });
+    await waitForPageReady(page, config.timeoutMs);
     await ensureProductSelection(page, config.products, config.timeoutMs);
+    await page.waitForTimeout(1200);
+
+    const detailCache = loadDetailCache();
+    const budget = { remaining: DETAIL_FETCH_LIMIT };
+    const collectList = async (key, label) => {
+      let rows = dedupeByReservation(await collectRows(page))
+        .filter((row) => !row.productName || config.products.includes(row.productName))
+        .map((row) => ({
+          ...applyBookerRule(row),
+          filterType: key,
+          filterLabel: label,
+          collectedAt: new Date().toISOString(),
+        }));
+      if (config.detail) {
+        rows = await enrichRowsWithDetails(context, config.baseUrl, rows, config.timeoutMs, detailCache, budget);
+      }
+      return rows;
+    };
 
     const results = {};
+    results.upcoming = await collectList("upcoming", `이용일 ${UPCOMING_DAYS}일`);
+    Object.assign(results, splitUpcomingRows(results.upcoming, today));
     for (const filter of QUICK_FILTERS) {
       await activateQuickFilter(page, filter.label, config.timeoutMs);
-      let rows = dedupeByReservation(await collectRows(page)).map((row) => ({
-        ...applyBookerRule(row),
-        filterType: filter.key,
-        filterLabel: filter.label,
-        collectedAt: new Date().toISOString(),
-      }));
-      if (config.detail) {
-        rows = await enrichRowsWithDetails(context, config.baseUrl, rows, config.timeoutMs);
-      }
-      rows = filterRowsByQuickFilter(filter.key, rows);
-      results[filter.key] = rows;
+      results[filter.key] = filterRowsByQuickFilter(filter.key, await collectList(filter.key, filter.label));
     }
+    saveDetailCache(detailCache);
 
     const payload = {
+      upcomingRange: { startDate: today, endDate: seoulDate(UPCOMING_DAYS - 1) },
       syncedAt: new Date().toISOString(),
       baseUrl: config.baseUrl,
       products: config.products,
@@ -573,7 +698,11 @@ async function main() {
   await sync(config);
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
+}
+
+module.exports = { parseDetailFields, rowUseDate, splitUpcomingRows, monthListUrl };

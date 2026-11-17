@@ -12,9 +12,15 @@ internal sealed class AppStorage
         PropertyNameCaseInsensitive = true
     };
 
-    private readonly string _directory = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "YouthSpringStaffDashboard");
+    private readonly string _directory;
+
+    // 가상 시트 데모는 별도 폴더를 써서 실제 설정·기록을 건드리지 않는다.
+    public AppStorage(string folderName = "YouthSpringStaffDashboard")
+    {
+        _directory = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            folderName);
+    }
 
     private string SettingsPath => Path.Combine(_directory, "settings.json");
     private string StatePath => Path.Combine(_directory, "events.json");

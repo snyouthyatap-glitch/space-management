@@ -57,14 +57,13 @@ test("APPS_SCRIPT_READY.gs의 cleanNaverBookerName_도 같은 결과를 낸다",
   }
 });
 
-test("APPS_SCRIPT_READY.gs의 maskNaverPhone_는 가운데 자리를 가린다", () => {
-  const source = fs.readFileSync(path.join(__dirname, "..", "APPS_SCRIPT_READY.gs"), "utf8");
-  const pick = (name) => source.match(new RegExp(`function ${name}\\([^)]*\\) \\{[\\s\\S]*?\\n\\}`))[0];
-  const mask = new Function(`${pick("str_")}; ${pick("digits_")}; ${pick("maskNaverPhone_")}; return maskNaverPhone_;`)();
-  assert.equal(mask("010-1234-5678"), "010-****-5678");
-  assert.equal(mask("01012345678"), "010-****-5678");
-  assert.equal(mask("010-****-5678"), "010-****-5678");
-  assert.equal(mask(""), "");
+test("APPS_SCRIPT_READY.gs의 formatNaverPhone_는 번호를 가리지 않고 저장한다", () => {
+  const format = loadAppsScriptFunctions(["str_", "digits_", "formatNaverPhone_"], "formatNaverPhone_");
+  assert.equal(format("010-1234-5678"), "010-1234-5678");
+  assert.equal(format("01012345678"), "010-1234-5678");
+  assert.equal(format("0101235678"), "010-123-5678");
+  assert.equal(format("010-****-5678"), "010-****-5678");
+  assert.equal(format(""), "");
 });
 
 test("이용일시: 24시간제와 '26.11.11.수' 형태, '변경' 표시를 읽는다", () => {
@@ -87,13 +86,13 @@ test("서버 diffNaverReservationDetails_: 바뀐 값만 고친다", () => {
   const diff = loadAppsScriptFunctions(
     [
       "str_", "digits_", "pad2_", "normalizeTime_", "normalizeSheetTime_", "normalizeSheetDate_",
-      "safePositiveInteger_", "normalizeNameKey_", "cleanNaverBookerName_", "maskNaverPhone_",
+      "safePositiveInteger_", "normalizeNameKey_", "cleanNaverBookerName_", "formatNaverPhone_",
       "nowText_", "diffNaverReservationDetails_",
     ],
     "diffNaverReservationDetails_"
   );
   const current = {
-    status: "확정", bookerName: "정 변경", maskedPhone: "010-****-1234", usageDate: "2026-11-11",
+    status: "확정", bookerName: "정 변경", maskedPhone: "010-9999-1234", usageDate: "2026-11-11",
     startTime: "15:30", endTime: "17:30", placeName: "AI 커리어존 (청취Room1)", spaceType: "careerRoom1",
     headcount: "1", purpose: "면접 준비", rawUsageText: "26.11.11.수 15:30~17:30",
   };
@@ -112,6 +111,47 @@ test("서버 diffNaverReservationDetails_: 바뀐 값만 고친다", () => {
 
   const confirmed = diff({ ...current, status: "신청" }, sameButFormatted, "확정");
   assert.equal(confirmed.status, "확정");
+
+  // 예전에 가려 저장한 번호는 전체 번호로 고치고, 다른 사람 번호가 들어갔으면 바로잡는다.
+  assert.equal(diff({ ...current, maskedPhone: "010-****-1234" }, sameButFormatted, "확정").maskedPhone, "010-9999-1234");
+  assert.equal(diff(current, { ...sameButFormatted, maskedPhone: "010-5555-7070" }, "확정").maskedPhone, "010-5555-7070");
+  assert.deepEqual(diff(current, { ...sameButFormatted, maskedPhone: "010-****-1234" }, "확정"), {});
+});
+
+test("서버 직원 운영 목록: 취소·반려·노쇼 웹 예약도 보낸다", () => {
+  const visible = loadAppsScriptFunctions(
+    ["str_", "visibleReservationRequestStatus_", "staffCalendarReservationRequestStatus_"],
+    "staffCalendarReservationRequestStatus_"
+  );
+  for (const status of ["신청", "승인", "일지제출완료", "취소", "반려", "노쇼"]) assert.equal(visible(status), true, status);
+  assert.equal(visible(""), false);
+  const source = fs.readFileSync(path.join(__dirname, "..", "APPS_SCRIPT_READY.gs"), "utf8");
+  assert.match(source, /cancelled: isCancelledNaverStatus_\(row\.status\) && !isNoShowNaverStatus_\(row\.status\)/);
+});
+
+test("서버: 승인 안 한 신청은 시작 시간이 되면 자동 취소", () => {
+  const { createVirtualAppsScript } = require("../demo/virtual-apps-script");
+  const app = createVirtualAppsScript();
+  const { context, constants } = app;
+  const { SHEET_NAMES, HEADERS } = constants;
+  context.ensureDataSheetSchemas_();
+  const today = context.today_();
+  const at = (minutes) => context.Utilities.formatDate(new Date(Date.now() + minutes * 60000), "Asia/Seoul", "HH:mm");
+  const startedAt = at(-5);
+  const laterAt = at(60);
+  if (startedAt > laterAt) return; // 자정 근처에는 건너뛴다.
+  const add = (requestId, status, startTime) =>
+    context.appendObjectRow_(SHEET_NAMES.RESERVATION_REQUESTS, HEADERS.reservationRequests, {
+      requestId, status, name: "가짜", date: today, startTime, endTime: "23:59", spaceType: "careerRoom1",
+    });
+  add("r-started", "신청", startedAt);
+  add("r-later", "신청", laterAt);
+  add("r-approved", "승인", startedAt);
+  assert.equal(context.expireUnapprovedReservationRequests_(), 1);
+  const rows = context.getRowsAsObjects_(SHEET_NAMES.RESERVATION_REQUESTS, HEADERS.reservationRequests);
+  const status = Object.fromEntries(rows.map((row) => [row.requestId, row.status]));
+  assert.deepEqual(status, { "r-started": "취소", "r-later": "신청", "r-approved": "승인" });
+  assert.equal(rows.find((row) => row.requestId === "r-started").decidedBy, "system");
 });
 
 test("서버 실적 기간: 월별·기간 지정·최대 366일", () => {
@@ -139,6 +179,77 @@ test("서버 실적 기간: 월별·기간 지정·최대 366일", () => {
   assert.throws(() => api.resolvePerformanceRange_({ startDate: "2025-01-01", endDate: "2026-01-02" }), /최대 366일/);
   assert.throws(() => api.resolvePerformanceRange_({ startDate: "2026-02-30", endDate: "2026-03-01" }), /YYYY-MM-DD/);
   delete globalThis.PERFORMANCE_MAX_RANGE_DAYS;
+});
+
+test("상세 화면: 목록 행이 섞여 대리예약으로 보여도 이 예약의 전화번호를 쓴다", () => {
+  const { parseDetailFields } = require("./naver-booking-sync");
+  // 2026-11-14: 목록 컨테이너가 대리예약 행부터 시작해 일반 예약 3건이 모두 대리예약 연락처로 기록됐다.
+  const fields = [
+    { label: "전화번호", value: "예약번호" },
+    { label: "예약자", value: "이예시" },
+    { label: "전화번호", value: "010-2222-3333" },
+  ];
+  const parsed = parseDetailFields(fields, { proxyBooking: true, phone: "010-9999-0000" });
+  assert.equal(parsed.phone, "010-2222-3333");
+  assert.equal(parsed.proxyBooking, undefined);
+
+  const proxy = parseDetailFields(
+    [
+      { label: "예약자", value: "김예약대리예약" },
+      { label: "방문자", value: "이방문(010-3333-4444)" },
+      { label: "전화번호", value: "010-1111-2222" },
+    ],
+    {}
+  );
+  assert.equal(proxy.phone, "010-3333-4444");
+  assert.equal(proxy.proxyBooking, true);
+});
+
+test("상세 화면: 모든 칸을 잘리거나 붙지 않게 읽는다", () => {
+  const { parseDetailFields } = require("./naver-booking-sync");
+  // 2026-11-17 실제 상세 화면과 같은 칸 구성(이름·번호는 가짜). 화면 위쪽 메뉴 칸도 섞여 들어온다.
+  const parsed = parseDetailFields([
+    { label: "날짜 선택오늘취소적용", value: "로딩중" },
+    { label: "35건", value: "내려받기" },
+    { label: "예약자", value: "이예시" },
+    { label: "전화번호", value: "010-2222-3333" },
+    { label: "예약번호", value: "1400000001" },
+    { label: "상품", value: "AI 커리어존 (청취Room1)" },
+    { label: "이용일시", value: "2026. 11. 17.(화) 오후 4:00~오후 6:00(2시간)" },
+    { label: "이용 인원(명)", value: "3" },
+    { label: "이용 목적", value: "스터디 모임" },
+    { label: "확정", value: "2026. 11. 17.(화) 오전 11:58파트너센터 (운영자:abcd****)" },
+    { label: "신청", value: "2026. 11. 15.(일) 오후 4:53" },
+  ]);
+  assert.equal(parsed.bookerName, "이예시");
+  assert.equal(parsed.phone, "010-2222-3333");
+  assert.equal(parsed.reservationNo, "1400000001");
+  assert.equal(parsed.productName, "AI 커리어존 (청취Room1)");
+  assert.equal(parsed.useDateTime, "2026. 11. 17.(화) 오후 4:00~오후 6:00(2시간)");
+  assert.equal(parsed.headcount, 3);
+  assert.equal(parsed.purpose, "스터디 모임");
+  assert.equal(parsed.confirmedAt, "2026. 11. 17.(화) 오전 11:58");
+  assert.equal(parsed.requestedAt, "2026. 11. 15.(일) 오후 4:53");
+});
+
+test("한 달 목록: 이용일을 읽고 오늘이용·오늘취소를 골라낸다", () => {
+  const { rowUseDate, splitUpcomingRows, monthListUrl, parseDetailFields } = require("./naver-booking-sync");
+  assert.equal(rowUseDate({ useDateTime: "26.11.18.수 13:00~16:00" }), "2026-11-18");
+  assert.equal(rowUseDate({ useDateTime: "2026. 11. 7.(토) 오전 10:00~오후 12:00(2시간)" }), "2026-11-07");
+  assert.equal(rowUseDate({ useDateTime: "16:00~18:00" }), "");
+  const rows = [
+    { reservationNo: "1", status: "확정", useDateTime: "2026. 11. 17.(화) 오후 4:00~오후 6:00" },
+    { reservationNo: "2", status: "취소", useDateTime: "26.11.17.화 10:00~12:00" },
+    { reservationNo: "3", status: "확정", useDateTime: "26.11.18.수 10:00~12:00" },
+    { reservationNo: "4", status: "신청", useDateTime: "26.11.17.화 13:00~14:00" },
+  ];
+  const split = splitUpcomingRows(rows, "2026-11-17");
+  assert.deepEqual(split.today_use.map((row) => row.reservationNo), ["1"]);
+  assert.deepEqual(split.today_cancel.map((row) => row.reservationNo), ["2"]);
+  assert.match(monthListUrl("https://example.test/list", "2026-11-17", "2026-12-16"),
+    /dateDropdownType=MONTH&startDateTime=2026-11-17&endDateTime=2026-12-16&dateFilter=USEDATE/);
+  // 바뀐 예약은 상세 예약번호 옆에 '변경'이 붙어 온다(2026-11-17 실제 화면).
+  assert.equal(parseDetailFields([{ label: "예약번호", value: "1400000001변경" }]).reservationNo, "1400000001");
 });
 
 test("대리예약은 방문자 이름과 아래쪽 연락처를 쓴다", () => {
