@@ -88,6 +88,9 @@ internal sealed class Reservation
     [JsonPropertyName("bookerName")]
     public string BookerName { get; set; } = "";
 
+    [JsonPropertyName("phoneTail")]
+    public string PhoneTail { get; set; } = "";
+
     [JsonPropertyName("date")]
     public string Date { get; set; } = "";
 
@@ -120,6 +123,10 @@ internal sealed class CalendarEntry
 {
     [JsonPropertyName("id")]
     public string Id { get; set; } = "";
+
+    // 웹 예약 신청 시각(yyyy-MM-dd HH:mm:ss). 미승인 확인창에 쓴다.
+    [JsonPropertyName("requestedAt")]
+    public string RequestedAt { get; set; } = "";
 
     [JsonPropertyName("source")]
     public string Source { get; set; } = "";
@@ -162,6 +169,14 @@ internal sealed class CalendarEntry
 
     [JsonIgnore]
     public bool CheckedIn { get; set; }
+
+    // 서버 시트(네이버 예약)에 저장된 연락처 뒷 4자리. 서버가 회원 확인에 쓰는 값이다.
+    [JsonPropertyName("phoneTail")]
+    public string PhoneTail { get; set; } = "";
+
+    // 이번에 네이버에서 읽어 온 연락처 뒷 4자리(대리예약이면 방문자 연락처)
+    [JsonIgnore]
+    public string NaverPhoneTail { get; set; } = "";
 }
 
 internal sealed class StaffCheckIn
@@ -181,6 +196,8 @@ internal sealed class NaverBookingSnapshot
     public List<NaverBookingReservation> PendingConfirm { get; init; } = [];
     public List<NaverBookingReservation> TodayUse { get; init; } = [];
     public List<NaverBookingReservation> TodayCancel { get; init; } = [];
+    // 이용일 기준 오늘부터 30일 목록(모든 상태). 서버 '네이버 예약' 시트를 미리 맞추는 데 쓴다.
+    public List<NaverBookingReservation> Upcoming { get; init; } = [];
 }
 
 internal sealed class NaverBookingReservation
@@ -220,10 +237,25 @@ internal sealed class NaverReservationEnsureResult
     public string ReservationId { get; set; } = "";
 }
 
+internal sealed class NaverReservationEnsureBatchResult
+{
+    [JsonPropertyName("ok")]
+    public bool Ok { get; set; }
+
+    [JsonPropertyName("error")]
+    public string Error { get; set; } = "";
+
+    [JsonPropertyName("results")]
+    public List<NaverReservationEnsureResult> Results { get; set; } = [];
+}
+
 internal sealed class ReservationRequest
 {
     [JsonPropertyName("id")]
     public string Id { get; set; } = "";
+
+    [JsonPropertyName("requestedAt")]
+    public string RequestedAt { get; set; } = "";
 
     [JsonPropertyName("requestId")]
     public string RequestId { get; set; } = "";
@@ -383,6 +415,9 @@ internal sealed class AdminMember
 
     [JsonPropertyName("phone")]
     public string Phone { get; set; } = "";
+
+    [JsonPropertyName("phoneLastDigits")]
+    public string PhoneLastDigits { get; set; } = "";
 }
 
 // 일지 대리 제출(adminCompleteReservationUsage)의 동반 이용자 정보

@@ -140,6 +140,49 @@ internal sealed class AppsScriptClient
             response => response.Ok,
             response => response.Error);
 
+    // 여러 건을 한 번에 맞춘다. 예전 서버(묶음 요청 없음)면 null을 돌려준다.
+    public async Task<List<NaverReservationEnsureResult>?> EnsureNaverReservationsAsync(
+        DashboardSettings settings,
+        string password,
+        IReadOnlyList<NaverSheetSyncItem> items,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var response = await ExecuteAdminActionAsync<NaverReservationEnsureBatchResult>(
+                settings,
+                password,
+                "adminEnsureNaverReservations",
+                session => new
+                {
+                    adminSession = session,
+                    items = items.Select(item => new
+                    {
+                        reservationId = item.Reservation.ReservationNo,
+                        status = item.Status,
+                        bookerName = item.Entry.Name,
+                        maskedPhone = item.Reservation.Phone,
+                        usageDate = item.Entry.Date,
+                        startTime = item.Entry.StartTime,
+                        endTime = item.Entry.EndTime,
+                        placeName = item.Entry.PlaceName,
+                        spaceType = item.Entry.SpaceType,
+                        headcount = item.Entry.Headcount,
+                        purpose = item.Reservation.Purpose,
+                        rawUsageText = item.Reservation.UseDateTime
+                    }).ToList()
+                },
+                cancellationToken,
+                result => result.Ok,
+                result => result.Error);
+            return response.Results;
+        }
+        catch (InvalidOperationException exception) when (exception.Message.Contains("지원하지 않는 요청"))
+        {
+            return null;
+        }
+    }
+
     public Task<ReservationStatusUpdate> CompleteReservationUsageAsync(
         DashboardSettings settings,
         string password,

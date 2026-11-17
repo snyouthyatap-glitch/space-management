@@ -6,6 +6,8 @@
   "scripts": {
     "test": "node --test automation/*.test.js",
     "test:login": "node automation/naver-login.test.cjs",
+    "demo": "node demo/demo-server.js",
+    "demo:keep": "node demo/demo-server.js --keep",
     "naver:help": "node automation/naver-booking-sync.js --help",
     "naver:setup-login": "node automation/naver-booking-sync.js --setup-login",
     "naver:sync": "node automation/naver-booking-sync.js",

@@ -21,6 +21,9 @@ internal static class SelfTest
         TestNaverBookingParserSeparatesReservationRows();
         TestNaverBookerNameCleanup();
         TestNaverProxyBookingRow();
+        TestNoShowAndCancelStayVisible();
+        TestNaverSheetRowsCombineByReservationNo();
+        TestUpcomingSheetSyncItems();
         TestNaverTodayCancelRows();
         TestNaverSheetSyncItems();
         TestNaverChangedRowAnd24HourTime();
@@ -91,6 +94,49 @@ internal static class SelfTest
         {
             throw new InvalidOperationException("일지 미제출 상태 판별 테스트에 실패했습니다.");
         }
+
+        // 2026-11-17 운영 규칙: 노쇼는 시작 30분 뒤부터, 승인 안 한 신청은 시작 시간이 되면 취소.
+        var now = DateTime.Now;
+        CalendarEntry StartedAgo(int minutes, string status) => new()
+        {
+            Id = "web:" + minutes + status, Source = "reservationRequest", Date = now.ToString("yyyy-MM-dd"),
+            StartTime = now.AddMinutes(-minutes).ToString("HH:mm"),
+            EndTime = now.AddMinutes(-minutes).AddHours(3).ToString("HH:mm"),
+            Name = "시간테스트", Status = status
+        };
+        if (now.Hour is < 1 or > 19) return; // 날짜가 바뀌는 시간대에는 건너뛴다.
+        var rules = new[]
+        {
+            (Entry: StartedAgo(15, "승인"), Expected: "승인 완료"),
+            (Entry: StartedAgo(31, "승인"), Expected: "노쇼"),
+            (Entry: StartedAgo(-30, "신청"), Expected: "승인 대기"),
+            (Entry: StartedAgo(1, "신청"), Expected: "취소")
+        };
+        var wrong = rules.Where(rule => ReservationService.GetUnifiedStatus(rule.Entry) != rule.Expected)
+            .Select(rule => $"{rule.Entry.Id}={ReservationService.GetUnifiedStatus(rule.Entry)}")
+            .ToList();
+        if (wrong.Count > 0)
+            throw new InvalidOperationException("노쇼 30분·미승인 자동 취소 판별 테스트 실패: " + string.Join(", ", wrong));
+
+        // 신청 10분 뒤 미승인 확인창 대상: 10분 지났고, 아직 시작 전인 '신청'만.
+        CalendarEntry Requested(string id, int minutesAgo, string status, int startInMinutes) => new()
+        {
+            Id = id, Source = "reservationRequest", Status = status, Name = "확인창테스트",
+            RequestedAt = now.AddMinutes(-minutesAgo).ToString("yyyy-MM-dd HH:mm:ss"),
+            Date = now.AddMinutes(startInMinutes).ToString("yyyy-MM-dd"),
+            StartTime = now.AddMinutes(startInMinutes).ToString("HH:mm"),
+            EndTime = now.AddMinutes(startInMinutes + 60).ToString("HH:mm")
+        };
+        var reminders = ReservationService.FindUnapprovedRequests(
+            [
+                Requested("due", 11, "신청", 120),
+                Requested("too-soon", 5, "신청", 120),
+                Requested("approved", 30, "승인", 120),
+                Requested("started", 30, "신청", -5)
+            ],
+            now).Select(entry => entry.Id).ToList();
+        if (!reminders.SequenceEqual(["due"]))
+            throw new InvalidOperationException("미승인 확인창 대상 테스트 실패: " + string.Join(", ", reminders));
     }
 
     private static void TestWindowsPasswordProtection()
@@ -275,8 +321,8 @@ internal static class SelfTest
                   "rawText": "{{rawText}}"
                 }, {
                   "reservationNo": "1314868769",
-                  "bookerName": "안정준",
-                  "productName": "청년 커넥트룸",
+                  "bookerName": "",
+                  "productName": "",
                   "status": "확정",
                   "rawText": "{{rawText}}"
                 }],
@@ -498,6 +544,95 @@ internal static class SelfTest
         }
     }
 
+    // 2026-11-17: 목록이 시트의 네이버 줄을 버려서 직원이 처리한 상태가 사라졌다. 예약번호로 합친다.
+    private static void TestNaverSheetRowsCombineByReservationNo()
+    {
+        var day = DateTime.Today.AddDays(1).ToString("yyyy-MM-dd");
+        CalendarEntry Row(string id, string source, string name, string start, string status, bool cancelled = false, bool submitted = false) => new()
+        {
+            Id = id, Source = source, Date = day, StartTime = start, EndTime = start.Replace(":00", ":50"),
+            Name = name, PlaceName = "커넥트룸", SpaceType = "connectRoom", Status = status,
+            Cancelled = cancelled, Submitted = submitted, Headcount = 2
+        };
+        var merged = ReservationService.MergeCalendarEntries(
+            [
+                Row("naver:1", "naver", "가노쇼", "09:00", "노쇼"),          // 직원이 노쇼 처리
+                Row("naver:2", "naver", "나취소", "10:00", "확정"),          // 네이버에서 막 취소됨
+                Row("naver:3", "naver", "다재약", "11:00", "취소", cancelled: true), // 취소 후
+                Row("naver:4", "naver", "다재약", "11:00", "확정"),          // 같은 시간 재예약
+                Row("naver:5", "naver", "라일지", "12:00", "확정"),
+                Row("usage:9", "usage", "라일지", "12:00", "이용완료", submitted: true),
+                Row("naver:6", "naver", "마미래", "13:00", "확정")           // 네이버 목록에는 아직 없음
+            ],
+            [
+                Row("naverSmartPlace:1", "naverSmartPlace", "가노쇼", "09:00", "확정"),
+                Row("naverSmartPlace:2", "naverSmartPlace", "나취소", "10:00", "취소", cancelled: true),
+                Row("naverSmartPlace:4", "naverSmartPlace", "다재약", "11:00", "확정")
+            ],
+            []);
+        var shown = merged.Select(item => $"{item.Id}:{item.Name}:{ReservationService.GetUnifiedStatus(item)}").ToList();
+        var expected = new[]
+        {
+            "naver:1:가노쇼:노쇼", "naver:2:나취소:취소", "naver:3:다재약:취소", "naver:4:다재약:승인 완료",
+            "naver:5:라일지:승인 완료", "naver:6:마미래:승인 완료"
+        };
+        if (!shown.OrderBy(item => item, StringComparer.Ordinal).SequenceEqual(expected) ||
+            !merged.Single(item => item.Id == "naver:5").Submitted)
+            throw new InvalidOperationException("네이버 시트 줄 예약번호 합치기 테스트 실패: " + string.Join(", ", shown));
+    }
+
+    private static void TestUpcomingSheetSyncItems()
+    {
+        NaverBookingReservation Item(string no, string status, string product) => new()
+        {
+            ReservationNo = no, Status = status, BookerName = "가짜", ProductName = product,
+            UseDateTime = "2026. 12. 1.(화) 오후 2:00~오후 4:00", Phone = "010-0000-0000"
+        };
+        var items = NaverBookingParser.BuildSheetSyncItems(new NaverBookingSnapshot
+        {
+            Upcoming =
+            [
+                Item("1", "확정", "청년 커넥트룸"),
+                Item("2", "취소", "AI 커리어존 (청취Room1)"),
+                Item("3", "노쇼", "AI 커리어존 (청취Room2)"),
+                Item("4", "신청", "청년 커넥트룸"),
+                Item("5", "완료", "청년 커넥트룸"),
+                Item("6", "확정", "[동아리실] 3층 Joy1")
+            ]
+        });
+        var shown = string.Join(",", items.Select(item => $"{item.Reservation.ReservationNo}:{item.Status}:{item.Entry.Date}"));
+        if (shown != "1:확정:2026-12-01,2:취소:2026-12-01,3:노쇼:2026-12-01,5:이용완료:2026-12-01")
+            throw new InvalidOperationException("한 달 네이버 예약 시트 반영 대상 테스트 실패: " + shown);
+    }
+
+    // 2026-11-17: 노쇼가 '취소'로 보이거나, 네이버 '확정' 줄에 덮여 사라졌다.
+    private static void TestNoShowAndCancelStayVisible()
+    {
+        var day = DateTime.Today.ToString("yyyy-MM-dd");
+        CalendarEntry Entry(string id, string source, string status, bool cancelled, string start) => new()
+        {
+            Id = id, Source = source, Date = day, StartTime = start, EndTime = start.Replace(":00", ":50"),
+            Name = id.Contains("kim") ? "김노쇼" : id.Contains("lee") ? "이취소" : "박반려",
+            PlaceName = "커넥트룸", Status = status, Cancelled = cancelled
+        };
+        var merged = ReservationService.MergeCalendarEntries(
+            [
+                // 예전 서버처럼 노쇼에 cancelled가 붙어 와도 노쇼로 보여야 한다.
+                Entry("naver:kim", "naver", "노쇼", true, "09:00"),
+                Entry("naver:lee", "naver", "취소", true, "10:00"),
+                Entry("web:park", "reservationRequest", "반려", false, "11:00")
+            ],
+            [
+                Entry("naverSmartPlace:kim", "naverSmartPlace", "확정", false, "09:00"),
+                Entry("naverSmartPlace:lee", "naverSmartPlace", "확정", false, "10:00")
+            ],
+            []);
+        var statuses = merged.Select(item => $"{item.Name}:{ReservationService.GetUnifiedStatus(item)}").ToList();
+        var expected = new[] { "김노쇼:노쇼", "이취소:취소", "박반려:취소" };
+        if (!statuses.SequenceEqual(expected))
+            throw new InvalidOperationException("노쇼·취소 표시 테스트 실패: " + string.Join(", ", statuses));
+    }
+
     private static void TestNaverProxyBookingRow()
     {
         var parsed = NaverBookingParser.ParseReservationText(new NaverBookingReservation
@@ -513,6 +648,38 @@ internal static class SelfTest
         });
         if (parsed.Status != "확정" || entry.Name != "이방문" || entry.PlaceName != "커넥트룸" || entry.StartTime != "18:00")
             throw new InvalidOperationException($"네이버 대리예약 행 파싱 테스트 실패: '{entry.Name}' {entry.PlaceName} {entry.StartTime}");
+
+        // 2026-11-17: 예약이 한 건뿐이라 행 글자에 목록 머리글(신청일시·확정일시·취소일시)이 붙었다. 번호는 가짜.
+        var headerRow = "상태예약자전화번호예약번호이용일시상품신청일시확정일시취소일시확정이예시010-1111-2222140000000116:00~18:00AI 커리어존 (청취Room1)";
+        var headerParsed = NaverBookingParser.ParseReservationText(new NaverBookingReservation
+        {
+            ReservationNo = "1400000001",
+            RawText = headerRow
+        });
+        var headerEntry = NaverBookingParser.ConvertTodayUseReservation(new NaverBookingReservation
+        {
+            ReservationNo = "1400000001",
+            BookerName = "이예시",
+            RawText = headerRow
+        });
+        if (headerParsed.Status != "확정" || headerParsed.BookerName != "이예시" ||
+            headerEntry.Name != "이예시" || headerEntry.Status != "확정")
+            throw new InvalidOperationException(
+                $"네이버 머리글 섞인 행 파싱 테스트 실패: '{headerParsed.Status}' '{headerParsed.BookerName}' '{headerEntry.Name}'");
+
+        // 목록 줄에는 시간만 있어도 상세 화면의 이용일시(날짜·오전/오후·소요시간)를 쓴다.
+        var detailEntry = NaverBookingParser.ConvertTodayUseReservation(new NaverBookingReservation
+        {
+            ReservationNo = "1400000001",
+            BookerName = "이예시",
+            ProductName = "AI 커리어존 (청취Room2)",
+            UseDateTime = "2026. 11. 20.(금) 오후 4:00~오후 6:00(2시간)",
+            RawText = headerRow
+        });
+        if (detailEntry.Date != "2026-11-20" || detailEntry.StartTime != "16:00" || detailEntry.EndTime != "18:00" ||
+            detailEntry.PlaceName != "커리어존 Room2" || detailEntry.SpaceType != "careerRoom2")
+            throw new InvalidOperationException(
+                $"네이버 상세 이용일시 우선 테스트 실패: {detailEntry.Date} {detailEntry.StartTime}~{detailEntry.EndTime} {detailEntry.PlaceName}");
     }
 
     private static void TestReservationMergeByRepresentativeDateAndTime()

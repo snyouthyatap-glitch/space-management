@@ -29,7 +29,8 @@ internal static class NaverBookingParser
                 .Where(item => IsPendingApplication(item) && !IsOtherProduct(item))
                 .ToList(),
             TodayUse = ReadResultRows(results, "today_use"),
-            TodayCancel = ReadResultRows(results, "today_cancel")
+            TodayCancel = ReadResultRows(results, "today_cancel"),
+            Upcoming = ReadResultRows(results, "upcoming")
         };
     }
 
@@ -59,6 +60,33 @@ internal static class NaverBookingParser
     public static List<NaverSheetSyncItem> BuildSheetSyncItems(NaverBookingSnapshot snapshot)
     {
         var items = new List<NaverSheetSyncItem>();
+        // 한 달 목록이 있으면 그것으로 미래 예약까지 맞춘다(확정·이용완료 → 추가/고침, 취소·노쇼 → 상태 변경).
+        if (snapshot.Upcoming.Count > 0)
+        {
+            foreach (var reservation in snapshot.Upcoming
+                         .Where(item => !IsOtherProduct(item))
+                         .GroupBy(item => item.ReservationNo, StringComparer.Ordinal)
+                         .Select(group => group.First()))
+            {
+                var status = NormalizeStatus(reservation.Status);
+                var sheetStatus = status switch
+                {
+                    "확정" or "승인" => status,
+                    "완료" => "이용완료",
+                    "취소" => "취소",
+                    "노쇼" => "노쇼",
+                    _ => ""
+                };
+                if (sheetStatus == "") continue; // '신청'(확정대기)은 승인 전이라 시트에 넣지 않는다.
+                var entry = sheetStatus is "취소" or "노쇼"
+                    ? ConvertCancelledReservation(reservation)
+                    : ConvertTodayUseReservation(reservation);
+                if (IsSyncable(reservation, entry))
+                    items.Add(new NaverSheetSyncItem(reservation, entry, sheetStatus));
+            }
+            return items;
+        }
+
         foreach (var reservation in snapshot.TodayUse.Where(item => !IsOtherProduct(item)))
         {
             var status = NormalizeStatus(reservation.Status);
@@ -104,7 +132,8 @@ internal static class NaverBookingParser
     public static CalendarEntry ConvertTodayUseReservation(NaverBookingReservation item)
     {
         var parsed = ParseReservationText(item);
-        var useDateTime = FirstNonEmpty(parsed.UseDateTime, item.UseDateTime);
+        // 상세 화면의 이용일시(날짜 포함)를 먼저 쓴다. 목록 줄은 오늘 예약이면 날짜를 빼고 보여 준다.
+        var useDateTime = FirstNonEmpty(item.UseDateTime, parsed.UseDateTime);
         var timeRange = ParseTimeRange(useDateTime);
         return new CalendarEntry
         {
@@ -113,13 +142,21 @@ internal static class NaverBookingParser
             Date = ParseUsageDate(useDateTime) ?? DateTime.Today.ToString("yyyy-MM-dd"),
             StartTime = timeRange.StartTime,
             EndTime = timeRange.EndTime,
-            PlaceName = ShortProductName(FirstNonEmpty(parsed.ProductName, item.ProductName, "네이버 예약")),
-            SpaceType = SpaceTypeFromProductName(FirstNonEmpty(parsed.ProductName, item.ProductName)),
-            Name = CleanBookerName(FirstNonEmpty(parsed.BookerName, item.BookerName, "예약자")),
+            PlaceName = ShortProductName(FirstNonEmpty(item.ProductName, parsed.ProductName, "네이버 예약")),
+            SpaceType = SpaceTypeFromProductName(FirstNonEmpty(item.ProductName, parsed.ProductName)),
+            // 상세 화면에서 읽은 이름이 목록 글자보다 정확하다.
+            Name = CleanBookerName(FirstNonEmpty(item.BookerName, parsed.BookerName, "예약자")),
             Purpose = FirstNonEmpty(item.Purpose, "네이버 오늘 이용"),
             Headcount = Math.Max(1, item.Headcount),
-            Status = FirstNonEmpty(parsed.Status, item.Status, "확정")
+            Status = FirstNonEmpty(parsed.Status, item.Status, "확정"),
+            NaverPhoneTail = PhoneTail(item.Phone)
         };
+    }
+
+    public static string PhoneTail(string? phone)
+    {
+        var digits = Regex.Replace(phone ?? "", @"\D", "");
+        return digits.Length >= 4 ? digits[^4..] : "";
     }
 
     public static string BuildPendingReservationNotice(List<NaverBookingReservation> pending)
@@ -141,7 +178,7 @@ internal static class NaverBookingParser
 
         var statusName = Regex.Matches(
                 rawText,
-                @"(확정|신청|취소|완료|노쇼)([^0-9]+?)(01\d-\d{3,4}-\d{4})(?:01\d-\d{3,4}-\d{4})?" + Regex.Escape(item.ReservationNo))
+                @"(확정|신청|취소|완료|노쇼)((?:(?!확정|신청|취소|완료|노쇼|일시)[^0-9])+?)(01\d-\d{3,4}-\d{4})(?:01\d-\d{3,4}-\d{4})?" + Regex.Escape(item.ReservationNo))
             .Cast<Match>()
             .LastOrDefault();
         // 예약번호 바로 뒤의 이용일시. 두 가지 화면 형태를 모두 읽는다.
@@ -210,12 +247,13 @@ internal static class NaverBookingParser
             rows.Add(new NaverBookingReservation
             {
                 ReservationNo = reservationNo,
-                ProductName = FirstNonEmpty(parsed.ProductName, GetJsonString(item, "productName")),
+                ProductName = FirstNonEmpty(GetJsonString(item, "productName"), parsed.ProductName),
+                // 상세 화면에서 읽은 이름(bookerName)을 먼저 쓴다.
                 BookerName = FirstNonEmpty(
-                    NormalizeBookerName(parsed.BookerName),
-                    NormalizeBookerName(GetJsonString(item, "bookerName"))),
+                    NormalizeBookerName(GetJsonString(item, "bookerName")),
+                    NormalizeBookerName(parsed.BookerName)),
                 Status = FirstNonEmpty(parsed.Status, GetJsonString(item, "status")),
-                UseDateTime = FirstNonEmpty(parsed.UseDateTime, GetJsonString(item, "useDateTime")),
+                UseDateTime = FirstNonEmpty(GetJsonString(item, "useDateTime"), parsed.UseDateTime),
                 Phone = GetJsonString(item, "phone"),
                 // 네이버는 바뀐 예약의 예약번호 아래에 '변경'을 붙인다.
                 Changed = GetJsonBool(item, "changed") ||

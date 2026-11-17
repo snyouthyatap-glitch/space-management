@@ -170,6 +170,8 @@ function dispatchWebAction_(action, payload) {
       return handleAdminUpdateReservationStatus_(payload);
     case 'adminEnsureNaverReservation':
       return handleAdminEnsureNaverReservation_(payload);
+    case 'adminEnsureNaverReservations':
+      return handleAdminEnsureNaverReservations_(payload);
     case 'adminUpdateReservationRequestStatus':
       return handleAdminUpdateReservationRequestStatus_(payload);
     case 'adminMonthlyPerformance':
@@ -273,6 +275,7 @@ function requireAdminSession_(payload, refreshSession) {
 
 function handleAdminDashboardSnapshot_(payload) {
   const recentLimit = Math.min(500, Math.max(20, Number(payload && payload.limit) || 100));
+  expireUnapprovedReservationRequests_();
   const calendarEntries = getStaffCalendarEntries_(payload && payload.calendarMonth);
   return {
     ok: true,
@@ -291,11 +294,32 @@ function handleAdminDashboardSnapshot_(payload) {
 // - 취소: 시트에 있으면 '취소'로 바꿈
 // - 이미 일지가 제출됐거나 직원이 처리(이용완료·취소·노쇼)한 예약은 건드리지 않음
 // CSV 동기화를 깜빡해도 이용자 웹 '오늘 예약 일정'과 운영 캘린더에 오늘 예약이 보이게 하려는 것이다.
+// 직원 프로그램이 한 달치 네이버 예약을 몇 건씩 묶어 보낸다(요청 수를 줄이려고).
+function handleAdminEnsureNaverReservations_(payload) {
+  const items = Array.isArray(payload && payload.items) ? payload.items.slice(0, 20) : [];
+  return {
+    ok: true,
+    results: items.map(function(item) {
+      try {
+        return handleAdminEnsureNaverReservation_(item);
+      } catch (error) {
+        return {
+          ok: false,
+          reservationId: str_(item && item.reservationId),
+          error: error.message || String(error)
+        };
+      }
+    })
+  };
+}
+
 function handleAdminEnsureNaverReservation_(payload) {
   const reservationId = str_(payload && payload.reservationId).replace(/^naverSmartPlace:/, '');
   const status = str_(payload && payload.status, '확정');
   if (!reservationId) throw new Error('맞출 네이버 예약번호가 없습니다.');
-  const cancelled = status === '취소';
+  // 네이버에서 노쇼 처리한 예약도 취소처럼 시트 상태만 바꾼다.
+  const noShow = status === '노쇼';
+  const cancelled = status === '취소' || noShow;
   if (!cancelled && ['확정', '승인', '이용완료'].indexOf(status) === -1) {
     throw new Error('확정 또는 취소된 네이버 예약만 시트에 맞출 수 있습니다.');
   }
@@ -334,10 +358,10 @@ function handleAdminEnsureNaverReservation_(payload) {
         };
       }
       const changes = {
-        status: '취소',
+        status: noShow ? '노쇼' : '취소',
         completedAt: '',
         cancelledAt: now,
-        cancelReason: '네이버에서 취소됨(직원 프로그램 확인)',
+        cancelReason: noShow ? '네이버에서 노쇼 처리됨(직원 프로그램 확인)' : '네이버에서 취소됨(직원 프로그램 확인)',
         lastSyncedAt: now
       };
       updateNaverReservationRow_(sheet, existing.rowNumber, changes);
@@ -353,7 +377,7 @@ function handleAdminEnsureNaverReservation_(payload) {
       reservationId: reservationId,
       status: status,
       bookerName: cleanNaverBookerName_(payload.bookerName) || '예약자',
-      maskedPhone: maskNaverPhone_(payload.maskedPhone),
+      maskedPhone: formatNaverPhone_(payload.maskedPhone),
       usageDate: normalizeSheetDate_(payload.usageDate),
       startTime: normalizeSheetTime_(payload.startTime),
       endTime: normalizeSheetTime_(payload.endTime),
@@ -389,7 +413,7 @@ function diffNaverReservationDetails_(current, payload, status) {
     headcount: payload.headcount ? String(safePositiveInteger_(payload.headcount, 1)) : '',
     purpose: str_(payload.purpose),
     bookerName: cleanNaverBookerName_(payload.bookerName),
-    maskedPhone: maskNaverPhone_(payload.maskedPhone),
+    maskedPhone: formatNaverPhone_(payload.maskedPhone),
     rawUsageText: str_(payload.rawUsageText)
   };
   const changes = {};
@@ -401,7 +425,9 @@ function diffNaverReservationDetails_(current, payload, status) {
     else if (field === 'startTime' || field === 'endTime') before = normalizeSheetTime_(before);
     else before = str_(before);
     if (field === 'bookerName' && normalizeNameKey_(before) === normalizeNameKey_(next)) return;
-    if (field === 'maskedPhone' && digits_(before).slice(-4) === digits_(next).slice(-4)) return;
+    // 연락처: 같은 번호면 그대로 둔다. 가려진(****) 새 값은 끝자리가 같으면 덮어쓰지 않는다.
+    if (field === 'maskedPhone' && (digits_(before) === digits_(next) ||
+      (next.indexOf('*') !== -1 && digits_(before).slice(-4) === digits_(next).slice(-4)))) return;
     if (field === 'headcount' && Number(before) === Number(next)) return;
     // 상품명은 CSV('AI 커리어존 (청취Room1)')와 화면('커리어존 Room1') 표기가 달라서, 공간이 바뀐 경우에만 고친다.
     if (field === 'placeName' && str_(current.spaceType) === incoming.spaceType) return;
@@ -421,15 +447,17 @@ function clearNaverReservationMonthCache_(usageDate) {
   markOperationCalendarMonthPending_(usageDate);
   const monthKey = usageDate.slice(0, 7);
   if (isValidMonthKey_(monthKey)) {
-    CacheService.getScriptCache().remove('staff-dashboard-calendar-v1:' + monthKey);
+    CacheService.getScriptCache().remove('staff-dashboard-calendar-v4:' + monthKey);
   }
 }
 
 // CSV와 같은 형태로 가운데 자리를 가린다. 회원 확인은 뒷 4자리만 쓴다.
-function maskNaverPhone_(value) {
-  const digits = digits_(value);
-  if (digits.length < 8) return str_(value);
-  return digits.slice(0, 3) + '-****-' + digits.slice(-4);
+// 네이버 연락처를 가리지 않고 010-1234-5678 형태로 저장한다(시트는 직원만 본다).
+function formatNaverPhone_(value) {
+  const raw = str_(value);
+  const digits = digits_(raw);
+  if (raw.indexOf('*') !== -1 || digits.length < 10) return raw;
+  return digits.slice(0, 3) + '-' + digits.slice(3, digits.length - 4) + '-' + digits.slice(-4);
 }
 
 function handleAdminUpdateReservationStatus_(payload) {
@@ -476,13 +504,13 @@ function handleAdminUpdateReservationStatus_(payload) {
     markOperationCalendarMonthPending_(usageDate);
     const monthKey = usageDate.slice(0, 7);
     if (isValidMonthKey_(monthKey)) {
-      CacheService.getScriptCache().remove('staff-dashboard-calendar-v1:' + monthKey);
+      CacheService.getScriptCache().remove('staff-dashboard-calendar-v4:' + monthKey);
     }
     return {
       ok: true,
       reservationId: reservationId,
       status: status,
-      cancelled: isCancelledNaverStatus_(status)
+      cancelled: isCancelledNaverStatus_(status) && !isNoShowNaverStatus_(status)
     };
   });
 }
@@ -1068,6 +1096,7 @@ function getStaffTodayReservations_(calendarEntries) {
         source: str_(row.source),
         status: str_(row.status),
         bookerName: str_(row.name),
+        phoneTail: str_(row.phoneTail),
         spaceType: str_(row.spaceType),
         placeName: str_(row.placeName),
         date: date,
@@ -1102,7 +1131,8 @@ function getStaffReservationRequests_(calendarEntries) {
         placeName: str_(row.placeName),
         spaceType: str_(row.spaceType),
         headcount: safePositiveInteger_(row.headcount, 1),
-        purpose: str_(row.purpose)
+        purpose: str_(row.purpose),
+        requestedAt: str_(row.requestedAt)
       };
     });
 }
@@ -1151,7 +1181,7 @@ function getStaffCalendarEntries_(requestedMonth) {
     ? str_(requestedMonth)
     : fallbackMonth;
   const cache = CacheService.getScriptCache();
-  const cacheKey = 'staff-dashboard-calendar-v1:' + monthKey;
+  const cacheKey = 'staff-dashboard-calendar-v4:' + monthKey;
   const cached = cache.get(cacheKey);
   if (cached) {
     try {
@@ -1176,18 +1206,22 @@ function getStaffCalendarEntries_(requestedMonth) {
         placeName: getReservationSpaceLabel_(str_(row.spaceType)),
         spaceType: str_(row.spaceType),
         name: str_(row.bookerName),
+        // 회원 확인에 쓰는 시트 연락처 뒷 4자리(직원 프로그램 상세보기용)
+        phoneTail: digits_(row.maskedPhone).slice(-4),
         headcount: safePositiveInteger_(row.headcount, 1),
         purpose: str_(row.purpose),
         status: str_(row.status),
-        cancelled: isCancelledNaverStatus_(row.status),
+        // 노쇼는 취소와 따로 보여 준다(직원 프로그램 상태 필터의 '노쇼').
+        cancelled: isCancelledNaverStatus_(row.status) && !isNoShowNaverStatus_(row.status),
         submitted: Boolean(str_(row.usageLogId))
       };
     });
 
   getRowsAsObjects_(SHEET_NAMES.RESERVATION_REQUESTS, HEADERS.reservationRequests)
     .filter(function(row) {
+      // 직원 운영 목록에는 취소·반려·노쇼도 남겨 상태 필터로 볼 수 있게 한다.
       return normalizeSheetDate_(row.date).slice(0, 7) === monthKey &&
-        visibleReservationRequestStatus_(row.status);
+        staffCalendarReservationRequestStatus_(row.status);
     })
     .forEach(function(row) {
       entries.push({
@@ -1204,7 +1238,11 @@ function getStaffCalendarEntries_(requestedMonth) {
         purpose: str_(row.purpose),
         status: str_(row.status),
         cancelled: str_(row.status) === '취소' || str_(row.status) === '반려',
-        submitted: Boolean(str_(row.usageLogId)) || str_(row.status) === '일지제출완료'
+        submitted: Boolean(str_(row.usageLogId)) || str_(row.status) === '일지제출완료',
+        // 직원 프로그램이 '신청 10분 뒤 미승인' 확인창을 띄우는 데 쓴다.
+        requestedAt: row.requestedAt instanceof Date || str_(row.requestedAt)
+          ? normalizeDashboardDateTime_(row.requestedAt)
+          : ''
       });
     });
 
@@ -1637,6 +1675,7 @@ function handleSubmitVisitLog_(payload) {
 
 function handleGetTodayReservations_(payload) {
   const member = requireActiveMember_(payload.memberId);
+  expireUnapprovedReservationRequests_();
   return {
     ok: true,
     reservations: getTodayReservationsForMember_(member, today_())
@@ -1647,6 +1686,7 @@ function handleGetSpaceAvailability_(payload) {
   const spaceType = normalizeReservationSpaceType_(payload.spaceType, payload.placeId);
   const date = normalizeSheetDate_(payload.date);
   if (!isValidReservationDate_(date)) throw new Error('예약 날짜를 확인해 주세요.');
+  expireUnapprovedReservationRequests_();
   return {
     ok: true,
     date: date,
@@ -3377,7 +3417,7 @@ function clearReservationCaches_(date) {
   const monthKey = normalizeSheetDate_(date).slice(0, 7);
   if (!isValidMonthKey_(monthKey)) return;
   const cache = CacheService.getScriptCache();
-  cache.remove('staff-dashboard-calendar-v1:' + monthKey);
+  cache.remove('staff-dashboard-calendar-v4:' + monthKey);
   cache.remove('staff-dashboard-summary-v2');
 }
 
@@ -3965,6 +4005,11 @@ function isValidReservationDate_(value) {
     parsed.getUTCDate() === day;
 }
 
+function staffCalendarReservationRequestStatus_(status) {
+  const value = str_(status);
+  return visibleReservationRequestStatus_(value) || value === '취소' || value === '반려' || value === '노쇼';
+}
+
 function visibleReservationRequestStatus_(status) {
   const value = str_(status);
   return value === '신청' || value === '승인' || value === '일지제출완료';
@@ -4041,6 +4086,44 @@ function updateNaverReservationRow_(sheet, rowNumber, changes) {
     if (column >= 0) values[column] = changes[header] || '';
   });
   sheet.getRange(rowNumber, 1, 1, HEADERS.naverSync.length).setValues([values]);
+}
+
+// 승인하지 않은 신청('신청')은 이용 시작 시간이 되면 자동으로 '취소'한다.
+// 직원 프로그램 새로고침·이용자 예약 화면 조회 때 1분에 한 번만 확인한다.
+function expireUnapprovedReservationRequests_() {
+  const cache = CacheService.getScriptCache();
+  if (cache.get('reservation-request-expiry-checked')) return 0;
+  cache.put('reservation-request-expiry-checked', '1', 60);
+
+  return withScriptLock_(function() {
+    const sheet = getOrCreateSheet_(SHEET_NAMES.RESERVATION_REQUESTS, HEADERS.reservationRequests);
+    if (sheet.getLastRow() < 2) return 0;
+    const statusColumn = HEADERS.reservationRequests.indexOf('status') + 1;
+    const pendingRows = findRowsByColumnValue_(sheet, statusColumn, '신청');
+    if (pendingRows.length === 0) return 0;
+
+    const nowKey = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd HH:mm');
+    const now = nowText_();
+    let expired = 0;
+    pendingRows.forEach(function(rowNumber) {
+      const row = objectAtRow_(sheet, rowNumber, HEADERS.reservationRequests);
+      if (str_(row.status) !== '신청' || str_(row.usageLogId)) return;
+      const date = normalizeSheetDate_(row.date);
+      const startTime = normalizeSheetTime_(row.startTime);
+      if (!date || !startTime || date + ' ' + startTime > nowKey) return;
+      updateReservationRequestRow_(sheet, rowNumber, {
+        status: '취소',
+        decidedAt: now,
+        decidedBy: 'system',
+        decisionNote: '시작 시간까지 승인되지 않아 자동 취소',
+        updatedAt: now
+      });
+      clearReservationCaches_(date);
+      markOperationCalendarMonthPending_(date);
+      expired += 1;
+    });
+    return expired;
+  });
 }
 
 function updateReservationRequestRow_(sheet, rowNumber, changes) {

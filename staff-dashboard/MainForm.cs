@@ -11,7 +11,10 @@ internal sealed class MainForm : Form
     private const string ChromePath = @"C:\Program Files\Google\Chrome\Application\chrome.exe";
     private const string ChromeProfile = "Profile 6";
 
-    private readonly AppStorage _storage = new();
+    private readonly AppStorage _storage;
+    // 가상 시트 데모(--virtual-sheet=주소): 내 컴퓨터의 데모 서버와 가짜 네이버 결과 파일만 쓴다.
+    private readonly string _virtualSheetUrl;
+    private const string VirtualSheetPassword = "virtual-demo-1234";
     private readonly AppsScriptClient _client = new();
     private readonly System.Windows.Forms.Timer _pollTimer = new();
     private readonly System.Windows.Forms.Timer _naverBookingTimer = new();
@@ -69,17 +72,26 @@ internal sealed class MainForm : Form
     private readonly bool _demoMode;
     private readonly string _previewPath;
 
-    public MainForm(bool demoMode = false, string previewPath = "")
+    public MainForm(bool demoMode = false, string previewPath = "", string virtualSheetUrl = "")
     {
         _demoMode = demoMode;
         _previewPath = previewPath;
+        _virtualSheetUrl = virtualSheetUrl.Trim();
+        _storage = IsVirtualSheet ? new AppStorage("YouthSpringStaffDashboard-VirtualDemo") : new AppStorage();
         _settings = _storage.LoadSettings();
         _state = _storage.LoadState();
         _password = _storage.UnprotectPassword(_settings.ProtectedPassword);
         _naverId = _storage.UnprotectPassword(_settings.ProtectedNaverId);
         _naverPassword = _storage.UnprotectPassword(_settings.ProtectedNaverPassword);
+        if (IsVirtualSheet)
+        {
+            _settings.AppsScriptUrl = _virtualSheetUrl;
+            _password = VirtualSheetPassword;
+            _naverId = "";
+            _naverPassword = "";
+        }
 
-        Text = "청년이봄 직원 운영";
+        Text = IsVirtualSheet ? "청년이봄 직원 운영 · 가상 시트 데모" : "청년이봄 직원 운영";
         StartPosition = FormStartPosition.CenterScreen;
         MinimumSize = new Size(1100, 680);
         Size = new Size(1380, 860);
@@ -92,7 +104,8 @@ internal sealed class MainForm : Form
 
         _pollTimer.Interval = Math.Max(15, _settings.PollSeconds) * 1000;
         _pollTimer.Tick += async (_, _) => await RefreshDashboardAsync();
-        _naverBookingTimer.Interval = 5 * 60 * 1000;
+        // 네이버 예약은 1시간마다 갱신한다(한 달치 목록을 읽어 시트까지 맞춘다).
+        _naverBookingTimer.Interval = 60 * 60 * 1000;
         _naverBookingTimer.Tick += async (_, _) => await RefreshNaverBookingStatusAsync();
 
         Shown += async (_, _) =>
@@ -297,24 +310,170 @@ internal sealed class MainForm : Form
             .ToList();
         if (fresh.Count == 0) return;
 
-        string Describe(CalendarEntry entry) =>
-            $"{entry.StartTime} {entry.PlaceName} · {entry.Name} " +
-            (entry.CheckedIn ? "(출석함 → 일지 대리 제출)" : "(출석 기록 없음 → 노쇼 확인)");
-        var message = fresh.Count == 1
-            ? Describe(fresh[0])
-            : string.Join("\n", fresh.Take(3).Select(Describe)) +
-              (fresh.Count > 3 ? $"\n외 {fresh.Count - 3}건" : "");
-
-        _overdueBalloonShown = true;
-        System.Media.SystemSounds.Exclamation.Play();
-        _notifyIcon.ShowBalloonTip(
-            10000,
-            fresh.Count == 1
-                ? $"일지 미제출 · 시작 {ReservationService.OverdueUsageLogAlertMinutes}분 지남"
-                : $"일지 미제출 {fresh.Count}건 · 시작 {ReservationService.OverdueUsageLogAlertMinutes}분 지남",
-            message + "\n눌러서 확인",
-            ToolTipIcon.Warning);
         _statusLabel.Text = $"시작 {ReservationService.OverdueUsageLogAlertMinutes}분이 지났는데 일지가 없는 예약 {fresh.Count}건 · 노쇼 처리 또는 일지 대리 제출이 필요합니다.";
+        if (_demoMode) return;
+        // 화면을 그리는 도중에 창을 띄우지 않도록 다음 순서로 미룬다.
+        BeginInvoke(new Action(async () => await ShowOverdueDecisionsAsync(fresh)));
+    }
+
+    private readonly Queue<CalendarEntry> _overdueDecisionQueue = new();
+    private bool _overdueDecisionOpen;
+
+    // 시작 30분이 지났는데 일지가 없는 예약마다 '일지 미제출 확인 + 노쇼 여부'를 묻는다.
+    // 노쇼를 고르면 시트를 노쇼로 바꾸고, 네이버 예약이면 네이버 예약 화면을 열어 거기서도 노쇼 처리하게 한다.
+    private async Task ShowOverdueDecisionsAsync(IEnumerable<CalendarEntry> entries)
+    {
+        foreach (var entry in entries) _overdueDecisionQueue.Enqueue(entry);
+        if (_overdueDecisionOpen) return;
+        _overdueDecisionOpen = true;
+        try
+        {
+            while (_overdueDecisionQueue.Count > 0)
+            {
+                var entry = _overdueDecisionQueue.Dequeue();
+                if (ReservationService.GetUnifiedStatus(entry) is "취소" or "이용완료" or "이용중" || entry.Submitted)
+                    continue; // 그사이 처리된 예약
+                RestoreFromTray();
+                System.Media.SystemSounds.Exclamation.Play();
+                var choice = AskOverdueDecision(entry, _overdueDecisionQueue.Count);
+                if (choice == "노쇼")
+                {
+                    var changed = await UpdateEntryStatusAsync(entry, "노쇼", askConfirmation: false);
+                    if (changed && IsNaverEntry(entry))
+                    {
+                        OpenChrome(NaverBookingDetailUrl(entry));
+                        _statusLabel.Text = $"{entry.Name} 예약을 노쇼로 바꿨습니다. 열린 네이버 예약 화면에서도 노쇼 처리해 주세요.";
+                    }
+                }
+                else if (choice == "이용완료")
+                {
+                    await UpdateEntryStatusAsync(entry, "이용완료", askConfirmation: false);
+                }
+            }
+        }
+        finally
+        {
+            _overdueDecisionOpen = false;
+        }
+    }
+
+    private static bool IsNaverEntry(CalendarEntry entry) => entry.Source is "naver" or "naverSmartPlace";
+
+    private static string NaverBookingDetailUrl(CalendarEntry entry) =>
+        "https://partner.booking.naver.com/bizes/1002115/booking-list-view/bookings/" + StripKnownEntryPrefix(entry.Id);
+
+    // 반환값: "노쇼", "이용완료"(일지 대리 제출), "" (나중에)
+    private string AskOverdueDecision(CalendarEntry entry, int remaining)
+    {
+        using var dialog = new Form
+        {
+            Text = "일지 미제출 확인",
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            StartPosition = FormStartPosition.CenterParent,
+            MinimizeBox = false,
+            MaximizeBox = false,
+            ShowInTaskbar = false,
+            TopMost = true,
+            ClientSize = new Size(460, 250),
+            Font = Font,
+            BackColor = Color.White
+        };
+        var date = DateTime.TryParse(entry.Date, out var parsedDate) ? parsedDate.ToString("M월 d일") : entry.Date;
+        var title = new Label
+        {
+            Text = $"시작 {ReservationService.OverdueUsageLogAlertMinutes}분이 지났는데 일지가 없습니다",
+            Font = new Font(Font.FontFamily, 12F, FontStyle.Bold),
+            ForeColor = Color.FromArgb(168, 48, 48),
+            AutoSize = false,
+            Bounds = new Rectangle(20, 18, 420, 28)
+        };
+        var body = new Label
+        {
+            Text = $"{date} {entry.StartTime}~{entry.EndTime} · {entry.PlaceName}\n" +
+                   $"예약자 {entry.Name} · {(IsNaverEntry(entry) ? "네이버 예약" : "웹 예약")}\n" +
+                   (entry.CheckedIn ? "오늘 출석 기록이 있습니다 → 일지 대리 제출을 권장합니다." : "오늘 출석 기록이 없습니다.") +
+                   (IsNaverEntry(entry) ? "\n노쇼를 누르면 네이버 예약 화면이 열립니다. 거기서도 노쇼 처리해 주세요." : "") +
+                   (remaining > 0 ? $"\n\n확인할 예약이 {remaining}건 더 있습니다." : ""),
+            AutoSize = false,
+            Bounds = new Rectangle(20, 54, 420, 130)
+        };
+        Button MakeButton(string text, Color color, int left, string result)
+        {
+            var button = new Button
+            {
+                Text = text,
+                Bounds = new Rectangle(left, 196, 130, 36),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = color,
+                ForeColor = Color.White
+            };
+            button.FlatAppearance.BorderSize = 0;
+            button.Click += (_, _) => { dialog.Tag = result; dialog.Close(); };
+            return button;
+        }
+        var later = MakeButton("나중에", Color.FromArgb(117, 111, 108), 310, "");
+        dialog.Controls.AddRange([
+            title,
+            body,
+            MakeButton("노쇼 처리", Color.FromArgb(168, 48, 48), 20, "노쇼"),
+            MakeButton("일지 대리 제출", Color.FromArgb(196, 84, 20), 165, "이용완료"),
+            later
+        ]);
+        dialog.CancelButton = later;
+        dialog.ShowDialog(this);
+        return dialog.Tag as string ?? "";
+    }
+
+    private readonly HashSet<string> _unapprovedRemindedKeys = new(StringComparer.Ordinal);
+    private bool _unapprovedDialogOpen;
+
+    // 웹 예약 신청 후 10분이 지나도 승인하지 않았으면 확인창을 한 번 띄운다.
+    // (시작 시간까지 승인하지 않으면 서버가 자동으로 취소한다)
+    private void CheckUnapprovedRequests()
+    {
+        if (_demoMode || _unapprovedDialogOpen || !string.IsNullOrWhiteSpace(_previewPath)) return;
+        var allEntries = _calendarCacheByMonth.Values.SelectMany(list => list)
+            .Concat(_calendarEntries)
+            .GroupBy(entry => entry.Id, StringComparer.Ordinal)
+            .Select(group => group.First());
+        var fresh = ReservationService.FindUnapprovedRequests(allEntries, DateTime.Now)
+            .Where(entry => !_unapprovedRemindedKeys.Contains(entry.Id))
+            .ToList();
+        if (fresh.Count == 0) return;
+        foreach (var entry in fresh) _unapprovedRemindedKeys.Add(entry.Id);
+
+        string Describe(CalendarEntry entry) =>
+            $"· {DateTime.Parse(entry.Date):M월 d일} {entry.StartTime}~{entry.EndTime} {entry.PlaceName} · {entry.Name}";
+        var lines = string.Join("\n", fresh.Take(5).Select(Describe)) +
+                    (fresh.Count > 5 ? $"\n외 {fresh.Count - 5}건" : "");
+
+        _unapprovedDialogOpen = true;
+        try
+        {
+            RestoreFromTray();
+            System.Media.SystemSounds.Exclamation.Play();
+            var answer = MessageBox.Show(
+                this,
+                $"신청 후 {ReservationService.UnapprovedRequestReminderMinutes}분이 지났는데 아직 승인하지 않은 웹 예약이 {fresh.Count}건 있습니다.\n\n" +
+                lines +
+                "\n\n시작 시간까지 승인하지 않으면 자동으로 취소됩니다.\n지금 확인할까요?",
+                "승인하지 않은 예약 신청",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning,
+                MessageBoxDefaultButton.Button1);
+            if (answer != DialogResult.Yes) return;
+
+            // 첫 신청 날짜로 이동하고 '승인 대기'만 보여 준다.
+            var first = DateTime.Parse(fresh[0].Date);
+            _visibleCalendarMonth = new DateTime(first.Year, first.Month, 1);
+            var pendingIndex = _reservationStatusFilter.Items.IndexOf("승인 대기");
+            if (pendingIndex >= 0) _reservationStatusFilter.SelectedIndex = pendingIndex;
+            _ = SelectCalendarDateAsync(first);
+        }
+        finally
+        {
+            _unapprovedDialogOpen = false;
+        }
     }
 
     private void ShowTodayOverdueReservations()
@@ -1097,6 +1256,21 @@ internal sealed class MainForm : Form
         AddDetailRow(details, "구분", FormatReservationSource(entry.Source));
         AddDetailRow(details, "목적", string.IsNullOrWhiteSpace(entry.Purpose) ? "-" : entry.Purpose);
 
+        // 일지 대리 제출 때 서버는 '시트 연락처' 끝자리와 '회원 끝자리'를 비교한다.
+        Label? memberTailLabel = null;
+        if (entry.Source is "naver" or "naverSmartPlace")
+        {
+            AddDetailRow(details, "시트 연락처", FormatPhoneTail(entry.PhoneTail, "시트에 없음"));
+            AddDetailRow(details, "네이버 연락처", FormatPhoneTail(entry.NaverPhoneTail, "-"));
+            memberTailLabel = AddDetailRow(details, "회원 끝자리", "확인 중...");
+            dialog.Size = new Size(520, 680);
+            dialog.Shown += async (_, _) =>
+            {
+                var text = await DescribeMemberPhoneTailAsync(entry);
+                if (!memberTailLabel.IsDisposed) memberTailLabel.Text = text;
+            };
+        }
+
         var closeButton = new Button
         {
             Text = "닫기",
@@ -1113,7 +1287,34 @@ internal sealed class MainForm : Form
         dialog.ShowDialog(this);
     }
 
-    private static void AddDetailRow(TableLayoutPanel details, string labelText, string value)
+    private static string FormatPhoneTail(string tail, string emptyText) =>
+        string.IsNullOrWhiteSpace(tail) ? emptyText : "끝자리 " + tail;
+
+    private async Task<string> DescribeMemberPhoneTailAsync(CalendarEntry entry)
+    {
+        try
+        {
+            using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            var members = await _client.LookupMembersAsync(_settings, _password, entry.Name, cancellation.Token);
+            if (members.Count == 0) return "같은 이름의 회원 없음";
+            var tails = members
+                .Select(member => FirstNonEmpty(member.PhoneLastDigits, NaverBookingParser.PhoneTail(member.Phone)))
+                .ToList();
+            var sheetTail = entry.PhoneTail;
+            var verdict = string.IsNullOrWhiteSpace(sheetTail)
+                ? "시트 연락처가 없어 이름만 비교"
+                : tails.Contains(sheetTail) ? "시트와 일치" : "시트와 다름";
+            var list = string.Join(", ", tails.Select(tail => string.IsNullOrWhiteSpace(tail) ? "없음" : tail));
+            var people = members.Count > 1 ? $" (동명이인 {members.Count}명)" : "";
+            return $"{list}{people} · {verdict}";
+        }
+        catch (Exception exception)
+        {
+            return "확인 실패 · " + exception.Message;
+        }
+    }
+
+    private static Label AddDetailRow(TableLayoutPanel details, string labelText, string value)
     {
         var row = details.RowCount;
         details.RowCount++;
@@ -1126,14 +1327,16 @@ internal sealed class MainForm : Form
             Font = new Font("맑은 고딕", 9F, FontStyle.Bold),
             TextAlign = ContentAlignment.MiddleLeft
         }, 0, row);
-        details.Controls.Add(new Label
+        var valueLabel = new Label
         {
             Text = value,
             Dock = DockStyle.Fill,
             ForeColor = Color.FromArgb(52, 48, 46),
             TextAlign = ContentAlignment.MiddleLeft,
             AutoEllipsis = true
-        }, 1, row);
+        };
+        details.Controls.Add(valueLabel, 1, row);
+        return valueLabel;
     }
 
     private static string FormatReservationSource(string source) => source switch
@@ -1335,7 +1538,9 @@ internal sealed class MainForm : Form
             _checkInsByMonth[requestedMonth] = snapshot.CheckIns ?? [];
             var smartPlaceEntries = _calendarEntries.Where(IsSmartPlaceNaverEntry).ToList();
             var mergedEntries = ReservationService.MergeCalendarEntries(
-                snapshot.CalendarEntries.Where(item => !IsSheetNaverEntry(item)),
+                // 시트의 네이버 줄도 쓴다(직원이 처리한 노쇼·취소, 일지 연결, 지난 날짜·미래 예약).
+                // 네이버에서 읽은 줄과는 예약번호로 합친다(ReservationService.CombineNaverSources).
+                snapshot.CalendarEntries,
                 ConvertTodayReservations(snapshot.TodayReservations).Where(item => !IsSheetNaverEntry(item)),
                 ConvertReservationRequests(snapshot.ReservationRequests).Concat(smartPlaceEntries));
             _calendarCacheByMonth[requestedMonth] = mergedEntries.ToList();
@@ -1595,6 +1800,7 @@ internal sealed class MainForm : Form
             PlaceName = item.PlaceName,
             SpaceType = item.SpaceType,
             Name = item.BookerName,
+            PhoneTail = item.PhoneTail,
             Purpose = item.Purpose,
             Headcount = item.Headcount,
             Status = item.Status,
@@ -1616,30 +1822,36 @@ internal sealed class MainForm : Form
             Purpose = item.Purpose,
             Headcount = item.Headcount,
             Status = string.IsNullOrWhiteSpace(item.Status) ? "신청" : item.Status,
-            Submitted = item.Submitted
+            Submitted = item.Submitted,
+            RequestedAt = item.RequestedAt
         })
         .Where(item => !string.IsNullOrWhiteSpace(item.Id) && !string.IsNullOrWhiteSpace(item.Date))
         .ToList();
 
     private async Task UpdateSelectedReservationStatusAsync(string status)
     {
-        if (_updatingReservationStatus ||
-            _reservationsGrid.SelectedRows.Count == 0 ||
-            _reservationsGrid.SelectedRows[0].Tag is not CalendarEntry entry ||
-            !CanChangeEntryStatus(entry))
+        if (_reservationsGrid.SelectedRows.Count == 0 ||
+            _reservationsGrid.SelectedRows[0].Tag is not CalendarEntry entry)
         {
             return;
         }
+        await UpdateEntryStatusAsync(entry, status, askConfirmation: true);
+    }
+
+    // 반환값: 상태를 바꿨으면 true
+    private async Task<bool> UpdateEntryStatusAsync(CalendarEntry entry, string status, bool askConfirmation)
+    {
+        if (_updatingReservationStatus || !CanChangeEntryStatus(entry)) return false;
 
         if (StatusMatches(entry, status))
         {
             _statusLabel.Text = $"예약 {entry.Id}은(는) 이미 {status} 상태입니다.";
-            return;
+            return false;
         }
 
-        if (!IsAllowedStatusForEntry(entry, status)) return;
+        if (!IsAllowedStatusForEntry(entry, status)) return false;
 
-        if (status is "취소" or "노쇼" or "반려")
+        if (askConfirmation && status is "취소" or "노쇼" or "반려")
         {
             var confirmed = MessageBox.Show(
                 this,
@@ -1649,7 +1861,7 @@ internal sealed class MainForm : Form
                 MessageBoxButtons.YesNo,
                 MessageBoxIcon.Warning,
                 MessageBoxDefaultButton.Button2);
-            if (confirmed != DialogResult.Yes) return;
+            if (confirmed != DialogResult.Yes) return false;
         }
 
         _updatingReservationStatus = true;
@@ -1696,6 +1908,7 @@ internal sealed class MainForm : Form
         }
 
         if (updated) await RefreshDashboardAsync();
+        return updated;
     }
 
     private async Task<ReservationStatusUpdate> CompleteReservationUsageAsync(
@@ -2048,6 +2261,13 @@ internal sealed class MainForm : Form
 
     private bool ShowSettings()
     {
+        if (IsVirtualSheet)
+        {
+            // 데모에서 실제 서버 주소로 바뀌지 않게 연결 설정을 막는다.
+            MessageBox.Show(this, "가상 시트 데모에서는 연결 설정을 바꿀 수 없습니다.\n데모 주소: " + _virtualSheetUrl,
+                "가상 시트 데모", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return false;
+        }
         using var dialog = new SettingsForm(
             _settings,
             _password,
@@ -2143,8 +2363,11 @@ internal sealed class MainForm : Form
         _naverBookingStatusLabel.Text = "네이버 확인 중...";
         try
         {
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(90));
-            var result = await RunNaverBookingSyncAsync(repoRoot, _naverId, _naverPassword, timeout.Token);
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(180));
+            // 가상 시트 데모는 실제 네이버를 열지 않고 데모 서버의 가짜 결과 파일을 읽는다.
+            var result = IsVirtualSheet
+                ? (ExitCode: 0, OutputText: "가상 시트 데모: 가짜 네이버 결과 사용", ErrorText: "")
+                : await RunNaverBookingSyncAsync(repoRoot, _naverId, _naverPassword, timeout.Token);
             LogNaverRun("네이버 예약 확인", result.ExitCode, result.OutputText, result.ErrorText);
             if (result.ExitCode != 0)
             {
@@ -2159,7 +2382,7 @@ internal sealed class MainForm : Form
                 return;
             }
 
-            var outputPath = Path.Combine(repoRoot, "outputs", "naver-booking-sync.json");
+            var outputPath = NaverOutputPath(repoRoot);
             var naverSnapshot = NaverBookingParser.ReadSnapshot(outputPath);
             _lastNaverBookingSnapshot = naverSnapshot;
             _naverBookingCheckedAt = DateTime.Now;
@@ -2222,7 +2445,42 @@ internal sealed class MainForm : Form
     {
         if (_demoMode || string.IsNullOrWhiteSpace(_password)) return 0;
         var changed = 0;
-        foreach (var item in NaverBookingParser.BuildSheetSyncItems(snapshot))
+        var pending = NaverBookingParser.BuildSheetSyncItems(snapshot)
+            .Where(item => !_naverSheetSyncedKeys.Contains(item.Key))
+            .ToList();
+        // 새 서버는 5건씩 묶어 받는다. 예전 서버면 아래에서 한 건씩 보낸다.
+        var batchSupported = true;
+        foreach (var chunk in pending.Chunk(5))
+        {
+            if (!batchSupported) break;
+            try
+            {
+                using var batchTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+                var results = await _client.EnsureNaverReservationsAsync(_settings, _password, chunk, batchTimeout.Token);
+                if (results is null) { batchSupported = false; break; }
+                foreach (var (item, result) in chunk.Zip(results))
+                {
+                    if (!result.Ok)
+                    {
+                        LogNaverRun($"네이버 예약 시트 반영 · {item.Reservation.ReservationNo}", -1, "", result.Error);
+                        continue;
+                    }
+                    _naverSheetSyncedKeys.Add(item.Key);
+                    if (result.Created || result.Updated) changed++;
+                }
+            }
+            catch (Exception exception)
+            {
+                LogNaverRun("네이버 예약 시트 묶음 반영", -1, "", exception.Message);
+            }
+        }
+        if (batchSupported)
+        {
+            if (changed > 0) _ = RefreshDashboardAsync();
+            return changed;
+        }
+
+        foreach (var item in pending)
         {
             if (_naverSheetSyncedKeys.Contains(item.Key)) continue;
             try
@@ -2333,7 +2591,7 @@ internal sealed class MainForm : Form
             var repoRoot = FindRepositoryRoot();
             if (!string.IsNullOrWhiteSpace(repoRoot))
             {
-                var outputPath = Path.Combine(repoRoot, "outputs", "naver-booking-sync.json");
+                var outputPath = NaverOutputPath(repoRoot);
                 snapshot = NaverBookingParser.ReadSnapshot(outputPath);
                 _lastNaverBookingSnapshot = snapshot;
             }
@@ -2564,7 +2822,7 @@ internal sealed class MainForm : Form
     {
         var repoRoot = FindRepositoryRoot();
         if (string.IsNullOrWhiteSpace(repoRoot)) return;
-        var outputPath = Path.Combine(repoRoot, "outputs", "naver-booking-sync.json");
+        var outputPath = NaverOutputPath(repoRoot);
         try
         {
             var snapshot = NaverBookingParser.ReadSnapshot(outputPath);
@@ -2588,6 +2846,13 @@ internal sealed class MainForm : Form
                 !line.StartsWith(">", StringComparison.Ordinal) &&
                 !line.StartsWith("npm notice", StringComparison.OrdinalIgnoreCase) &&
                 !line.StartsWith("npm warn", StringComparison.OrdinalIgnoreCase)) ?? "";
+
+    private bool IsVirtualSheet => !string.IsNullOrWhiteSpace(_virtualSheetUrl);
+
+    // 네이버 결과 파일. 가상 시트 데모에서는 데모 서버가 만든 가짜 결과를 읽는다.
+    private string NaverOutputPath(string repoRoot) => IsVirtualSheet
+        ? Path.Combine(repoRoot, "outputs", "demo", "naver-booking-sync.json")
+        : Path.Combine(repoRoot, "outputs", "naver-booking-sync.json");
 
     private static string FindRepositoryRoot()
     {
@@ -2638,7 +2903,11 @@ internal sealed class MainForm : Form
         _notifyIcon.BalloonTipClosed += (_, _) => _overdueBalloonShown = false;
 
         // 서버 새로고침이 없어도 시간이 지나 30분을 넘기는 예약을 놓치지 않도록 1분마다 확인한다.
-        _overdueCheckTimer.Tick += (_, _) => CheckOverdueUsageLogs();
+        _overdueCheckTimer.Tick += (_, _) =>
+        {
+            CheckOverdueUsageLogs();
+            CheckUnapprovedRequests();
+        };
         _overdueCheckTimer.Start();
     }
 
