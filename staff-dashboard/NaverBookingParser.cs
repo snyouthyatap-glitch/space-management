@@ -27,6 +27,7 @@ internal static class NaverBookingParser
         {
             PendingConfirm = ReadResultRows(results, "pending_confirm")
                 .Where(item => IsPendingApplication(item) && !IsOtherProduct(item))
+                .Where(item => IsWithinPendingNoticeWindow(item, DateTime.Today))
                 .ToList(),
             TodayUse = ReadResultRows(results, "today_use"),
             TodayCancel = ReadResultRows(results, "today_cancel"),
@@ -165,6 +166,16 @@ internal static class NaverBookingParser
             .GroupBy(item => string.IsNullOrWhiteSpace(item.ProductName) ? "예약" : item.ProductName)
             .Select(group => $"{ShortProductName(group.Key)} {group.Count()}건");
         return string.Join(" · ", counts) + "\n프로그램에서 내용을 확인해 주세요.";
+    }
+
+    // 네이버 확정대기 알림(예약신청 버튼 숫자·알림·신청 창)은 이용일이 오늘부터 7일 뒤까지인 건만 보여 준다.
+    public const int PendingNoticeDays = 7;
+
+    public static bool IsWithinPendingNoticeWindow(NaverBookingReservation item, DateTime today)
+    {
+        var useDate = ParseUsageDate(FirstNonEmpty(item.UseDateTime, ParseReservationText(item).UseDateTime));
+        if (useDate is null || !DateTime.TryParse(useDate, out var date)) return true; // 날짜를 모르면 놓치지 않게 보여 준다.
+        return date.Date >= today.Date && date.Date <= today.Date.AddDays(PendingNoticeDays);
     }
 
     public static bool IsPendingApplication(NaverBookingReservation item) =>

@@ -13,6 +13,10 @@ internal static class Program
 
         ApplicationConfiguration.Initialize();
 
+        // 자동 업데이트로 다시 켜진 경우: 이전 프로그램이 끝날 때까지 기다린 뒤 실행 잠금을 잡는다.
+        var justUpdated = AppUpdater.WaitForPreviousProcess(args);
+        AppUpdater.CleanupOldCopy(Environment.ProcessPath);
+
         // 가상 시트 데모: --virtual-sheet=http://127.0.0.1:8787/exec (demo/demo-server.js)
         var virtualSheetUrl = args
             .FirstOrDefault(argument => argument.StartsWith("--virtual-sheet=", StringComparison.OrdinalIgnoreCase))
@@ -50,7 +54,7 @@ internal static class Program
         var previewPath = args
             .FirstOrDefault(argument => argument.StartsWith("--preview=", StringComparison.OrdinalIgnoreCase))
             ?.Substring("--preview=".Length) ?? "";
-        Application.Run(new MainForm(demoMode, previewPath, virtualSheetUrl));
+        Application.Run(new MainForm(demoMode, previewPath, virtualSheetUrl, justUpdated));
         return 0;
     }
 

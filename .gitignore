@@ -11,6 +11,7 @@ staff-dashboard/obj/
 staff-dashboard/preview.png
 staff-dashboard/publish/
 staff-dashboard/publish-*/
+staff-dashboard/release/
 node_modules/
 outputs/
 automation/.naver-booking-state/
