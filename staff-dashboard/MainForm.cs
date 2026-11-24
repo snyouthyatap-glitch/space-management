@@ -72,8 +72,9 @@ internal sealed class MainForm : Form
     private readonly bool _demoMode;
     private readonly string _previewPath;
 
-    public MainForm(bool demoMode = false, string previewPath = "", string virtualSheetUrl = "")
+    public MainForm(bool demoMode = false, string previewPath = "", string virtualSheetUrl = "", bool justUpdated = false)
     {
+        _justUpdated = justUpdated;
         _demoMode = demoMode;
         _previewPath = previewPath;
         _virtualSheetUrl = virtualSheetUrl.Trim();
@@ -148,6 +149,22 @@ internal sealed class MainForm : Form
             _pollTimer.Start();
             _naverBookingTimer.Start();
             _ = RefreshNaverBookingStatusAsync();
+
+            if (_justUpdated)
+            {
+                _notifyIcon.ShowBalloonTip(5000, "청년이봄 직원 운영", "새 버전으로 업데이트했습니다.", ToolTipIcon.Info);
+                _storage.AppendDiagnosticLog($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] 자동 업데이트 완료");
+            }
+            // 켜고 1분 뒤 처음 확인하고, 그다음부터 10분마다 확인한다.
+            _updateCheckTimer.Tick += (_, _) =>
+            {
+                // 업데이트 점검(YOUTHSPRING_UPDATE_TEST=1) 때만 30초마다 확인한다.
+                _updateCheckTimer.Interval = Environment.GetEnvironmentVariable("YOUTHSPRING_UPDATE_TEST") == "1"
+                    ? 30 * 1000
+                    : 10 * 60 * 1000;
+                TryAutoUpdate();
+            };
+            _updateCheckTimer.Start();
         };
 
         Resize += (_, _) =>
@@ -311,7 +328,7 @@ internal sealed class MainForm : Form
         if (fresh.Count == 0) return;
 
         _statusLabel.Text = $"시작 {ReservationService.OverdueUsageLogAlertMinutes}분이 지났는데 일지가 없는 예약 {fresh.Count}건 · 노쇼 처리 또는 일지 대리 제출이 필요합니다.";
-        if (_demoMode) return;
+        if (_demoMode || _closingForUpdate) return;
         // 화면을 그리는 도중에 창을 띄우지 않도록 다음 순서로 미룬다.
         BeginInvoke(new Action(async () => await ShowOverdueDecisionsAsync(fresh)));
     }
@@ -328,7 +345,7 @@ internal sealed class MainForm : Form
         _overdueDecisionOpen = true;
         try
         {
-            while (_overdueDecisionQueue.Count > 0)
+            while (_overdueDecisionQueue.Count > 0 && !_closingForUpdate)
             {
                 var entry = _overdueDecisionQueue.Dequeue();
                 if (ReservationService.GetUnifiedStatus(entry) is "취소" or "이용완료" or "이용중" || entry.Submitted)
@@ -336,6 +353,7 @@ internal sealed class MainForm : Form
                 RestoreFromTray();
                 System.Media.SystemSounds.Exclamation.Play();
                 var choice = AskOverdueDecision(entry, _overdueDecisionQueue.Count);
+                if (_closingForUpdate) break;
                 if (choice == "노쇼")
                 {
                     var changed = await UpdateEntryStatusAsync(entry, "노쇼", askConfirmation: false);
@@ -357,6 +375,42 @@ internal sealed class MainForm : Form
         }
     }
 
+    // 알림용 예/아니오 창. 자동 업데이트 때 닫아도 되도록 표시해 둔다(다시 켜지면 알림이 다시 뜬다).
+    private bool AskReminder(string title, string message, string yesText, string noText)
+    {
+        using var dialog = new Form
+        {
+            Text = title,
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            StartPosition = FormStartPosition.CenterParent,
+            MinimizeBox = false,
+            MaximizeBox = false,
+            ShowInTaskbar = false,
+            TopMost = true,
+            ClientSize = new Size(480, 280),
+            Font = Font,
+            BackColor = Color.White,
+            Tag = SafeToCloseForUpdate
+        };
+        var body = new Label { Text = message, AutoSize = false, Bounds = new Rectangle(20, 18, 440, 196) };
+        var yes = new Button
+        {
+            Text = yesText, Bounds = new Rectangle(214, 226, 120, 36), FlatStyle = FlatStyle.Flat,
+            BackColor = Color.FromArgb(74, 156, 68), ForeColor = Color.White, DialogResult = DialogResult.Yes
+        };
+        var no = new Button
+        {
+            Text = noText, Bounds = new Rectangle(342, 226, 120, 36), FlatStyle = FlatStyle.Flat,
+            BackColor = Color.FromArgb(117, 111, 108), ForeColor = Color.White, DialogResult = DialogResult.No
+        };
+        yes.FlatAppearance.BorderSize = 0;
+        no.FlatAppearance.BorderSize = 0;
+        dialog.Controls.AddRange([body, yes, no]);
+        dialog.AcceptButton = yes;
+        dialog.CancelButton = no;
+        return dialog.ShowDialog(this) == DialogResult.Yes;
+    }
+
     private static bool IsNaverEntry(CalendarEntry entry) => entry.Source is "naver" or "naverSmartPlace";
 
     private static string NaverBookingDetailUrl(CalendarEntry entry) =>
@@ -365,6 +419,7 @@ internal sealed class MainForm : Form
     // 반환값: "노쇼", "이용완료"(일지 대리 제출), "" (나중에)
     private string AskOverdueDecision(CalendarEntry entry, int remaining)
     {
+        var choice = "";
         using var dialog = new Form
         {
             Text = "일지 미제출 확인",
@@ -408,7 +463,7 @@ internal sealed class MainForm : Form
                 ForeColor = Color.White
             };
             button.FlatAppearance.BorderSize = 0;
-            button.Click += (_, _) => { dialog.Tag = result; dialog.Close(); };
+            button.Click += (_, _) => { choice = result; dialog.Close(); };
             return button;
         }
         var later = MakeButton("나중에", Color.FromArgb(117, 111, 108), 310, "");
@@ -420,8 +475,9 @@ internal sealed class MainForm : Form
             later
         ]);
         dialog.CancelButton = later;
+        dialog.Tag = SafeToCloseForUpdate; // 업데이트로 닫혀도 다시 켜지면 다시 묻는다.
         dialog.ShowDialog(this);
-        return dialog.Tag as string ?? "";
+        return choice;
     }
 
     private readonly HashSet<string> _unapprovedRemindedKeys = new(StringComparer.Ordinal);
@@ -431,7 +487,7 @@ internal sealed class MainForm : Form
     // (시작 시간까지 승인하지 않으면 서버가 자동으로 취소한다)
     private void CheckUnapprovedRequests()
     {
-        if (_demoMode || _unapprovedDialogOpen || !string.IsNullOrWhiteSpace(_previewPath)) return;
+        if (_demoMode || _closingForUpdate || _unapprovedDialogOpen || !string.IsNullOrWhiteSpace(_previewPath)) return;
         var allEntries = _calendarCacheByMonth.Values.SelectMany(list => list)
             .Concat(_calendarEntries)
             .GroupBy(entry => entry.Id, StringComparer.Ordinal)
@@ -452,16 +508,14 @@ internal sealed class MainForm : Form
         {
             RestoreFromTray();
             System.Media.SystemSounds.Exclamation.Play();
-            var answer = MessageBox.Show(
-                this,
+            var answer = AskReminder(
+                "승인하지 않은 예약 신청",
                 $"신청 후 {ReservationService.UnapprovedRequestReminderMinutes}분이 지났는데 아직 승인하지 않은 웹 예약이 {fresh.Count}건 있습니다.\n\n" +
                 lines +
                 "\n\n시작 시간까지 승인하지 않으면 자동으로 취소됩니다.\n지금 확인할까요?",
-                "승인하지 않은 예약 신청",
-                MessageBoxButtons.YesNo,
-                MessageBoxIcon.Warning,
-                MessageBoxDefaultButton.Button1);
-            if (answer != DialogResult.Yes) return;
+                "지금 확인",
+                "나중에");
+            if (!answer || _closingForUpdate) return;
 
             // 첫 신청 날짜로 이동하고 '승인 대기'만 보여 준다.
             var first = DateTime.Parse(fresh[0].Date);
@@ -2598,8 +2652,11 @@ internal sealed class MainForm : Form
         }
 
         using var dialog = BuildNaverBookingDialog(snapshot, _naverBookingCheckedAt);
+        dialog.Tag = SafeToCloseForUpdate; // 보기만 하는 창이라 자동 업데이트 때 닫아도 된다.
         dialog.ShowDialog(this);
     }
+
+    private const string SafeToCloseForUpdate = "safe-to-close-for-update";
 
     private DateTime? _naverBookingCheckedAt;
     private static readonly System.Globalization.CultureInfo KoreanCulture = new("ko-KR");
@@ -2848,6 +2905,58 @@ internal sealed class MainForm : Form
                 !line.StartsWith("npm warn", StringComparison.OrdinalIgnoreCase)) ?? "";
 
     private bool IsVirtualSheet => !string.IsNullOrWhiteSpace(_virtualSheetUrl);
+
+    private readonly bool _justUpdated;
+    private readonly System.Windows.Forms.Timer _updateCheckTimer = new() { Interval = 60 * 1000 };
+    private bool _updating;
+    private bool _closingForUpdate; // 업데이트하려고 알림 창을 닫는 중(새 알림 창을 띄우지 않는다)
+
+    // 10분마다 작업 폴더의 staff-dashboard\release에 새 버전이 있는지 보고, 한가할 때 바꿔 끼운다.
+    private void TryAutoUpdate()
+    {
+        // 가상 시트 데모에서는 바꾸지 않는다(업데이트 동작 점검 때만 YOUTHSPRING_UPDATE_TEST=1).
+        var updateTest = Environment.GetEnvironmentVariable("YOUTHSPRING_UPDATE_TEST") == "1";
+        if (_updating || _demoMode || (IsVirtualSheet && !updateTest) || !string.IsNullOrWhiteSpace(_previewPath)) return;
+        var currentExe = Environment.ProcessPath;
+        if (!AppUpdater.IsInstalledCopy(currentExe) || currentExe is null) return;
+        var repoRoot = FindRepositoryRoot();
+        if (string.IsNullOrWhiteSpace(repoRoot)) return;
+        var releaseExe = AppUpdater.ReleaseExePath(repoRoot);
+
+        try
+        {
+            if (!File.Exists(releaseExe)) return;
+            var release = new FileInfo(releaseExe);
+            if (!AppUpdater.ShouldUpdate(File.GetLastWriteTimeUtc(currentExe), release.LastWriteTimeUtc, release.Length, DateTime.UtcNow))
+                return;
+            // 작업 중이면(네이버 확인·상태 변경·열린 창) 다음 확인 때 바꾼다.
+            // 상태 변경·네이버 확인·새로고침 중이면 다음에 바꾼다.
+            if (_naverBookingSyncRunning || _updatingReservationStatus || _refreshing) return;
+            var openDialogs = Application.OpenForms.Cast<Form>().Where(form => form != this && form.Modal).ToList();
+            // 직원이 입력하는 창(설정·회원 선택 등)이 열려 있으면 다음에 바꾼다.
+            if (openDialogs.Any(form => !Equals(form.Tag, SafeToCloseForUpdate))) return;
+            if (openDialogs.Count > 0 || _overdueDecisionOpen || _unapprovedDialogOpen)
+            {
+                // 알림 창(네이버 신청·일지 미제출·미승인 확인)은 닫는다. 다시 켜지면 다시 뜬다.
+                _closingForUpdate = true;
+                foreach (var form in openDialogs) form.Close();
+                _updateCheckTimer.Interval = 5000;
+                return;
+            }
+
+            _updating = true;
+            _storage.AppendDiagnosticLog($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] 자동 업데이트 시작 · 새 버전 {release.LastWriteTime:yyyy-MM-dd HH:mm}");
+            AppUpdater.ReplaceAndRestart(currentExe, releaseExe);
+            _allowClose = true;
+            Close();
+        }
+        catch (Exception exception)
+        {
+            _updating = false;
+            _closingForUpdate = false;
+            _storage.AppendDiagnosticLog($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] 자동 업데이트 실패 · {exception.Message}");
+        }
+    }
 
     // 네이버 결과 파일. 가상 시트 데모에서는 데모 서버가 만든 가짜 결과를 읽는다.
     private string NaverOutputPath(string repoRoot) => IsVirtualSheet

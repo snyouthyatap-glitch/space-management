@@ -24,6 +24,8 @@ internal static class SelfTest
         TestNoShowAndCancelStayVisible();
         TestNaverSheetRowsCombineByReservationNo();
         TestUpcomingSheetSyncItems();
+        TestPendingNoticeWindow();
+        TestAutoUpdateRules();
         TestNaverTodayCancelRows();
         TestNaverSheetSyncItems();
         TestNaverChangedRowAnd24HourTime();
@@ -579,6 +581,43 @@ internal static class SelfTest
         if (!shown.OrderBy(item => item, StringComparer.Ordinal).SequenceEqual(expected) ||
             !merged.Single(item => item.Id == "naver:5").Submitted)
             throw new InvalidOperationException("네이버 시트 줄 예약번호 합치기 테스트 실패: " + string.Join(", ", shown));
+    }
+
+    // 자동 업데이트: 설치본만, 더 새롭고 다 복사된(2분 지난) release 파일만 쓴다.
+    private static void TestAutoUpdateRules()
+    {
+        var now = new DateTime(2026, 11, 24, 12, 0, 0, DateTimeKind.Utc);
+        const long size = 100L * 1024 * 1024;
+        var installed = @"C:\Users\x\AppData\Local\YouthSpringStaffDashboard\App\청년이봄 직원알림.exe";
+        var failures = new List<string>();
+        if (!AppUpdater.IsInstalledCopy(installed)) failures.Add("설치본 인식");
+        if (AppUpdater.IsInstalledCopy(@"C:\work\staff-dashboard\release\청년이봄 직원알림.exe")) failures.Add("작업 폴더 실행본은 제외");
+        if (!AppUpdater.ShouldUpdate(now.AddDays(-1), now.AddMinutes(-5), size, now)) failures.Add("새 버전");
+        if (AppUpdater.ShouldUpdate(now.AddDays(-1), now.AddSeconds(-30), size, now)) failures.Add("복사 직후");
+        if (AppUpdater.ShouldUpdate(now.AddMinutes(-5), now.AddMinutes(-5), size, now)) failures.Add("같은 버전");
+        if (AppUpdater.ShouldUpdate(now, now.AddDays(-1), size, now)) failures.Add("더 옛 버전");
+        if (AppUpdater.ShouldUpdate(now.AddDays(-1), now.AddMinutes(-5), 1024, now)) failures.Add("잘린 파일");
+        if (failures.Count > 0)
+            throw new InvalidOperationException("자동 업데이트 판단 테스트 실패: " + string.Join(", ", failures));
+    }
+
+    // 2026-11-24 운영 규칙: 네이버 확정대기 알림은 이용일이 오늘~7일 뒤인 건만.
+    private static void TestPendingNoticeWindow()
+    {
+        var today = new DateTime(2026, 11, 24);
+        bool Shown(string useDateTime) => NaverBookingParser.IsWithinPendingNoticeWindow(
+            new NaverBookingReservation { ReservationNo = "1", Status = "신청", UseDateTime = useDateTime }, today);
+        var cases = new[]
+        {
+            (Use: "2026. 11. 24.(화) 오후 2:00~오후 4:00", Expected: true),
+            (Use: "2026. 12. 1.(화) 오전 10:00~오후 12:00", Expected: true),
+            (Use: "2026. 12. 2.(수) 오전 10:00~오후 12:00", Expected: false),
+            (Use: "2026. 11. 23.(월) 오전 10:00~오후 12:00", Expected: false),
+            (Use: "", Expected: true)
+        };
+        var wrong = cases.Where(item => Shown(item.Use) != item.Expected).Select(item => item.Use).ToList();
+        if (wrong.Count > 0)
+            throw new InvalidOperationException("네이버 확정대기 1주일 알림 테스트 실패: " + string.Join(" | ", wrong));
     }
 
     private static void TestUpcomingSheetSyncItems()
