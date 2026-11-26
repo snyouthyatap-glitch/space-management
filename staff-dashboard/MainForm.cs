@@ -1349,7 +1349,8 @@ internal sealed class MainForm : Form
         try
         {
             using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-            var members = await _client.LookupMembersAsync(_settings, _password, entry.Name, cancellation.Token);
+            var members = await _client.LookupMembersAsync(_settings, _password, entry.Name, cancellation.Token,
+                FirstNonEmpty(entry.PhoneTail, entry.NaverPhoneTail));
             if (members.Count == 0) return "같은 이름의 회원 없음";
             var tails = members
                 .Select(member => FirstNonEmpty(member.PhoneLastDigits, NaverBookingParser.PhoneTail(member.Phone)))
@@ -1972,7 +1973,8 @@ internal sealed class MainForm : Form
         var memberId = entry.MemberId;
         if (string.IsNullOrWhiteSpace(memberId))
         {
-            var members = await _client.LookupMembersAsync(_settings, _password, entry.Name, cancellationToken);
+            var members = await _client.LookupMembersAsync(_settings, _password, entry.Name, cancellationToken,
+                FirstNonEmpty(entry.PhoneTail, entry.NaverPhoneTail));
             if (members.Count == 0)
                 throw new InvalidOperationException("예약자 이름과 일치하는 회원을 찾을 수 없습니다.");
             var member = members.Count == 1 ? members[0] : ShowMemberSelectionDialog(members, entry.Name);

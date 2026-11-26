@@ -39,6 +39,10 @@ const NAME_CASES = [
   ["John Smith", "John Smith"],
   ["[관리자등록]", ""],
   ["", ""],
+  // 2026-11 네이버 정책 변경: 이름 가운데·연락처 앞자리를 가린다(가짜 이름).
+  ["박*예", "박*예"],
+  ["박*예***-****-1234", "박*예"],
+  ["김*****-****-1234", "김**"],
 ];
 
 test("cleanNaverBookerName", () => {
@@ -116,6 +120,53 @@ test("서버 diffNaverReservationDetails_: 바뀐 값만 고친다", () => {
   assert.equal(diff({ ...current, maskedPhone: "010-****-1234" }, sameButFormatted, "확정").maskedPhone, "010-9999-1234");
   assert.equal(diff(current, { ...sameButFormatted, maskedPhone: "010-5555-7070" }, "확정").maskedPhone, "010-5555-7070");
   assert.deepEqual(diff(current, { ...sameButFormatted, maskedPhone: "010-****-1234" }, "확정"), {});
+});
+
+test("서버: 네이버가 가린 이름(박*예)·연락처(끝 4자리)로도 회원 예약을 찾는다", () => {
+  const api = loadAppsScriptFunctions(
+    ["str_", "digits_", "normalizeNameKey_", "isMaskedName_", "maskedNameMatches_", "reservationBelongsToMember_",
+      "formatNaverPhone_", "cleanNaverBookerName_"],
+    "{ reservationBelongsToMember_, maskedNameMatches_, formatNaverPhone_, cleanNaverBookerName_ }"
+  );
+  const member = { name: "박지예", phoneLastDigits: "1234" };
+  assert.equal(api.reservationBelongsToMember_({ bookerName: "박*예", maskedPhone: "***-****-1234" }, member), true);
+  assert.equal(api.reservationBelongsToMember_({ bookerName: "박*예", maskedPhone: "***-****-9999" }, member), false);
+  assert.equal(api.reservationBelongsToMember_({ bookerName: "박*예", maskedPhone: "" }, member), false, "가린 이름은 끝자리 필수");
+  assert.equal(api.reservationBelongsToMember_({ bookerName: "박지예", maskedPhone: "" }, member), true);
+  assert.equal(api.reservationBelongsToMember_({ bookerName: "김*예", maskedPhone: "***-****-1234" }, member), false);
+  assert.equal(api.maskedNameMatches_("박*예", "박예"), false);
+  assert.equal(api.formatNaverPhone_("***-****-1234"), "***-****-1234");
+  assert.equal(api.cleanNaverBookerName_("박*예***-****-1234"), "박*예");
+
+  const { findPhones, resolveNaverBooker } = require("./naver-booker");
+  assert.deepEqual(findPhones("확정박*예***-****-12341415031923"), ["***-****-1234"]);
+  assert.deepEqual(resolveNaverBooker("박*예", ["***-****-1234"]), { bookerName: "박*예", phone: "***-****-1234", proxyBooking: false });
+});
+
+test("서버 시트 고치기: 가린 이름이 기존 실명과 맞으면 실명을 둔다", () => {
+  const diff = loadAppsScriptFunctions(
+    [
+      "str_", "digits_", "pad2_", "normalizeTime_", "normalizeSheetTime_", "normalizeSheetDate_",
+      "safePositiveInteger_", "normalizeNameKey_", "isMaskedName_", "maskedNameMatches_", "cleanNaverBookerName_",
+      "formatNaverPhone_", "nowText_", "diffNaverReservationDetails_",
+    ],
+    "diffNaverReservationDetails_"
+  );
+  const current = {
+    status: "확정", bookerName: "박지예", maskedPhone: "010-9999-1234", usageDate: "2026-11-26",
+    startTime: "16:00", endTime: "18:00", placeName: "커리어존 Room2", spaceType: "careerRoom2", headcount: "1", purpose: "공부",
+  };
+  const incoming = {
+    bookerName: "박*예", maskedPhone: "***-****-1234", usageDate: "2026-11-26", startTime: "16:00", endTime: "18:00",
+    placeName: "커리어존 Room2", spaceType: "careerRoom2", headcount: 1, purpose: "공부",
+  };
+  const changes = diff(current, incoming, "확정");
+  assert.equal(changes.bookerName, undefined);
+  assert.equal(changes.maskedPhone, undefined);
+  // 예전에 '*'를 지워 잘못 저장한 이름(박예)과 빈 연락처는 가린 값으로 고친다.
+  const fixed = diff({ ...current, bookerName: "박예", maskedPhone: "" }, incoming, "확정");
+  assert.equal(fixed.bookerName, "박*예");
+  assert.equal(fixed.maskedPhone, "***-****-1234");
 });
 
 test("서버 직원 운영 목록: 취소·반려·노쇼 웹 예약도 보낸다", () => {

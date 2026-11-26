@@ -3,19 +3,21 @@
 // APPS_SCRIPT_READY.gs(cleanNaverBookerName_)에도 있다. 바꿀 때는 세 곳을 같이 바꾸고
 // `npm test`로 확인한다.
 
-const PHONE_PATTERN = /01[0-9]-?\d{3,4}-?\d{4}/g;
+// 2026-11 네이버 정책 변경: 연락처는 끝 4자리만(***-****-5678), 이름은 가운데를 가린다(박*예).
+const PHONE_SOURCE = String.raw`(?:01[0-9]|\*{3})-?(?:\d{3,4}|\*{3,4})-?\d{4}`;
+const PHONE_PATTERN = new RegExp(PHONE_SOURCE, "g");
 const PROXY_PATTERN = /대리\s*예약/;
 
-// 예) "김예약 [대리예약] 방문자: 이방문" → "이방문", "최관리 [관리자등록]" → "최관리"
+// 예) "김예약 [대리예약] 방문자: 이방문" → "이방문", "최관리 [관리자등록]" → "최관리", "박*예" → "박*예"
 function cleanNaverBookerName(value) {
   let text = String(value || "").replace(/\s+/g, " ").trim();
-  text = text.replace(/01[0-9]-?\d{3,4}-?\d{4}.*$/, "").replace(/\d{9,}.*$/, "");
+  text = text.replace(new RegExp(`${PHONE_SOURCE}.*$`), "").replace(/\d{9,}.*$/, "");
   const parts = text.split(/(?:예약자|방문자)\s*[:：]?/);
   for (let index = parts.length - 1; index >= 0; index -= 1) {
     const name = parts[index]
       .replace(/\[[^\]]*\]/g, " ")
       .replace(/대리\s*예약|관리자\s*등록/g, " ")
-      .replace(/[^가-힣A-Za-z\s]/g, "")
+      .replace(/[^가-힣A-Za-z*\s]/g, "")
       .replace(/\s+/g, " ")
       .trim();
     if (name) return name;

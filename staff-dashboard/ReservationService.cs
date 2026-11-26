@@ -43,7 +43,20 @@ internal static class ReservationService
                 continue;
             }
 
-            if (!byDateAndName.TryGetValue($"{entry.Date}|{NormalizeNameKey(entry.Name)}", out var matches))
+            // 네이버가 가린 이름(박*예)은 같은 날 방문한 회원 중 모양이 맞는 사람을 찾는다.
+            List<StaffCheckIn>? matches;
+            if ((entry.Name ?? "").Contains('*'))
+            {
+                matches = checkIns
+                    .Where(item => item.Date == entry.Date && NaverBookingParser.MaskedNameMatches(entry.Name, item.Name))
+                    .ToList();
+                if (matches.Count == 0) matches = null;
+            }
+            else if (!byDateAndName.TryGetValue($"{entry.Date}|{NormalizeNameKey(entry.Name)}", out matches))
+            {
+                matches = null;
+            }
+            if (matches is null)
             {
                 entry.CheckedIn = false;
                 continue;
