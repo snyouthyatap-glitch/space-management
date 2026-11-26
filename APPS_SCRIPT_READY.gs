@@ -424,7 +424,9 @@ function diffNaverReservationDetails_(current, payload, status) {
     if (field === 'usageDate') before = normalizeSheetDate_(before);
     else if (field === 'startTime' || field === 'endTime') before = normalizeSheetTime_(before);
     else before = str_(before);
-    if (field === 'bookerName' && normalizeNameKey_(before) === normalizeNameKey_(next)) return;
+    // 가린 이름(박*예)이 시트의 실명(박지예)과 맞으면 실명을 그대로 둔다.
+    if (field === 'bookerName' && (normalizeNameKey_(before) === normalizeNameKey_(next) ||
+      (isMaskedName_(next) && maskedNameMatches_(next, before)))) return;
     // 연락처: 같은 번호면 그대로 둔다. 가려진(****) 새 값은 끝자리가 같으면 덮어쓰지 않는다.
     if (field === 'maskedPhone' && (digits_(before) === digits_(next) ||
       (next.indexOf('*') !== -1 && digits_(before).slice(-4) === digits_(next).slice(-4)))) return;
@@ -1205,7 +1207,8 @@ function getStaffCalendarEntries_(requestedMonth) {
         endTime: normalizeSheetTime_(row.endTime),
         placeName: getReservationSpaceLabel_(str_(row.spaceType)),
         spaceType: str_(row.spaceType),
-        name: str_(row.bookerName),
+        // 네이버가 이름을 가려 보내므로(박*예), 일지를 낸 회원이 있으면 그 실명을 보여 준다.
+        name: str_(row.onsiteMemberName) || str_(row.bookerName),
         // 회원 확인에 쓰는 시트 연락처 뒷 4자리(직원 프로그램 상세보기용)
         phoneTail: digits_(row.maskedPhone).slice(-4),
         headcount: safePositiveInteger_(row.headcount, 1),
@@ -1374,6 +1377,12 @@ function handleAdminLookupMember_(payload) {
   let members = [];
   if (isValidPhone_(phone)) {
     members = findMembersByField_('phone', phone);
+  } else if (isMaskedName_(query)) {
+    // 네이버가 가린 이름(박*예): 같은 모양의 회원 중 연락처 끝자리가 같은 사람
+    const phoneTail = digits_(payload.phoneTail).slice(-4);
+    members = findMembersByMaskedName_(query).filter(function(member) {
+      return !phoneTail || str_(member.phoneLastDigits) === phoneTail;
+    });
   } else {
     const nameKey = normalizeNameKey_(query);
     if (nameKey.length < 2) throw new Error('회원 이름을 2글자 이상 입력해 주세요.');
@@ -1389,6 +1398,18 @@ function handleAdminLookupMember_(payload) {
     member: adminMemberResponse_(member),
     members: activeMembers.map(adminMemberResponse_)
   };
+}
+
+function findMembersByMaskedName_(pattern) {
+  const sheet = getOrCreateSheet_(SHEET_NAMES.MEMBERS, HEADERS.members);
+  const headerContext = memberHeaderContext_(sheet);
+  const lastRow = sheet.getLastRow();
+  const matches = [];
+  for (let rowNumber = 2; rowNumber <= lastRow; rowNumber++) {
+    const member = memberAtRow_(sheet, rowNumber, headerContext);
+    if (maskedNameMatches_(pattern, member.name)) matches.push(member);
+  }
+  return matches;
 }
 
 function findMembersByName_(name) {
@@ -3779,13 +3800,15 @@ function mapNaverReservationRow_(headers, row, file) {
 // 예) "김예약 [대리예약] 방문자: 이방문" → "이방문", "최관리 [관리자등록]" → "최관리"
 function cleanNaverBookerName_(value) {
   let text = String(value || '').replace(/\s+/g, ' ').trim();
-  text = text.replace(/01[0-9]-?\d{3,4}-?\d{4}.*$/, '').replace(/\d{9,}.*$/, '');
+  // 연락처(010-1234-5678, 가린 번호 ***-****-5678) 뒤는 버린다.
+  text = text.replace(/(?:01[0-9]|\*{3})-?(?:\d{3,4}|\*{3,4})-?\d{4}.*$/, '').replace(/\d{9,}.*$/, '');
   const parts = text.split(/(?:예약자|방문자)\s*[:：]?/);
   for (let index = parts.length - 1; index >= 0; index -= 1) {
     const name = parts[index]
       .replace(/\[[^\]]*\]/g, ' ')
       .replace(/대리\s*예약|관리자\s*등록/g, ' ')
-      .replace(/[^가-힣A-Za-z\s]/g, '')
+      // 네이버가 가린 이름(박*예)의 *는 남긴다.
+      .replace(/[^가-힣A-Za-z*\s]/g, '')
       .replace(/\s+/g, ' ')
       .trim();
     if (name) return name;
@@ -3941,9 +3964,28 @@ function getTodayReservationsForMember_(member, date) {
 }
 
 function reservationBelongsToMember_(reservation, member) {
-  if (normalizeNameKey_(reservation.bookerName) !== normalizeNameKey_(member.name)) return false;
+  if (!maskedNameMatches_(reservation.bookerName, member.name)) return false;
   const reservationPhoneTail = digits_(reservation.maskedPhone).slice(-4);
-  return !reservationPhoneTail || reservationPhoneTail === str_(member.phoneLastDigits);
+  // 네이버가 이름을 가려 보내면(박*예) 동명이인을 가릴 수 없으므로 연락처 끝자리가 꼭 있어야 한다.
+  if (!reservationPhoneTail) return !isMaskedName_(reservation.bookerName);
+  return reservationPhoneTail === str_(member.phoneLastDigits);
+}
+
+// 2026-11 네이버 정책 변경: 예약자 이름 가운데를 *로 가린다(박*예). *는 한 글자로 본다.
+function isMaskedName_(value) {
+  return str_(value).indexOf('*') !== -1;
+}
+
+function maskedNameMatches_(pattern, fullName) {
+  const masked = normalizeNameKey_(pattern);
+  const name = normalizeNameKey_(fullName);
+  if (!masked || !name) return false;
+  if (masked.indexOf('*') === -1) return masked === name;
+  if (masked.length !== name.length) return false;
+  for (let i = 0; i < masked.length; i += 1) {
+    if (masked[i] !== '*' && masked[i] !== name[i]) return false;
+  }
+  return true;
 }
 
 function publicNaverReservation_(reservation) {

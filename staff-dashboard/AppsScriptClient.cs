@@ -229,13 +229,15 @@ internal sealed class AppsScriptClient
         DashboardSettings settings,
         string password,
         string query,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string phoneTail = "")
     {
+        // 네이버가 가린 이름(박*예)은 연락처 끝자리를 같이 보내 서버가 회원을 좁히게 한다.
         var result = await ExecuteAdminActionAsync<AdminMemberLookup>(
             settings,
             password,
             "adminLookupMember",
-            session => new { adminSession = session, query, name = query },
+            session => new { adminSession = session, query, name = query, phoneTail },
             cancellationToken,
             response => response.Ok,
             response => response.Error);

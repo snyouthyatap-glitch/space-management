@@ -371,7 +371,11 @@ internal static class SelfTest
             ("김 봄 010-1234-5678", "김 봄"),
             ("John Smith", "John Smith"),
             ("[관리자등록]", ""),
-            ("", "")
+            ("", ""),
+            // 2026-11 네이버 정책 변경: 이름 가운데·연락처 앞자리를 가린다(가짜 이름).
+            ("박*예", "박*예"),
+            ("박*예***-****-1234", "박*예"),
+            ("김*****-****-1234", "김**")
         ];
         foreach (var (input, expected) in cases)
         {
@@ -379,6 +383,35 @@ internal static class SelfTest
             if (actual != expected)
                 throw new InvalidOperationException($"네이버 예약자명 정리 테스트 실패: '{input}' → '{actual}' (기대값 '{expected}')");
         }
+
+        // 가린 이름 비교: *는 한 글자
+        var maskCases = new[]
+        {
+            ("박*예", "박지예", true), ("박*예", "박예", false), ("박*예", "김지예", false),
+            ("박지예", "박지예", true), ("박*예", "박지 예", true), ("", "박지예", false)
+        };
+        var wrongMask = maskCases.Where(item => NaverBookingParser.MaskedNameMatches(item.Item1, item.Item2) != item.Item3)
+            .Select(item => $"{item.Item1}/{item.Item2}").ToList();
+        if (wrongMask.Count > 0)
+            throw new InvalidOperationException("가린 이름 비교 테스트 실패: " + string.Join(", ", wrongMask));
+
+        // 가린 이름 예약도 같은 날 방문(체크인)한 회원과 이어진다.
+        var masked = new CalendarEntry
+        {
+            Id = "naver:9", Source = "naver", Date = "2026-11-26", StartTime = "10:00", EndTime = "12:00", Name = "박*예"
+        };
+        ReservationService.ApplyCheckIns([masked], [new StaffCheckIn { Date = "2026-11-26", Name = "박지예", MemberId = "m-1" }]);
+        if (!masked.CheckedIn || masked.MemberId != "m-1")
+            throw new InvalidOperationException("가린 이름 체크인 연결 테스트 실패");
+        // 같은 행 글자에서 가린 연락처도 읽는다.
+        var maskedRow = NaverBookingParser.ParseReservationText(new NaverBookingReservation
+        {
+            ReservationNo = "1415031923",
+            RawText = "확정박*예***-****-1234141503192326.11.26.목16:00~18:00AI 커리어존 (청취Room2)1-0원"
+        });
+        if (maskedRow.Status != "확정" || NaverBookingParser.NormalizeBookerName(maskedRow.BookerName) != "박*예" ||
+            maskedRow.ProductName != "AI 커리어존 (청취Room2)")
+            throw new InvalidOperationException($"가린 연락처 행 파싱 테스트 실패: '{maskedRow.Status}' '{maskedRow.BookerName}' '{maskedRow.ProductName}'");
     }
 
     // 실제 화면 형태: '변경' 표시, '26.11.11.수', 24시간제 '17:30~19:30'

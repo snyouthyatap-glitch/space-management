@@ -373,7 +373,8 @@ async function collectRows(page) {
         return match ? clean(match[1]) : null;
       };
       const status = extract(/^(확정|신청|취소|완료|노쇼)/);
-      const phoneMatches = [...source.matchAll(/01[0-9]-\d{3,4}-\d{4}/g)].map((m) => m[0]);
+      // 2026-11부터 네이버는 연락처를 ***-****-5678처럼 끝 4자리만 보여 준다.
+      const phoneMatches = [...source.matchAll(/(?:01[0-9]|\*{3})-(?:\d{3,4}|\*{3,4})-\d{4}/g)].map((m) => m[0]);
       // 이름 정리는 브라우저 밖에서 naver-booker.js 규칙으로 한다.
       const bookerText = (() => {
         if (!status) return null;

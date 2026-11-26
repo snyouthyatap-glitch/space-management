@@ -189,7 +189,7 @@ internal static class NaverBookingParser
 
         var statusName = Regex.Matches(
                 rawText,
-                @"(확정|신청|취소|완료|노쇼)((?:(?!확정|신청|취소|완료|노쇼|일시)[^0-9])+?)(01\d-\d{3,4}-\d{4})(?:01\d-\d{3,4}-\d{4})?" + Regex.Escape(item.ReservationNo))
+                @"(확정|신청|취소|완료|노쇼)((?:(?!확정|신청|취소|완료|노쇼|일시)[^0-9])+?)((?:01\d|\*{3})-(?:\d{3,4}|\*{3,4})-\d{4})(?:(?:01\d|\*{3})-(?:\d{3,4}|\*{3,4})-\d{4})?" + Regex.Escape(item.ReservationNo))
             .Cast<Match>()
             .LastOrDefault();
         // 예약번호 바로 뒤의 이용일시. 두 가지 화면 형태를 모두 읽는다.
@@ -286,17 +286,32 @@ internal static class NaverBookingParser
 
     // automation/naver-booker.js의 cleanNaverBookerName과 같은 규칙이다. 바꿀 때는 같이 바꾼다.
     // 예) "김예약 [대리예약] 방문자: 이방문" → "이방문", "최관리 [관리자등록]" → "최관리"
+    public const string PhonePattern = @"(?:01[0-9]|\*{3})-?(?:\d{3,4}|\*{3,4})-?\d{4}";
+
+    // 가린 이름(박*예)이 실명(박지예)과 맞는지. *는 한 글자로 본다. 가리지 않은 이름은 그대로 비교한다.
+    public static bool MaskedNameMatches(string? pattern, string? fullName)
+    {
+        var masked = Regex.Replace(pattern ?? "", @"\s+", "").ToLowerInvariant();
+        var name = Regex.Replace(fullName ?? "", @"\s+", "").ToLowerInvariant();
+        if (masked.Length == 0 || name.Length == 0) return false;
+        if (!masked.Contains('*')) return masked == name;
+        return masked.Length == name.Length &&
+               masked.Zip(name).All(pair => pair.First == '*' || pair.First == pair.Second);
+    }
+
     public static string NormalizeBookerName(string? value)
     {
         var text = Regex.Replace(value ?? "", @"\s+", " ").Trim();
-        text = Regex.Replace(text, @"01[0-9]-?\d{3,4}-?\d{4}.*$", "");
+        // 연락처(010-1234-5678, 2026-11 이후 가린 번호 ***-****-5678) 뒤는 버린다.
+        text = Regex.Replace(text, PhonePattern + ".*$", "");
         text = Regex.Replace(text, @"\d{9,}.*$", "");
         var parts = Regex.Split(text, @"(?:예약자|방문자)\s*[:：]?");
         for (var index = parts.Length - 1; index >= 0; index--)
         {
             var name = Regex.Replace(parts[index], @"\[[^\]]*\]", " ");
             name = Regex.Replace(name, @"대리\s*예약|관리자\s*등록", " ");
-            name = Regex.Replace(name, @"[^가-힣A-Za-z\s]", "");
+            // 네이버가 가린 이름(박*예)의 *는 남긴다.
+            name = Regex.Replace(name, @"[^가-힣A-Za-z*\s]", "");
             name = Regex.Replace(name, @"\s+", " ").Trim();
             if (name.Length > 0) return name;
         }
